@@ -332,4 +332,7 @@ export default {
   'err.SUPPLIER_REQUIRED': 'Choose a supplier first',
   'err.SHIFT_CLOSED': 'That shift is closed and cannot be changed',
   'err.NOT_FOUND': 'Not found',
+  'support.title': 'Support',
+  'support.intro': 'For activation, renewal or any help, contact {name}:',
+  'support.whatsapp': 'Call / WhatsApp',
 };

@@ -2,14 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { api, backup, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
+import Support from '../components/Support.jsx';
 
-const TABS = ['general', 'taxes', 'receipt', 'users', 'tables', 'data'];
+const TABS = ['general', 'taxes', 'receipt', 'users', 'tables', 'data', 'support'];
 
 export default function Settings() {
   const { t, settings } = useApp();
   const [tab, setTab] = useState('general');
   const tabs = TABS.filter((x) => x !== 'tables' || settings.business_type === 'restaurant');
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', users: 'settings.users', tables: 'settings.tables', data: 'settings.data' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', users: 'settings.users', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -20,6 +21,7 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'tables' && <Tables />}
       {tab === 'data' && <Data />}
+      {tab === 'support' && <div className="card narrow"><Support t={t} /></div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // Builds self-contained HTML documents for the thermal printer.
 import { formatMoney, formatQty } from './money.js';
+import { VENDOR } from './vendor.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Numbers, phones and dates inside RTL text must stay left-to-right.
@@ -71,7 +72,7 @@ export function receiptHtml(order, settings, t, lang) {
   ${order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
   <hr>
   ${settings.receipt_footer ? `<div class="c">${esc(settings.receipt_footer)}</div>` : ''}
-  <div class="c muted">InnoForge POS</div>`);
+  <div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
 }
 
 export function kitchenHtml(order, items, settings, t, lang) {

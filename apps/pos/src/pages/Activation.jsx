@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { activate, api, copyText } from '../lib/api.js';
 import { useI18n } from '../i18n/index.jsx';
+import Support from '../components/Support.jsx';
 
 // Shown by installed builds until a license for this computer is entered.
 export default function Activation({ license, onActivated, settings, reloadSettings }) {
@@ -47,6 +48,7 @@ export default function Activation({ license, onActivated, settings, reloadSetti
         </label>
         {error && <p className="warn">{error}</p>}
         <button className="primary lg" disabled={busy || !key.trim()}>{t('license.activate')}</button>
+        <Support t={t} compact />
       </form>
     </div>
   );

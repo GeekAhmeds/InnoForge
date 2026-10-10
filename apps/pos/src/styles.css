@@ -260,3 +260,12 @@ tr.dim td { opacity: .5; }
 .stat.strong { background: var(--brand); border-color: var(--brand); }
 .stat.strong small, .stat.strong b { color: #fff; }
 .sidebar nav button { padding: 8px 4px; }
+
+/* ---------- support ---------- */
+.support { margin-top: 4px; }
+.support.compact { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
+.support.compact p { font-size: 13px; margin-bottom: 8px; }
+.support-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.support-link { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; font-weight: 600; }
+.support-link:hover { border-color: var(--brand); color: var(--brand); }
+.support-link small { color: var(--muted); font-weight: 400; }

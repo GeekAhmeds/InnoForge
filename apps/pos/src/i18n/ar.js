@@ -332,4 +332,7 @@ export default {
   'err.SUPPLIER_REQUIRED': 'اختار المورّد الأول',
   'err.SHIFT_CLOSED': 'الوردية دي اتقفلت — مينفعش تعدّل عليها',
   'err.NOT_FOUND': 'مش موجود',
+  'support.title': 'الدعم الفني',
+  'support.intro': 'لتفعيل البرنامج أو التجديد أو أي مساعدة، تواصل مع {name}:',
+  'support.whatsapp': 'اتصال / واتساب',
 };
