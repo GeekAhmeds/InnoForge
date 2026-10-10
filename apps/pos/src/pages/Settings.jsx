@@ -3,6 +3,7 @@ import { activate, api, backup, copyText, dataPath, printers as listPrinters, re
 import { receiptHtml } from '../lib/receipt.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import Support from '../components/Support.jsx';
+import { UpdatePanel } from '../components/Updates.jsx';
 
 const TABS = ['general', 'taxes', 'receipt', 'users', 'tables', 'data', 'support'];
 
@@ -21,7 +22,12 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'tables' && <Tables />}
       {tab === 'data' && <Data />}
-      {tab === 'support' && <div className="card narrow"><Support t={t} /></div>}
+      {tab === 'support' && (
+        <>
+          <div className="card narrow"><Support t={t} /></div>
+          <div className="card narrow"><UpdatePanel t={t} /></div>
+        </>
+      )}
     </div>
   );
 }

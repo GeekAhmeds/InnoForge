@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('elect
 const { openDatabase } = require('./db.cjs');
 const { createServices, PosError } = require('./services/index.cjs');
 const { createLicenseStore } = require('./license.cjs');
+const { createUpdater } = require('./updater.cjs');
 
 // Only these namespaces are reachable from the renderer.
 const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'reports'];
@@ -17,6 +18,7 @@ let services;
 let mainWindow;
 let licenses;
 let license;
+let updater;
 
 const dbFile = () => path.join(app.getPath('userData'), 'innoforge-pos.db');
 
@@ -41,6 +43,28 @@ function boot() {
     publicKeyPem: require('./license-public.cjs'),
   });
   license = licenses.status();
+  autoBackup('daily');
+  updater = createUpdater({
+    publicKeyPem: require('./license-public.cjs'),
+    onState: (state) => mainWindow?.webContents.send('pos:update-state', state),
+  });
+}
+
+// Keeps rolling copies of the database in userData/backups: one per day (last 14),
+// plus one right before every update is installed.
+function autoBackup(kind, label = new Date().toLocaleDateString('en-CA')) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${kind}-${label}.db`);
+    if (kind === 'daily' && fs.existsSync(file)) return;
+    fs.rmSync(file, { force: true });
+    db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+    const daily = fs.readdirSync(dir).filter((f) => f.startsWith('daily-')).sort();
+    for (const old of daily.slice(0, Math.max(0, daily.length - 14))) fs.rmSync(path.join(dir, old), { force: true });
+  } catch (err) {
+    console.error('auto backup failed', err);
+  }
 }
 
 function createWindow() {
@@ -180,6 +204,15 @@ ipcMain.handle('pos:restore', async () => {
 });
 
 ipcMain.handle('pos:dataPath', () => ok(dbFile()));
+
+ipcMain.handle('pos:version', () => ok(app.getVersion()));
+ipcMain.handle('pos:updateState', () => ok(updater.state()));
+ipcMain.handle('pos:updateCheck', async () => ok(await updater.check()));
+ipcMain.handle('pos:updateInstall', () => {
+  if (updater.state().status !== 'ready') return fail(new PosError('NO_UPDATE'));
+  autoBackup('pre-update', updater.state().version);
+  return ok(updater.install());
+});
 
 ipcMain.handle('pos:copy', (_e, text) => {
   clipboard.writeText(String(text ?? ''));

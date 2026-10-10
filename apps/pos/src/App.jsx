@@ -12,6 +12,7 @@ import Shift from './pages/Shift.jsx';
 import Settings from './pages/Settings.jsx';
 import Activation from './pages/Activation.jsx';
 import Purchases from './pages/Purchases.jsx';
+import { UpdateBanner } from './components/Updates.jsx';
 
 export default function App() {
   const [settings, setSettings] = useState(null);
@@ -93,7 +94,10 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
             <button className="ghost" onClick={async () => { await api.auth.logout(); setUser(null); }}>{t('nav.logout')}</button>
           </div>
         </aside>
-        <main className="main">{shift === undefined ? null : <Page key={page} />}</main>
+        <main className="main">
+          <UpdateBanner t={t} />
+          {shift === undefined ? null : <Page key={page} />}
+        </main>
       </div>
     );
   }

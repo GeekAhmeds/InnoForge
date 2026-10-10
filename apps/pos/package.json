@@ -15,7 +15,8 @@
     "dist:win": "node scripts/package.cjs --win",
     "dist:mac": "node scripts/package.cjs --mac",
     "dist:linux": "node scripts/package.cjs --linux",
-    "license": "node tools/license.cjs"
+    "license": "node tools/license.cjs",
+    "sign-update": "node tools/sign-update.cjs"
   },
   "build": {
     "appId": "io.innosource.innoforge.pos",
@@ -76,7 +77,14 @@
       "enableNodeCliInspectArguments": false,
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://0x01source.com:7788/srv/InnoForge/PoS/",
+        "channel": "latest"
+      }
+    ]
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.2",
@@ -93,5 +101,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/GeekAhmeds/InnoForge"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

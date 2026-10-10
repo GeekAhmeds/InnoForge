@@ -108,6 +108,7 @@
       <a href="#renew">التجديد ونقل الجهاز</a>
       <a href="#protect">الحماية وحدودها</a>
       <a href="#build">عمل نسخة تسطيب جديدة</a>
+      <a href="#updates">التحديثات التلقائية</a>
       <div class="grp">للعميل (المستخدم)</div>
       <a href="#install">التسطيب وأول تشغيل</a>
       <a href="#users">المستخدمين والصلاحيات</a>
@@ -137,6 +138,7 @@
       <a href="#renew">Renewals & new PCs</a>
       <a href="#protect">Protection & its limits</a>
       <a href="#build">Building a new installer</a>
+      <a href="#updates">Automatic updates</a>
       <div class="grp">For the customer</div>
       <a href="#install">Install & first run</a>
       <a href="#users">Users & roles</a>
@@ -435,7 +437,7 @@ npm run license -- issue --key path/to/pos-license-private.pem --machine 4091-4F
         <ol>
           <li>أي تعديل بيترفع على البرنامج، GitHub بيبني ملف التسطيب لوحده على جهاز ويندوز.</li>
           <li>افتح الـ Repository على GitHub ← تبويب <b>Actions</b> ← <b>POS installer</b> ← آخر تشغيل علامته ✅.</li>
-          <li>انزل لتحت عند <b>Artifacts</b> وحمّل <b>InnoForge-POS-Windows-Setup</b>. هو ملف zip جواه ملف التسطيب. الملف ده بيفضل متاح 30 يوم.</li>
+          <li>انزل لتحت عند <b>Artifacts</b> وحمّل <b>InnoForge-POS-Setup-x.y.z</b>. هو ملف zip جواه ملف التسطيب، وبيفضل متاح 30 يوم. وجنبه <b>update-server-files</b> اللي بيترفع على السيرفر (<a href="#updates">التحديثات</a>).</li>
           <li>ولو عايز تبني يدوي: Actions ← POS installer ← <b>Run workflow</b>.</li>
         </ol>
         <h3>على جهازك (ويندوز)</h3>
@@ -451,7 +453,7 @@ npm run dist:win</code></pre>
         <ol>
           <li>Every change pushed to the program makes GitHub build the installer on a Windows machine automatically.</li>
           <li>Open the repository on GitHub → <b>Actions</b> tab → <b>POS installer</b> → the latest run marked ✅.</li>
-          <li>Scroll down to <b>Artifacts</b> and download <b>InnoForge-POS-Windows-Setup</b>. It's a zip with the installer inside, kept for 30 days.</li>
+          <li>Scroll down to <b>Artifacts</b> and download <b>InnoForge-POS-Setup-x.y.z</b>. It's a zip with the installer inside, kept for 30 days. Next to it is <b>update-server-files</b>, which goes on the server (see <a href="#updates">Updates</a>).</li>
           <li>To build on demand: Actions → POS installer → <b>Run workflow</b>.</li>
         </ol>
         <h3>On your own PC (Windows)</h3>
@@ -460,6 +462,106 @@ npm install
 npm run dist:win</code></pre>
         <p>The installer is written to <code>apps/pos/release</code>.</p>
         <div class="warn"><b>⚠️ If you create a new private key</b>(<code>npm run license -- keygen --force</code>): all existing licenses stop working in new builds. Only do this if your private key was stolen.</div>
+      </div>
+    </section>
+
+    <!-- ================= UPDATES ================= -->
+    <section id="updates">
+      <div lang="ar">
+        <h2>التحديثات التلقائية من السيرفر</h2>
+        <div class="good"><b>✅ الخلاصة</b>إنت بتعمل التحديث مرة واحدة وترفعه على السيرفر، وكل نسخة متسطّبة عند أي عميل بتنزّله وتثبّته لوحدها. <b>مفيش مفاتيح جديدة، ولا تفعيل تاني، ولا بيانات بتضيع.</b></div>
+        <h3>إيه اللي بيفضل زي ما هو مع كل تحديث؟</h3>
+        <ul>
+          <li><b>الترخيص:</b> مربوط بالجهاز والمفتاح السري، والاتنين مش بيتغيّروا مع التحديث. فالعميل مش هيحتاج يفعّل تاني.</li>
+          <li><b>البيانات:</b> قاعدة البيانات بتتحدّث لوحدها لو التحديث فيه جداول جديدة، ومفيش حاجة بتتمسح.</li>
+          <li><b>المفتاح السري:</b> هو نفسه اللي بيعمل التراخيص وبيوقّع التحديثات. ماتغيّروش أبداً غير لو اتسرق.</li>
+        </ul>
+        <h3>إزاي بيشتغل عند العميل؟</h3>
+        <ol>
+          <li>لما يكون فيه إنترنت، البرنامج بيدوّر على تحديث بعد التشغيل بنص دقيقة، وبعدها كل 6 ساعات، على <code>https://0x01source.com:7788/srv/InnoForge/PoS/</code>.</li>
+          <li>لو لقى إصدار أحدث، بينزّله في الخلفية والعميل شغّال عادي.</li>
+          <li><b>بيتأكد إن التحديث موقّع بمفتاحك.</b> لو حد اخترق السيرفر وحط ملف تاني، البرنامج بيرفضه ومش بيثبّته.</li>
+          <li>بيظهر شريط فوق: "الإصدار X نزل وجاهز للتثبيت"، وفيه زرار <b>إعادة التشغيل والتثبيت</b>. ولو العميل اختار "بعدين"، التحديث بيتثبّت لوحده لما يقفل البرنامج.</li>
+          <li>قبل أي تثبيت، البرنامج بياخد نسخة احتياطية من البيانات لوحده.</li>
+          <li>لو مفيش إنترنت، البرنامج بيشتغل عادي خالص، وبيحاول تاني بعدين.</li>
+        </ol>
+        <p>العميل يقدر يشوف رقم الإصدار ويدوّر على تحديث بإيده من <b>الإعدادات ← الدعم الفني ← الإصدار والتحديثات</b>.</p>
+
+        <h3>إزاي تنشر تحديث (خطواتك إنت)</h3>
+        <p><b>مرة واحدة بس، في الأول:</b> على GitHub افتح الـ Repository ← <b>Settings ← Secrets and variables ← Actions ← New repository secret</b>:</p>
+        <div class="table-wrap"><table>
+          <tr><th>الاسم</th><th>القيمة</th><th></th></tr>
+          <tr><td><code>POS_SIGNING_KEY</code></td><td>محتوى ملف <code>pos-license-private.pem</code> كله (افتحه بـ Notepad وانسخه)</td><td>ضروري</td></tr>
+          <tr><td><code>POS_DEPLOY_HOST</code></td><td>عنوان السيرفر، زي <code>0x01source.com</code></td><td rowspan="5">اختياري: للرفع الأوتوماتيك عن طريق SSH</td></tr>
+          <tr><td><code>POS_DEPLOY_PORT</code></td><td>بورت SSH (عادةً 22)</td></tr>
+          <tr><td><code>POS_DEPLOY_USER</code></td><td>اسم مستخدم SSH</td></tr>
+          <tr><td><code>POS_DEPLOY_KEY</code></td><td>مفتاح SSH الخاص بالمستخدم ده</td></tr>
+          <tr><td><code>POS_DEPLOY_PATH</code></td><td>مسار الفولدر على السيرفر اللي بيتعرض على <code>/srv/InnoForge/PoS/</code></td></tr>
+        </table></div>
+        <p><b>مع كل تحديث:</b></p>
+        <ol class="steps">
+          <li>التعديلات تترفع على GitHub، وكل مرة بيتبني إصدار جديد ورقمه بيزيد لوحده (<code>0.1.5</code>، وبعده <code>0.1.6</code>…).</li>
+          <li><b>الطريقة الأوتوماتيك:</b> Actions ← <b>POS installer</b> ← <b>Run workflow</b> ← علّم على <b>publish</b> ← Run. هيبني ويوقّع ويرفع على السيرفر.</li>
+          <li><b>أو يدوي:</b> من آخر تشغيل في Actions حمّل <b>update-server-files-x.y.z</b>، فكّه، وارفع <b>الأربع ملفات</b> اللي جواه على فولدر <code>/srv/InnoForge/PoS/</code> في السيرفر (FTP أو لوحة التحكم أو أي طريقة):
+            <ul>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe</code>: ملف التحديث</li>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe.blockmap</code>: بيخلّي التحميل أسرع</li>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe.sig</code>: التوقيع، ومن غيره التحديث بيترفض</li>
+              <li><code>latest.yml</code>: اللي بيقول للبرامج إن فيه إصدار جديد. <b>ارفعه آخر واحد</b>، بعد ما الباقي يخلص.</li>
+            </ul>
+          </li>
+          <li>خلاص! كل الأجهزة هتلاقي التحديث في خلال ساعات.</li>
+        </ol>
+        <div class="note"><b>💡 ملف التسطيب للعملاء الجداد</b>هو نفسه ملف <code>.exe</code> اللي على السيرفر. تقدر تدّي العميل لينك التحميل على طول: <code>https://0x01source.com:7788/srv/InnoForge/PoS/InnoForge-POS-Setup-x.y.z.exe</code>. ويفضل تسيب النسخ القديمة على السيرفر كام يوم بعد التحديث.</div>
+        <div class="warn"><b>⚠️ مهم في السيرفر</b>لازم الرابط <code>https://0x01source.com:7788/srv/InnoForge/PoS/latest.yml</code> يفتح من أي جهاز بشهادة HTTPS سليمة (مش Self-signed)، وإلا البرنامج مش هيقدر يقرأ التحديثات.</div>
+      </div>
+      <div lang="en">
+        <h2>Automatic updates from your server</h2>
+        <div class="good"><b>✅ In short</b>You publish an update once to the server, and every installed copy downloads and installs it on its own. <b>No new keys, no re-activation, no data loss.</b></div>
+        <h3>What stays the same across updates?</h3>
+        <ul>
+          <li><b>License:</b> it's bound to the PC and your private key, and neither changes with an update, so customers never re-activate.</li>
+          <li><b>Data:</b> the database upgrades itself if an update adds tables, and nothing is deleted.</li>
+          <li><b>Private key:</b> the same key creates licenses and signs updates. Never change it unless it's stolen.</li>
+        </ul>
+        <h3>How it works on the customer's PC</h3>
+        <ol>
+          <li>When there's internet, the app checks <code>https://0x01source.com:7788/srv/InnoForge/PoS/</code> 30 seconds after starting and then every 6 hours.</li>
+          <li>If a newer version exists, it downloads in the background while they keep working.</li>
+          <li><b>It verifies the update is signed with your key.</b> If someone hacks the server and swaps the file, the app refuses to install it.</li>
+          <li>A bar appears: "Version X is ready to install" with a <b>Restart & install</b> button. If they choose "Later", it installs when they close the app.</li>
+          <li>A data backup is taken automatically before every install.</li>
+          <li>With no internet, the app works normally and tries again later.</li>
+        </ol>
+        <p>Customers can see the version and check for updates manually in <b>Settings → Support → Version & updates</b>.</p>
+
+        <h3>How to publish an update (your steps)</h3>
+        <p><b>One time only, at the start:</b> on GitHub open the repository → <b>Settings → Secrets and variables → Actions → New repository secret</b>:</p>
+        <div class="table-wrap"><table>
+          <tr><th>Name</th><th>Value</th><th></th></tr>
+          <tr><td><code>POS_SIGNING_KEY</code></td><td>The full contents of <code>pos-license-private.pem</code> (open it in Notepad and copy everything)</td><td>Required</td></tr>
+          <tr><td><code>POS_DEPLOY_HOST</code></td><td>Server host, e.g. <code>0x01source.com</code></td><td rowspan="5">Optional: automatic upload over SSH</td></tr>
+          <tr><td><code>POS_DEPLOY_PORT</code></td><td>SSH port (usually 22)</td></tr>
+          <tr><td><code>POS_DEPLOY_USER</code></td><td>SSH user</td></tr>
+          <tr><td><code>POS_DEPLOY_KEY</code></td><td>That user's SSH private key</td></tr>
+          <tr><td><code>POS_DEPLOY_PATH</code></td><td>Server folder served at <code>/srv/InnoForge/PoS/</code></td></tr>
+        </table></div>
+        <p><b>For each update:</b></p>
+        <ol class="steps">
+          <li>Changes are pushed to GitHub, and each build gets a higher version automatically (<code>0.1.5</code>, then <code>0.1.6</code>…).</li>
+          <li><b>Automatic:</b> Actions → <b>POS installer</b> → <b>Run workflow</b> → tick <b>publish</b> → Run. It builds, signs and uploads to the server.</li>
+          <li><b>Or manual:</b> from the latest Actions run download <b>update-server-files-x.y.z</b>, unzip it, and upload the <b>four files</b> inside to <code>/srv/InnoForge/PoS/</code> on the server (FTP, control panel, anything):
+            <ul>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe</code>: the update</li>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe.blockmap</code>: makes downloads faster</li>
+              <li><code>InnoForge-POS-Setup-x.y.z.exe.sig</code>: the signature; without it the update is rejected</li>
+              <li><code>latest.yml</code>: tells apps a new version exists. <b>Upload it last</b>, after the others finish.</li>
+            </ul>
+          </li>
+          <li>Done! Every PC picks up the update within hours.</li>
+        </ol>
+        <div class="note"><b>💡 Installer for new customers</b>It's the same <code>.exe</code> on the server, so you can give customers a direct link: <code>https://0x01source.com:7788/srv/InnoForge/PoS/InnoForge-POS-Setup-x.y.z.exe</code>. Keep older versions on the server for a few days after an update.</div>
+        <div class="warn"><b>⚠️ Server requirement</b><code>https://0x01source.com:7788/srv/InnoForge/PoS/latest.yml</code> must open from any computer with a valid HTTPS certificate (not self-signed), otherwise the app can't read updates.</div>
       </div>
     </section>
 
@@ -763,6 +865,7 @@ npm run dist:win</code></pre>
           <li><b>الإعدادات ← البيانات ← عمل نسخة احتياطية:</b> بيحفظ ملف واحد فيه كل حاجة (الأصناف والفواتير والموردين والإعدادات).</li>
           <li><b>اعمل نسخة كل يوم أو كل أسبوع</b>، واحفظها على فلاشة أو Google Drive. لو الهارد باظ، كل البيانات اللي مش متاخد منها نسخة بتضيع.</li>
           <li><b>استرجاع نسخة</b> بيستبدل كل البيانات الحالية بالنسخة اللي تختارها، والبرنامج بيعيد التشغيل.</li>
+          <li><b>نسخ تلقائية:</b> البرنامج بياخد نسخة لوحده كل يوم (وبيحتفظ بآخر 14 يوم) وقبل أي تحديث، في فولدر <code>backups</code> جنب قاعدة البيانات. ولو حصلت مشكلة، تتسترجع من "استرجاع نسخة". بس النسخ دي على نفس الجهاز، فبرضه خد نسخة على فلاشة.</li>
         </ul>
       </div>
       <div lang="en">
@@ -771,6 +874,7 @@ npm run dist:win</code></pre>
           <li><b>Settings → Data → Create backup:</b> saves one file with everything (products, invoices, suppliers, settings).</li>
           <li><b>Back up daily or weekly</b> to a USB drive or Google Drive. If the disk fails, anything not backed up is lost.</li>
           <li><b>Restore backup</b> replaces ALL current data with the chosen file and restarts the app.</li>
+          <li><b>Automatic backups:</b> the app keeps a copy every day (the last 14 days) and one before every update, in a <code>backups</code> folder next to the database. Restore them with "Restore backup" if something goes wrong. They're on the same PC, so still keep an off-PC copy.</li>
         </ul>
       </div>
     </section>

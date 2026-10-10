@@ -65,6 +65,22 @@ Output goes to `release/`. The Windows installer can be built on Windows, or on 
 `scripts/package.cjs` obfuscates all JavaScript into `stage/` before packaging, and the build turns on Electron's
 security fuses: asar integrity check, load only from asar, no `ELECTRON_RUN_AS_NODE`, and no `--inspect`.
 
+## Automatic updates
+
+Installed apps check `https://0x01source.com:7788/srv/InnoForge/PoS/` (the `build.publish` URL in `package.json`) 30 s after
+start and every 6 h. They download new versions in the background and install them on restart. Offline, they just
+keep working.
+
+- **Updates must be signed** with the vendor private key (the same one used for licenses). The app verifies
+  `<installer>.sig` over the installer's sha512 and rejects anything unsigned or signed by another key.
+- Licenses and data survive updates. DB migrations are append-only, and a backup is taken before every install
+  (plus a daily rolling backup, last 14 days, in `userData/backups`).
+- CI (`.github/workflows/pos-installer.yml`) versions each build as `major.minor.<run number>`, signs it with the
+  `POS_SIGNING_KEY` secret, and uploads `release/update/*` to the server over SSH when run manually with **publish**.
+  To publish by hand, upload the 4 files from the `update-server-files` artifact, with `latest.yml` last.
+- Sign locally: `POS_VERSION=0.2.0 npm run dist:win` (with your key at `~/.innoforge/pos-license-private.pem`), or
+  `npm run sign-update -- release/update --key path/to/key.pem`.
+
 ## Licensing (one computer per license)
 
 Installed builds open on an **activation screen** that shows the computer's *Machine ID*. You (the vendor) sign a

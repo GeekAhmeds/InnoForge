@@ -21,6 +21,11 @@ export const dataPath = () => unwrap(bridge.dataPath());
 export const licenseStatus = () => unwrap(bridge.license());
 export const activate = (key) => unwrap(bridge.activate(key));
 export const copyText = (text) => unwrap(bridge.copy(text));
+export const appVersion = () => unwrap(bridge.version());
+export const updateState = () => unwrap(bridge.updateState());
+export const updateCheck = () => unwrap(bridge.updateCheck());
+export const updateInstall = () => unwrap(bridge.updateInstall());
+export const onUpdateState = (fn) => bridge.onUpdateState(fn);
 
 export const api = new Proxy({}, {
   get: (_t, ns) => new Proxy({}, { get: (_u, method) => (arg) => call(ns, method, arg) }),

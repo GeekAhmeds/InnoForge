@@ -1,7 +1,24 @@
 name: POS installer
 
+# Every push builds a signed Windows installer + the update files as artifacts.
+# Running it manually with "publish" ticked also uploads the update to the server,
+# so every installed copy picks it up automatically.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   POS_SIGNING_KEY   contents of pos-license-private.pem (signs updates; required to publish)
+#   POS_DEPLOY_HOST   server host name for upload over SSH, e.g. 0x01source.com      (optional)
+#   POS_DEPLOY_PORT   SSH port (default 22)                                          (optional)
+#   POS_DEPLOY_USER   SSH user                                                       (optional)
+#   POS_DEPLOY_KEY    SSH private key for that user                                  (optional)
+#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7788/srv/InnoForge/PoS/ (optional)
+
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload this build to the update server
+        type: boolean
+        default: false
   push:
     paths:
       - 'apps/pos/**'
@@ -22,9 +39,44 @@ jobs:
           cache-dependency-path: apps/pos/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npm run dist:win
+
+      # major.minor come from package.json; the patch number always increases with each run,
+      # so every build is newer than the last one installed.
+      - name: Version
+        shell: bash
+        run: echo "POS_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Build signed installer
+        run: npm run dist:win
+        env:
+          POS_SIGNING_KEY: ${{ secrets.POS_SIGNING_KEY }}
+
       - uses: actions/upload-artifact@v4
         with:
-          name: InnoForge-POS-Windows-Setup
+          name: InnoForge-POS-Setup-${{ env.POS_VERSION }}
           path: apps/pos/release/*.exe
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-server-files-${{ env.POS_VERSION }}
+          path: apps/pos/release/update/
+          retention-days: 30
+
+      - name: Check publish requirements
+        if: inputs.publish
+        shell: bash
+        run: |
+          ls release/update/*.sig >/dev/null 2>&1 || { echo "::error::POS_SIGNING_KEY secret is missing: installed apps would reject this update."; exit 1; }
+          [ -n "${{ secrets.POS_DEPLOY_HOST }}" ] || { echo "::error::POS_DEPLOY_* secrets are not set. Download the 'update-server-files' artifact and upload it to the server manually."; exit 1; }
+
+      - name: Upload to update server
+        if: inputs.publish
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.POS_DEPLOY_HOST }}
+          port: ${{ secrets.POS_DEPLOY_PORT || 22 }}
+          username: ${{ secrets.POS_DEPLOY_USER }}
+          key: ${{ secrets.POS_DEPLOY_KEY }}
+          source: apps/pos/release/update/*
+          target: ${{ secrets.POS_DEPLOY_PATH }}
+          strip_components: 4

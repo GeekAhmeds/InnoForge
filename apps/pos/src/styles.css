@@ -270,3 +270,12 @@ tr.dim td { opacity: .5; }
 .support-link:hover { border-color: var(--brand); color: var(--brand); }
 .support-link small { color: var(--muted); font-weight: 400; }
 .bottom-gap { margin-bottom: 18px; }
+
+/* ---------- updates ---------- */
+.update-banner { display: flex; align-items: center; gap: 8px; background: var(--brand); color: #fff; padding: 8px 14px; font-weight: 600; }
+.update-banner .ghost { color: #e0e7ff; }
+.update-banner .ghost:hover { background: rgb(255 255 255 / .12); color: #fff; }
+.update-banner .primary { background: #fff; color: var(--brand); border-color: #fff; }
+.small { font-size: 13px; }
+.main { display: flex; flex-direction: column; }
+.main > .pos { flex: 1; min-height: 0; }

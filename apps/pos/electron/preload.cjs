@@ -12,4 +12,13 @@ contextBridge.exposeInMainWorld('posBridge', {
   license: () => ipcRenderer.invoke('pos:license'),
   activate: (key) => ipcRenderer.invoke('pos:activate', key),
   copy: (text) => ipcRenderer.invoke('pos:copy', text),
+  version: () => ipcRenderer.invoke('pos:version'),
+  updateState: () => ipcRenderer.invoke('pos:updateState'),
+  updateCheck: () => ipcRenderer.invoke('pos:updateCheck'),
+  updateInstall: () => ipcRenderer.invoke('pos:updateInstall'),
+  onUpdateState: (fn) => {
+    const listener = (_e, state) => fn(state);
+    ipcRenderer.on('pos:update-state', listener);
+    return () => ipcRenderer.removeListener('pos:update-state', listener);
+  },
 });
