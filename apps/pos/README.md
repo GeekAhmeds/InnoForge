@@ -1,5 +1,7 @@
 # 🧾 InnoForge POS
 
+> 📘 **Full bilingual guide (Arabic / English):** [`docs/guide.html`](docs/guide.html) — selling & activating licenses, and using every feature.
+
 **An offline desktop point-of-sale for shops, bookstores and restaurants.** It's the first ready-made system in InnoForge.
 
 Everything runs locally: data lives in a SQLite file on the machine, so you don't need internet, a server, or a subscription.

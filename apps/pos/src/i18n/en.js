@@ -335,4 +335,7 @@ export default {
   'support.title': 'Support',
   'support.intro': 'For activation, renewal or any help, contact {name}:',
   'support.whatsapp': 'Call / WhatsApp',
+  'license.update': 'Update / renew license',
+  'license.updateHint': 'Paste the new license key from your vendor. The current license stays active if the new key is invalid.',
+  'license.updated': 'License updated',
 };

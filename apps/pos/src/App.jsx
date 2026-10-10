@@ -24,7 +24,7 @@ export default function App() {
     <I18nProvider lang={settings.language}>
       {license.required && !license.valid
         ? <Activation license={license} onActivated={setLicense} settings={settings} reloadSettings={reloadSettings} />
-        : <Shell settings={settings} reloadSettings={reloadSettings} license={license} />}
+        : <Shell settings={settings} reloadSettings={reloadSettings} license={license} setLicense={setLicense} />}
     </I18nProvider>
   );
 }
@@ -39,7 +39,7 @@ const NAV = [
   { id: 'settings', icon: '⚙', admin: true },
 ];
 
-function Shell({ settings, reloadSettings, license }) {
+function Shell({ settings, reloadSettings, license, setLicense }) {
   const { t, tErr, lang } = useI18n();
   const { notify, view: toasts } = useToasts();
   const [user, setUser] = useState(null);
@@ -60,7 +60,7 @@ function Shell({ settings, reloadSettings, license }) {
   }, [settings, notify, tErr]);
 
   const ctx = useMemo(() => ({
-    settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license,
+    settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
     isAdmin: user?.role === 'admin',
   }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license]);
 

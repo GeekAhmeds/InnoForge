@@ -269,3 +269,4 @@ tr.dim td { opacity: .5; }
 .support-link { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; font-weight: 600; }
 .support-link:hover { border-color: var(--brand); color: var(--brand); }
 .support-link small { color: var(--muted); font-weight: 400; }
+.bottom-gap { margin-bottom: 18px; }

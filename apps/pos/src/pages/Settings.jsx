@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, backup, dataPath, printers as listPrinters, restore } from '../lib/api.js';
+import { activate, api, backup, copyText, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import Support from '../components/Support.jsx';
@@ -183,7 +183,19 @@ function Tables() {
 }
 
 function Data() {
-  const { t, tErr, notify, license } = useApp();
+  const { t, tErr, notify, license, setLicense } = useApp();
+  const [renewing, setRenewing] = useState(false);
+  const [newKey, setNewKey] = useState('');
+  async function renew() {
+    try {
+      setLicense(await activate(newKey));
+      setRenewing(false);
+      setNewKey('');
+      notify(t('license.updated'));
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  }
   const [path, setPath] = useState('');
   useEffect(() => { dataPath().then(setPath).catch(() => {}); }, []);
   return (
@@ -196,6 +208,19 @@ function Data() {
           <dt>{t('license.expires')}</dt><dd>{license.expires ? new Date(license.expires).toLocaleDateString('en-GB') : t('license.lifetime')}</dd>
         </dl>
       ) : <p className="muted">{t('license.devMode')}</p>}
+      {license?.required && (
+        <div className="row bottom-gap">
+          <button onClick={() => copyText(license.machine).then(() => notify(t('license.copied')))}>{t('license.copy')} {t('license.machineId')}</button>
+          <button className="primary" onClick={() => setRenewing(true)}>🔑 {t('license.update')}</button>
+        </div>
+      )}
+      {renewing && (
+        <Modal title={t('license.update')} onClose={() => setRenewing(false)}
+          footer={<><span className="spacer" /><button onClick={() => setRenewing(false)}>{t('common.cancel')}</button><button className="primary" disabled={!newKey.trim()} onClick={renew}>{t('license.activate')}</button></>}>
+          <p className="muted">{t('license.updateHint')}</p>
+          <textarea dir="ltr" className="mono" rows={5} autoFocus value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+        </Modal>
+      )}
       <h3>{t('settings.data')}</h3>
       <Field label={t('settings.dataPath')}><input readOnly className="mono" value={path} /></Field>
       <div className="row">
