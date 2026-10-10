@@ -104,4 +104,4 @@ fs.writeFileSync(path.join(STAGE, 'package.json'), JSON.stringify({
   main: pkg.main,
 }, null, 2));
 
-run(`npx electron-builder ${platform} ${dirOnly ? '--dir' : ''} --config.directories.app=stage`);
+run(`npx electron-builder ${platform} ${dirOnly ? "--dir" : ""} --publish never --config.directories.app=stage`);
