@@ -104,6 +104,8 @@ export function shiftHtml(summary, settings, t, lang) {
   </table><hr><table>
     ${byMethod.map((b) => line(t(`pay.${b.method}`), m(b.amount))).join('')}
     ${line(t('shift.refunds'), `${refunds.count} — ${m(refunds.total)}`)}
+    ${summary.supplierCash ? line(t('shift.supplierCash'), '− ' + m(summary.supplierCash)) : ''}
+    ${summary.expenseCash ? line(t('shift.expenseCash'), '− ' + m(summary.expenseCash)) : ''}
   </table><hr><table>
     ${line(t('shift.expectedCash'), m(expectedCash), 'big')}
     ${shift.counted_cash != null ? line(t('shift.countedCash'), m(shift.counted_cash)) : ''}

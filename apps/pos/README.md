@@ -28,7 +28,10 @@ Everything runs locally: data lives in a SQLite file on the machine, so you don'
 - Shifts: opening float, expected vs. counted cash, and a printable Z-report.
 - Returns (partial or full) that restock items and refund proportionally.
 - Reports: sales, net, profit, and breakdowns by payment method, day, hour, category, product, cashier and order type.
+- **Purchasing**: suppliers, purchase invoices that receive stock and re-average cost, credit purchases, supplier statements and payments.
+- **Expenses** (rent, electricity, salaries…), from the cash drawer or outside it; shown in the shift and in net profit.
 - Users with PIN login and **Admin / Cashier** roles.
+- **Device licensing**: installed copies only run on the one computer they were activated for, for a period you choose.
 - Arabic (RTL) and English UI.
 - One-click backup & restore of the database file.
 
@@ -51,12 +54,35 @@ npm test           # business-logic tests
 ### Build an installer
 
 ```bash
-npm run dist:win     # Windows installer + portable .exe
+npm run dist:win     # Windows installer (InnoForge-POS-Setup-x.y.z.exe)
 npm run dist:mac     # macOS .dmg
 npm run dist:linux   # AppImage + .deb
 ```
 
-Output goes to `release/`. Build each platform on that OS, or use CI.
+Output goes to `release/`. The Windows installer can be built on Windows, or on Linux with Wine installed.
+`scripts/package.cjs` obfuscates all JavaScript into `stage/` before packaging, and the build turns on Electron's
+security fuses: asar integrity check, load only from asar, no `ELECTRON_RUN_AS_NODE`, and no `--inspect`.
+
+## Licensing (one computer per license)
+
+Installed builds open on an **activation screen** that shows the computer's *Machine ID*. You (the vendor) sign a
+license key for that ID with your private key, and the customer pastes it in. Everything works offline.
+
+| Tool | Use |
+|---|---|
+| `tools/license-generator.html` | Open in Chrome/Edge, load your private key, choose customer, Machine ID and duration (14 days, 1–12 months, lifetime or custom). Keeps a log you can export to CSV. |
+| `npm run license -- issue --machine XXXX-… --customer "Name" --days 365` | Same thing from the command line. |
+| `npm run license -- keygen --force` | Create a new key pair (old licenses stop working; rebuild the installer). |
+
+- The app ships only the **public** key (`electron/license-public.cjs`), so it can check licenses but never create them.
+- Keys are **Ed25519 signatures**: changing one character, or using one on another computer, makes it invalid.
+- Expiry is checked on every start and while the app runs. Turning the clock back is detected.
+- Running from source (`npm start`) skips licensing. Set `INNOFORGE_POS_FORCE_LICENSE=1` to test it.
+- **Keep the private key safe and backed up.** Anyone who has it can issue licenses, and if you lose it you
+  can't issue licenses for existing installs. Never commit it (`*.pem` is git-ignored).
+
+> No protection running on the customer's machine is unbreakable. Obfuscation, integrity fuses and signed licenses
+> make copying and tampering hard and deliberate, but they don't make it impossible.
 
 ## How it's built — understand what's inside
 

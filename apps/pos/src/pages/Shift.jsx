@@ -3,12 +3,14 @@ import { api } from '../lib/api.js';
 import { formatMoney, toMinor } from '../lib/money.js';
 import { shiftHtml } from '../lib/receipt.js';
 import { Field, useApp, useLoad } from '../components/ui.jsx';
+import { ExpenseModal } from './Purchases.jsx';
 
 export default function Shift() {
   const { t, tErr, notify, settings, shift, reloadShift, printDoc, lang, isAdmin, setPage } = useApp();
   const [counted, setCounted] = useState('');
   const [notes, setNotes] = useState('');
-  const [summary] = useLoad(() => (shift ? api.shifts.summary(shift.id) : Promise.resolve(null)), [shift?.id]);
+  const [expense, setExpense] = useState(false);
+  const [summary, reloadSummary] = useLoad(() => (shift ? api.shifts.summary(shift.id) : Promise.resolve(null)), [shift?.id]);
   const [history] = useLoad(() => (isAdmin ? api.shifts.list({}) : Promise.resolve([])), [shift?.id]);
   const m = (v) => formatMoney(v, settings);
 
@@ -47,9 +49,15 @@ export default function Shift() {
               <dt>{t('shift.sales')}</dt><dd><b>{m(summary.sales.total)}</b></dd>
               {summary.byMethod.map((b) => <React.Fragment key={b.method}><dt>{t(`pay.${b.method}`)}</dt><dd>{m(b.amount)}</dd></React.Fragment>)}
               <dt>{t('shift.refunds')}</dt><dd>{summary.refunds.count} — {m(summary.refunds.total)}</dd>
+              {!!summary.supplierCash && <><dt>{t('shift.supplierCash')}</dt><dd>− {m(summary.supplierCash)}</dd></>}
+              {!!summary.expenseCash && <><dt>{t('shift.expenseCash')}</dt><dd>− {m(summary.expenseCash)}</dd></>}
               <dt>{t('shift.expectedCash')}</dt><dd><b>{m(summary.expectedCash)}</b></dd>
             </dl>
-            <button onClick={() => printDoc(shiftHtml(summary, settings, t, lang))}>🖨 {t('common.print')}</button>
+            <div className="row">
+              <button onClick={() => printDoc(shiftHtml(summary, settings, t, lang))}>🖨 {t('common.print')}</button>
+              <button onClick={() => setExpense(true)}>💸 {t('expenses.newDrawer')}</button>
+            </div>
+            {expense && <ExpenseModal onClose={() => setExpense(false)} onSaved={() => { setExpense(false); reloadSummary(); }} />}
           </div>
           <form className="card" onSubmit={close}>
             <h3>{t('shift.close')}</h3>

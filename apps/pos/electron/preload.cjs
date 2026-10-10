@@ -9,4 +9,7 @@ contextBridge.exposeInMainWorld('posBridge', {
   backup: () => ipcRenderer.invoke('pos:backup'),
   restore: () => ipcRenderer.invoke('pos:restore'),
   dataPath: () => ipcRenderer.invoke('pos:dataPath'),
+  license: () => ipcRenderer.invoke('pos:license'),
+  activate: (key) => ipcRenderer.invoke('pos:activate', key),
+  copy: (text) => ipcRenderer.invoke('pos:copy', text),
 });

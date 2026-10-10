@@ -11,16 +11,18 @@
     "build": "vite build",
     "start": "vite build && electron .",
     "test": "node --test --disable-warning=ExperimentalWarning test/*.test.cjs",
-    "dist": "vite build && electron-builder",
-    "dist:win": "vite build && electron-builder --win",
-    "dist:mac": "vite build && electron-builder --mac",
-    "dist:linux": "vite build && electron-builder --linux"
+    "dist": "node scripts/package.cjs",
+    "dist:win": "node scripts/package.cjs --win",
+    "dist:mac": "node scripts/package.cjs --mac",
+    "dist:linux": "node scripts/package.cjs --linux",
+    "license": "node tools/license.cjs"
   },
   "build": {
     "appId": "io.innosource.innoforge.pos",
     "productName": "InnoForge POS",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "electron/**/*",
@@ -29,9 +31,14 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
     },
     "mac": {
       "target": [
@@ -43,11 +50,32 @@
         "AppImage",
         "deb"
       ],
-      "category": "Office"
+      "category": "Office",
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "InnoForge POS",
+      "artifactName": "InnoForge-POS-Setup-${version}.${ext}",
+      "installerLanguages": [
+        "ar_SA",
+        "en_US"
+      ],
+      "language": "1025",
+      "multiLanguageInstaller": true
+    },
+    "asar": true,
+    "electronVersion": "44.7.0",
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
     }
   },
   "devDependencies": {
@@ -56,6 +84,7 @@
     "cross-env": "^10.1.0",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
+    "javascript-obfuscator": "^5.9.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "vite": "^8.3.4",

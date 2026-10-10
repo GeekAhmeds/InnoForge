@@ -146,3 +146,52 @@ test('reports summarize sales by method, product and profit', () => {
   assert.equal(r.topProducts[0].qty, 3);
   assert.deepEqual(r.byMethod.map((m) => m.method).sort(), ['card', 'cash']);
 });
+
+test('purchase receives stock, averages cost, tracks supplier balance and payments', () => {
+  const { s, db } = setup();
+  const p = s.products.save({ name: 'Notebook', price: 3500, cost: 2000, stock: 10 });
+  const sup = s.suppliers.save({ name: 'Nile Paper', phone: '0100' });
+  s.shifts.open({ openingCash: 10000 });
+  const pur = s.purchases.create({
+    supplierId: sup, refNo: 'INV-7', items: [{ product_id: p, qty: 10, unit_cost: 2600 }], discount: 1000,
+    paid: 10000, method: 'cash', fromDrawer: true, updatePrices: [{ product_id: p, price: 4000 }],
+  });
+  assert.equal(pur.total, 25000);
+  const prod = db.prepare('SELECT stock, cost, price FROM products WHERE id = ?').get(p);
+  assert.equal(prod.stock, 20);
+  assert.equal(prod.cost, Math.round((10 * 2000 + 10 * 2500) / 20)); // discount spread into cost
+  assert.equal(prod.price, 4000);
+  assert.equal(s.suppliers.list({})[0].balance, 15000);
+  const st = s.suppliers.pay({ supplierId: sup, amount: 5000, method: 'card' });
+  assert.equal(st.supplier.balance, 10000);
+  assert.deepEqual(st.rows.map((r) => r.balance), [25000, 15000, 10000]);
+  assert.equal(s.shifts.summary().expectedCash, 0); // 10000 opening - 10000 paid from drawer
+});
+
+test('expenses reduce drawer cash and net profit; cashier limited to drawer expenses', () => {
+  const { s } = setup();
+  const a = s.products.save({ name: 'A', price: 1000, cost: 400, stock: 5 });
+  s.shifts.open({ openingCash: 2000 });
+  s.orders.checkout({ items: [{ product_id: a, qty: 2 }], payments: [{ method: 'cash', amount: 2000 }] });
+  s.expenses.create({ category: 'كهرباء', amount: 300, fromDrawer: true });
+  s.expenses.create({ category: 'إيجار', amount: 500, fromDrawer: false });
+  assert.equal(s.shifts.summary().expectedCash, 2000 + 2000 - 300);
+  const r = s.reports.summary({});
+  assert.equal(r.totals.expenses, 800);
+  assert.equal(r.totals.netProfit, 1200 - 800);
+  s.users.save({ name: 'C', username: 'c2', pin: '7777', role: 'cashier' });
+  s.auth.logout();
+  s.auth.login({ username: 'c2', pin: '7777' });
+  assert.equal(tryCode(() => s.expenses.create({ amount: 100, fromDrawer: false })), 'FORBIDDEN');
+  assert.ok(s.expenses.create({ amount: 100, fromDrawer: true }).id);
+  assert.equal(tryCode(() => s.purchases.list({})), 'FORBIDDEN');
+});
+
+test('drawer payments need an open shift; paying needs a supplier', () => {
+  const { s } = setup();
+  const p = s.products.save({ name: 'X', price: 100 });
+  const sup = s.suppliers.save({ name: 'S' });
+  assert.equal(tryCode(() => s.purchases.create({ supplierId: sup, items: [{ product_id: p, qty: 1, unit_cost: 50 }], paid: 50, fromDrawer: true })), 'NO_OPEN_SHIFT');
+  assert.equal(tryCode(() => s.purchases.create({ items: [{ product_id: p, qty: 1, unit_cost: 50 }], paid: 50 })), 'SUPPLIER_REQUIRED');
+  assert.equal(s.purchases.create({ items: [{ product_id: p, qty: 1, unit_cost: 50 }] }).total, 50);
+});

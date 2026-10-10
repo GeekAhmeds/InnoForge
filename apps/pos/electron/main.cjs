@@ -1,12 +1,13 @@
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs');
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
 const { openDatabase } = require('./db.cjs');
 const { createServices, PosError } = require('./services/index.cjs');
+const { createLicenseStore } = require('./license.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'reports'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'reports'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
@@ -14,12 +15,32 @@ if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(pro
 let db;
 let services;
 let mainWindow;
+let licenses;
+let license;
 
 const dbFile = () => path.join(app.getPath('userData'), 'innoforge-pos.db');
+
+// Installed builds are locked to one computer; running from source (npm start) is not,
+// unless INNOFORGE_POS_FORCE_LICENSE=1 is set to test the activation flow.
+const licenseRequired = () => app.isPackaged || process.env.INNOFORGE_POS_FORCE_LICENSE === '1';
+// Before activation the UI may only read settings (language, business name).
+const ALLOWED_UNLICENSED = new Set(['settings.get', 'settings.setLanguage']);
+
+function licenseOk() {
+  if (!licenseRequired()) return true;
+  if (!license?.valid) return false;
+  if (license.expires && Date.now() > Date.parse(license.expires)) license = licenses.status();
+  return license.valid;
+}
 
 function boot() {
   db = openDatabase(dbFile());
   services = createServices(db);
+  licenses = createLicenseStore({
+    file: path.join(app.getPath('userData'), 'license.json'),
+    publicKeyPem: require('./license-public.cjs'),
+  });
+  license = licenses.status();
 }
 
 function createWindow() {
@@ -37,6 +58,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      devTools: !app.isPackaged,
     },
   });
   mainWindow.removeMenu();
@@ -69,10 +91,19 @@ ipcMain.handle('pos:call', (_e, ns, method, arg) => {
   try {
     const target = EXPOSED.includes(ns) ? services[ns] : null;
     if (!target || typeof target[method] !== 'function') throw new PosError('UNKNOWN_METHOD', `${ns}.${method}`);
+    if (!ALLOWED_UNLICENSED.has(`${ns}.${method}`) && !licenseOk()) throw new PosError('LICENSE_REQUIRED');
     return ok(target[method](arg));
   } catch (err) {
     return fail(err);
   }
+});
+
+ipcMain.handle('pos:license', () => ok({ ...license, required: licenseRequired(), valid: licenseOk() }));
+
+ipcMain.handle('pos:activate', (_e, key) => {
+  const result = licenses.activate(key);
+  if (result.valid) license = result;
+  return result.valid ? ok({ ...result, required: licenseRequired() }) : fail(new PosError(`LICENSE_${result.reason}`));
 });
 
 ipcMain.handle('pos:printers', async () => {
@@ -149,6 +180,11 @@ ipcMain.handle('pos:restore', async () => {
 });
 
 ipcMain.handle('pos:dataPath', () => ok(dbFile()));
+
+ipcMain.handle('pos:copy', (_e, text) => {
+  clipboard.writeText(String(text ?? ''));
+  return ok(true);
+});
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

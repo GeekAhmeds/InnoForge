@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { I18nProvider, useI18n } from './i18n/index.jsx';
-import { api, print } from './lib/api.js';
+import { api, licenseStatus, print } from './lib/api.js';
 import { AppContext, useToasts } from './components/ui.jsx';
 import Setup from './pages/Setup.jsx';
 import Login from './pages/Login.jsx';
@@ -10,16 +10,21 @@ import Products from './pages/Products.jsx';
 import Reports from './pages/Reports.jsx';
 import Shift from './pages/Shift.jsx';
 import Settings from './pages/Settings.jsx';
+import Activation from './pages/Activation.jsx';
+import Purchases from './pages/Purchases.jsx';
 
 export default function App() {
   const [settings, setSettings] = useState(null);
+  const [license, setLicense] = useState(null);
   const reloadSettings = useCallback(async () => setSettings(await api.settings.get()), []);
-  useEffect(() => { reloadSettings(); }, [reloadSettings]);
+  useEffect(() => { reloadSettings(); licenseStatus().then(setLicense); }, [reloadSettings]);
 
-  if (!settings) return null;
+  if (!settings || !license) return null;
   return (
     <I18nProvider lang={settings.language}>
-      <Shell settings={settings} reloadSettings={reloadSettings} />
+      {license.required && !license.valid
+        ? <Activation license={license} onActivated={setLicense} settings={settings} reloadSettings={reloadSettings} />
+        : <Shell settings={settings} reloadSettings={reloadSettings} license={license} />}
     </I18nProvider>
   );
 }
@@ -28,12 +33,13 @@ const NAV = [
   { id: 'pos', icon: '🛒' },
   { id: 'orders', icon: '🧾' },
   { id: 'products', icon: '📦', admin: true },
+  { id: 'purchases', icon: '🚚', admin: true },
   { id: 'reports', icon: '📊', admin: true },
   { id: 'shift', icon: '⏱' },
   { id: 'settings', icon: '⚙', admin: true },
 ];
 
-function Shell({ settings, reloadSettings }) {
+function Shell({ settings, reloadSettings, license }) {
   const { t, tErr, lang } = useI18n();
   const { notify, view: toasts } = useToasts();
   const [user, setUser] = useState(null);
@@ -54,9 +60,9 @@ function Shell({ settings, reloadSettings }) {
   }, [settings, notify, tErr]);
 
   const ctx = useMemo(() => ({
-    settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage,
+    settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license,
     isAdmin: user?.role === 'admin',
-  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc]);
+  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license]);
 
   let content;
   if (!settings.setup_done) {
@@ -65,7 +71,7 @@ function Shell({ settings, reloadSettings }) {
     content = <Login onLogin={(u) => { setUser(u); setPage('pos'); }} />;
   } else {
     const nav = NAV.filter((n) => !n.admin || user.role === 'admin');
-    const Page = { pos: Pos, orders: Orders, products: Products, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { pos: Pos, orders: Orders, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

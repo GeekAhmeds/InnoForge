@@ -336,8 +336,11 @@ function createServices(db) {
     const byMethod = plainAll(db.prepare("SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN orders o ON o.id = p.order_id WHERE o.shift_id = ? AND o.status = 'completed' GROUP BY p.method").all(shiftId));
     const refunds = plain(db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, COALESCE(SUM(CASE WHEN method = \'cash\' THEN amount ELSE 0 END), 0) AS cash FROM returns WHERE shift_id = ?').get(shiftId));
     const cashSales = byMethod.find((m) => m.method === 'cash')?.amount || 0;
-    const expectedCash = shift.opening_cash + cashSales - refunds.cash;
-    return { shift, sales, byMethod, refunds, expectedCash };
+    // Cash that left the drawer during the shift for suppliers or expenses.
+    const supplierCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
+    const expenseCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
+    const expectedCash = shift.opening_cash + cashSales - refunds.cash - supplierCash - expenseCash;
+    return { shift, sales, byMethod, refunds, supplierCash, expenseCash, expectedCash };
   }
 
   const shifts = {
@@ -624,6 +627,176 @@ function createServices(db) {
     },
   };
 
+
+  // ---------- suppliers & purchasing ----------
+  const SUPPLIER_BALANCE = `(
+    COALESCE((SELECT SUM(total) FROM purchases p WHERE p.supplier_id = s.id), 0) -
+    COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id = s.id), 0)
+  )`;
+
+  // Records cash leaving the business; drawer cash needs the open shift so the Z-report balances.
+  function drawerShift(fromDrawer) {
+    if (!fromDrawer) return null;
+    const shift = currentShift();
+    if (!shift) throw new PosError('NO_OPEN_SHIFT');
+    return shift.id;
+  }
+
+  function insertSupplierPayment({ supplierId, purchaseId = null, amount, method = 'cash', fromDrawer = false, notes = '' }, user) {
+    if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+    const drawer = fromDrawer && method === 'cash';
+    db.prepare('INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, from_drawer, shift_id, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(supplierId, purchaseId, amount, method, drawer ? 1 : 0, drawerShift(drawer), user.id, str(notes));
+  }
+
+  const suppliers = {
+    list({ search = '', includeInactive = false } = {}) {
+      requireAdmin();
+      const q = `%${str(search)}%`;
+      return plainAll(db.prepare(`
+        SELECT s.*, ${SUPPLIER_BALANCE} AS balance FROM suppliers s
+        WHERE (s.name LIKE ? OR s.phone LIKE ?) ${includeInactive ? '' : 'AND s.active = 1'}
+        ORDER BY s.name`).all(q, q));
+    },
+    save(s = {}) {
+      requireAdmin();
+      if (!str(s.name)) throw new PosError('NAME_REQUIRED');
+      const vals = [str(s.name), str(s.phone), str(s.address), str(s.notes), s.active === false ? 0 : 1];
+      if (s.id) {
+        db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ?, notes = ?, active = ? WHERE id = ?').run(...vals, s.id);
+        return s.id;
+      }
+      return Number(db.prepare('INSERT INTO suppliers (name, phone, address, notes, active) VALUES (?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    /** Purchases and payments in date order with a running balance (what we owe). */
+    statement(id) {
+      requireAdmin();
+      const supplier = plain(db.prepare(`SELECT s.*, ${SUPPLIER_BALANCE} AS balance FROM suppliers s WHERE s.id = ?`).get(id));
+      if (!supplier) throw new PosError('NOT_FOUND');
+      const rows = plainAll(db.prepare(`
+        SELECT 'purchase' AS kind, id, created_at, ref_no AS ref, total AS debit, 0 AS credit, notes FROM purchases WHERE supplier_id = ?
+        UNION ALL
+        SELECT 'payment' AS kind, id, created_at, method AS ref, 0 AS debit, amount AS credit, notes FROM supplier_payments WHERE supplier_id = ?
+        ORDER BY created_at, kind DESC, id`).all(id, id));
+      let balance = 0;
+      for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
+      return { supplier, rows };
+    },
+    pay({ supplierId, amount, method = 'cash', fromDrawer = false, notes = '' } = {}) {
+      const u = requireAdmin();
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (!db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
+      transaction(db, () => insertSupplierPayment({ supplierId, amount: value, method, fromDrawer, notes }, u));
+      return suppliers.statement(supplierId);
+    },
+  };
+
+  const purchases = {
+    list({ from, to, supplierId = null } = {}) {
+      requireAdmin();
+      const [f, t] = dateRange(from, to);
+      const params = [f, t];
+      let extra = '';
+      if (supplierId) { extra = 'AND p.supplier_id = ?'; params.push(supplierId); }
+      return plainAll(db.prepare(`
+        SELECT p.*, s.name AS supplier_name, u.name AS user_name,
+          COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.purchase_id = p.id), 0) AS paid
+        FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id
+        WHERE p.created_at >= ? AND p.created_at < date(?, '+1 day') ${extra}
+        ORDER BY p.id DESC LIMIT 500`).all(...params));
+    },
+    get(id) {
+      requireAdmin();
+      const p = plain(db.prepare(`
+        SELECT p.*, s.name AS supplier_name, u.name AS user_name FROM purchases p
+        LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id WHERE p.id = ?`).get(id));
+      if (!p) throw new PosError('NOT_FOUND');
+      p.items = plainAll(db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id));
+      p.payments = plainAll(db.prepare('SELECT * FROM supplier_payments WHERE purchase_id = ? ORDER BY id').all(id));
+      return p;
+    },
+    /**
+     * Receives goods: adds stock, re-averages product cost and optionally pays now.
+     * Anything unpaid stays on the supplier's balance.
+     */
+    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [] } = {}) {
+      const u = requireAdmin();
+      if (!items.length) throw new PosError('EMPTY_CART');
+      if (supplierId && !db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
+      return transaction(db, () => {
+        const lines = items.map((it) => {
+          const qty = num(it.qty);
+          const unitCost = int(it.unit_cost, -1);
+          if (!(qty > 0)) throw new PosError('INVALID_QTY');
+          if (unitCost < 0) throw new PosError('INVALID_PRICE');
+          const product = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
+          if (!product) throw new PosError('PRODUCT_NOT_FOUND');
+          return { product, qty, unitCost, lineTotal: Math.round(qty * unitCost) };
+        });
+        const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+        const disc = Math.min(Math.max(0, int(discount)), subtotal);
+        const total = subtotal - disc;
+        const paidNow = Math.min(Math.max(0, int(paid)), total);
+        if (paidNow > 0 && !supplierId) throw new PosError('SUPPLIER_REQUIRED');
+
+        const purchaseId = Number(db.prepare('INSERT INTO purchases (supplier_id, ref_no, user_id, subtotal, discount, total, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(supplierId, str(refNo), u.id, subtotal, disc, total, str(notes)).lastInsertRowid);
+        // Spread the invoice discount over the lines so product cost reflects what was really paid.
+        const factor = subtotal > 0 ? total / subtotal : 1;
+        for (const l of lines) {
+          db.prepare('INSERT INTO purchase_items (purchase_id, product_id, name, qty, unit_cost, line_total) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(purchaseId, l.product.id, l.product.name, l.qty, l.unitCost, l.lineTotal);
+          const current = db.prepare('SELECT stock, cost, track_stock FROM products WHERE id = ?').get(l.product.id);
+          const effective = Math.round(l.unitCost * factor);
+          const onHand = current.track_stock ? Math.max(0, current.stock) : 0;
+          const newCost = onHand > 0 ? Math.round((onHand * current.cost + l.qty * effective) / (onHand + l.qty)) : effective;
+          db.prepare('UPDATE products SET cost = ? WHERE id = ?').run(newCost, l.product.id);
+          if (current.track_stock) moveStock(l.product.id, l.qty, 'purchase', purchaseId, u.id);
+        }
+        for (const up of updatePrices) {
+          const price = int(up.price, -1);
+          if (up.product_id && price >= 0) db.prepare('UPDATE products SET price = ? WHERE id = ?').run(price, up.product_id);
+        }
+        if (paidNow > 0) insertSupplierPayment({ supplierId, purchaseId, amount: paidNow, method, fromDrawer }, u);
+        return purchases.get(purchaseId);
+      });
+    },
+  };
+
+  const expenses = {
+    list({ from, to } = {}) {
+      requireAdmin();
+      const [f, t] = dateRange(from, to);
+      return plainAll(db.prepare(`
+        SELECT e.*, u.name AS user_name FROM expenses e JOIN users u ON u.id = e.user_id
+        WHERE e.created_at >= ? AND e.created_at < date(?, '+1 day') ORDER BY e.id DESC`).all(f, t));
+    },
+    categories() {
+      requireUser();
+      return db.prepare("SELECT DISTINCT category FROM expenses WHERE category != '' ORDER BY category").all().map((r) => r.category);
+    },
+    /** Cashiers may record drawer expenses (e.g. paying a delivery); admins can record any. */
+    create({ category = '', amount, notes = '', fromDrawer = true } = {}) {
+      const u = requireUser();
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (u.role !== 'admin' && !fromDrawer) throw new PosError('FORBIDDEN');
+      const id = Number(db.prepare('INSERT INTO expenses (category, amount, notes, from_drawer, shift_id, user_id) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(str(category), value, str(notes), fromDrawer ? 1 : 0, drawerShift(fromDrawer), u.id).lastInsertRowid);
+      return plain(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id));
+    },
+    remove(id) {
+      requireAdmin();
+      const e = db.prepare('SELECT shift_id FROM expenses WHERE id = ?').get(id);
+      if (!e) throw new PosError('NOT_FOUND');
+      // Removing a drawer expense from a closed shift would silently change its Z-report.
+      if (e.shift_id && db.prepare('SELECT closed_at FROM shifts WHERE id = ?').get(e.shift_id)?.closed_at) throw new PosError('SHIFT_CLOSED');
+      db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+      return true;
+    },
+  };
+
   // ---------- reports ----------
   const reports = {
     summary({ from, to } = {}) {
@@ -639,6 +812,9 @@ function createServices(db) {
         SELECT COALESCE(SUM(i.unit_cost * (i.qty - i.returned_qty)), 0) AS cost,
                COALESCE(SUM(i.line_total * (i.qty - i.returned_qty) / i.qty), 0) AS revenue
         FROM order_items i JOIN orders o ON o.id = i.order_id WHERE ${range}`).get(f, t);
+      const purchasesTotal = db.prepare("SELECT COALESCE(SUM(total), 0) AS t FROM purchases WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
+      const expensesTotal = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
+      const profit = Math.round(cost.revenue - cost.cost);
       return {
         from: f,
         to: t,
@@ -647,8 +823,12 @@ function createServices(db) {
           refunds,
           net: totals.gross - refunds,
           average: totals.orders ? Math.round(totals.gross / totals.orders) : 0,
-          profit: Math.round(cost.revenue - cost.cost),
+          profit,
+          purchases: purchasesTotal,
+          expenses: expensesTotal,
+          netProfit: profit - expensesTotal,
         },
+        expensesByCategory: plainAll(db.prepare("SELECT category, SUM(amount) AS total FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day') GROUP BY category ORDER BY total DESC").all(f, t)),
         byMethod: plainAll(db.prepare(`SELECT p.method, SUM(p.amount) AS amount, COUNT(DISTINCT p.order_id) AS orders FROM payments p JOIN orders o ON o.id = p.order_id WHERE ${range} GROUP BY p.method ORDER BY amount DESC`).all(f, t)),
         byDay: plainAll(db.prepare(`SELECT date(o.completed_at) AS day, COUNT(*) AS orders, SUM(o.total) AS total FROM orders o WHERE ${range} GROUP BY day ORDER BY day`).all(f, t)),
         byHour: plainAll(db.prepare(`SELECT CAST(strftime('%H', o.completed_at) AS INTEGER) AS hour, COUNT(*) AS orders, SUM(o.total) AS total FROM orders o WHERE ${range} GROUP BY hour ORDER BY hour`).all(f, t)),
@@ -667,7 +847,7 @@ function createServices(db) {
     },
   };
 
-  return { session, settings, auth, users, categories, products, tables, shifts, orders, reports, requireAdmin };
+  return { session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, reports, requireAdmin };
 }
 
 module.exports = { createServices, PosError, DEFAULT_SETTINGS, hashPin, verifyPin };

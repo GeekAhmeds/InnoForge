@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InnoForge POS — License Generator</title>
+<!-- Vendor-only tool. Works offline: open this file in Chrome/Edge. The private key is
+     read into memory only and never saved or sent anywhere. -->
+<style>
+  :root { --brand:#4f46e5; --line:#e5e7eb; --muted:#6b7280; --bg:#f4f5f7; --danger:#dc2626; --good:#059669; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); font:15px/1.5 "Segoe UI", Tahoma, sans-serif; color:#111827; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--muted); }
+  input, select, textarea { font:inherit; color:#111827; padding:9px 11px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; }
+  textarea { font-family: Consolas, monospace; font-size: 13px; }
+  button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ok { color: var(--good); } .err { color: var(--danger); }
+  .ltr { direction:ltr; text-align:left; }
+  .key-out { background:#eef2ff; border-radius:8px; padding:12px; word-break:break-all; font-family:Consolas, monospace; font-size:13px; direction:ltr; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:start; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; background:#f3f4f6; font-size:12px; }
+  .tag.exp { background:#fef2f2; color:var(--danger); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🔑 InnoForge POS — مولّد مفاتيح الترخيص</h1>
+  <p class="muted">أداة خاصة بيك إنت بس كبائع. كل مفتاح بيتعمل لجهاز واحد بعينه (برقم الجهاز اللي بيظهر للعميل في شاشة التفعيل)، ولمدة إنت بتحددها.</p>
+
+  <section class="card">
+    <h2>1) المفتاح الخاص (Private key)</h2>
+    <div class="row">
+      <input type="file" id="keyFile" accept=".pem,.txt" style="max-width:340px">
+      <span id="keyState" class="muted">لم يتم تحميل المفتاح</span>
+    </div>
+    <p class="muted" style="margin-bottom:0">الملف ده (<code>pos-license-private.pem</code>) هو سرّك: بيتقري جوه الصفحة دي بس، ومش بيتحفظ ولا بيتبعت لأي مكان. خلّي معاك منه نسخة احتياطية في مكان آمن.</p>
+  </section>
+
+  <section class="card">
+    <h2>2) بيانات الترخيص</h2>
+    <form id="form" class="grid">
+      <label>اسم العميل / النشاط<input id="customer" required></label>
+      <label>تليفون العميل (للسجل بس)<input id="phone"></label>
+      <label>رقم الجهاز<input id="machine" class="ltr" required placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"></label>
+      <label>المدة
+        <select id="duration">
+          <option value="14">تجربة — 14 يوم</option>
+          <option value="30">شهر</option>
+          <option value="90">3 شهور</option>
+          <option value="180">6 شهور</option>
+          <option value="365" selected>سنة</option>
+          <option value="0">مدى الحياة</option>
+          <option value="custom">عدد أيام مخصص…</option>
+        </select>
+      </label>
+      <label id="customWrap" hidden>عدد الأيام<input id="customDays" type="number" min="1" value="60"></label>
+      <label>ملاحظات (للسجل بس)<input id="notes"></label>
+      <div class="row" style="grid-column:1/-1">
+        <button class="primary" type="submit">إنشاء مفتاح الترخيص</button>
+        <span id="formMsg"></span>
+      </div>
+    </form>
+    <div id="result" hidden>
+      <p><b>المفتاح:</b> ابعته للعميل يلصقه في شاشة التفعيل.</p>
+      <div class="key-out" id="keyOut"></div>
+      <div class="row" style="margin-top:8px"><button id="copyBtn" type="button">نسخ المفتاح</button><span id="expiresOut" class="muted"></span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">سجل التراخيص</h2>
+      <div class="row"><button id="exportBtn" type="button">تصدير CSV</button><button id="clearBtn" type="button">مسح السجل</button></div></div>
+    <p class="muted">السجل ده محفوظ في المتصفح ده بس. صدّره من وقت للتاني عشان تحتفظ بنسخة.</p>
+    <table><thead><tr><th>التاريخ</th><th>العميل</th><th>رقم الجهاز</th><th>المدة</th><th>ينتهي</th><th></th></tr></thead><tbody id="log"></tbody></table>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const LOG_KEY = 'innoforge-pos-licenses';
+  let signingKey = null;
+
+  const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const pemToDer = (pem) => Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')), (c) => c.charCodeAt(0));
+  const normalizeId = (id) => String(id || '').toUpperCase().replace(/[^0-9A-F]/g, '');
+  const loadLog = () => { try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch { return []; } };
+  const saveLog = (log) => { try { localStorage.setItem(LOG_KEY, JSON.stringify(log)); } catch {} };
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB') : 'مدى الحياة');
+
+  $('keyFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      signingKey = await crypto.subtle.importKey('pkcs8', pemToDer(await file.text()), { name: 'Ed25519' }, false, ['sign']);
+      $('keyState').textContent = '✓ تم تحميل المفتاح';
+      $('keyState').className = 'ok';
+    } catch (err) {
+      signingKey = null;
+      $('keyState').textContent = 'الملف ده مش مفتاح Ed25519 صالح (أو المتصفح قديم — استخدم Chrome أو Edge حديث)';
+      $('keyState').className = 'err';
+    }
+  });
+
+  $('duration').addEventListener('change', () => { $('customWrap').hidden = $('duration').value !== 'custom'; });
+
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('formMsg').textContent = '';
+    if (!signingKey) { $('formMsg').textContent = 'حمّل المفتاح الخاص الأول'; $('formMsg').className = 'err'; return; }
+    const id = normalizeId($('machine').value);
+    if (id.length !== 20) { $('formMsg').textContent = 'رقم الجهاز لازم يكون 20 حرف/رقم زي 7F3A-91C2-04BE-D5E8-2A6F'; $('formMsg').className = 'err'; return; }
+    const days = $('duration').value === 'custom' ? Number($('customDays').value) : Number($('duration').value);
+    const now = new Date();
+    // Same field order and encoding as tools/license.cjs so both produce compatible keys.
+    const payload = {
+      product: 'innoforge-pos',
+      machine: id.match(/.{4}/g).join('-'),
+      customer: $('customer').value.trim(),
+      issued: now.toISOString(),
+      expires: days ? new Date(now.getTime() + days * 86400000).toISOString() : null,
+    };
+    const body = new TextEncoder().encode(JSON.stringify(payload));
+    const sig = await crypto.subtle.sign({ name: 'Ed25519' }, signingKey, body);
+    const key = `${b64url(body)}.${b64url(sig)}`;
+    $('keyOut').textContent = key;
+    $('expiresOut').textContent = `ينتهي: ${fmtDate(payload.expires)}`;
+    $('result').hidden = false;
+    const log = loadLog();
+    log.unshift({ ...payload, phone: $('phone').value.trim(), notes: $('notes').value.trim(), days, key });
+    saveLog(log);
+    renderLog();
+  });
+
+  $('copyBtn').addEventListener('click', async () => {
+    await navigator.clipboard.writeText($('keyOut').textContent);
+    $('copyBtn').textContent = '✓ اتنسخ';
+    setTimeout(() => { $('copyBtn').textContent = 'نسخ المفتاح'; }, 1500);
+  });
+
+  function renderLog() {
+    const now = Date.now();
+    $('log').innerHTML = loadLog().map((l, i) => `<tr>
+      <td>${esc(fmtDate(l.issued))}</td>
+      <td><b>${esc(l.customer)}</b><br><span class="muted">${esc(l.phone)} ${esc(l.notes)}</span></td>
+      <td class="ltr"><code>${esc(l.machine)}</code></td>
+      <td>${l.days ? `${l.days} يوم` : 'مدى الحياة'}</td>
+      <td><span class="tag ${l.expires && Date.parse(l.expires) < now ? 'exp' : ''}">${esc(fmtDate(l.expires))}</span></td>
+      <td><button type="button" data-copy="${i}">نسخ</button></td></tr>`).join('');
+  }
+  $('log').addEventListener('click', (e) => {
+    const i = e.target.dataset.copy;
+    if (i != null) navigator.clipboard.writeText(loadLog()[i].key);
+  });
+
+  $('exportBtn').addEventListener('click', () => {
+    const rows = [['issued', 'customer', 'phone', 'machine', 'days', 'expires', 'notes', 'key'],
+      ...loadLog().map((l) => [l.issued, l.customer, l.phone, l.machine, l.days, l.expires || 'lifetime', l.notes, l.key])];
+    const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `innoforge-licenses-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  });
+  $('clearBtn').addEventListener('click', () => { if (confirm('مسح السجل من المتصفح ده؟ صدّره الأول لو محتاجه.')) { saveLog([]); renderLog(); } });
+
+  renderLog();
+})();
+</script>
+</body>
+</html>

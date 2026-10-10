@@ -181,11 +181,19 @@ function Tables() {
 }
 
 function Data() {
-  const { t, tErr, notify } = useApp();
+  const { t, tErr, notify, license } = useApp();
   const [path, setPath] = useState('');
   useEffect(() => { dataPath().then(setPath).catch(() => {}); }, []);
   return (
     <div className="card narrow">
+      <h3>{t('license.info')}</h3>
+      {license?.required ? (
+        <dl className="kv">
+          <dt>{t('license.customer')}</dt><dd>{license.customer || '—'}</dd>
+          <dt>{t('license.machineId')}</dt><dd className="mono" dir="ltr">{license.machine}</dd>
+          <dt>{t('license.expires')}</dt><dd>{license.expires ? new Date(license.expires).toLocaleDateString('en-GB') : t('license.lifetime')}</dd>
+        </dl>
+      ) : <p className="muted">{t('license.devMode')}</p>}
       <h3>{t('settings.data')}</h3>
       <Field label={t('settings.dataPath')}><input readOnly className="mono" value={path} /></Field>
       <div className="row">

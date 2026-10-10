@@ -46,6 +46,9 @@ export default function Reports() {
             <Stat label={t('reports.average')} value={m(r.totals.average)} />
             <Stat label={t('reports.profit')} value={m(r.totals.profit)} />
             <Stat label={t('shift.refunds')} value={m(r.totals.refunds)} />
+            <Stat label={t('reports.purchases')} value={m(r.totals.purchases)} />
+            <Stat label={t('reports.expenses')} value={m(r.totals.expenses)} />
+            <Stat label={t('reports.netProfit')} value={m(r.totals.netProfit)} strong />
           </div>
           <div className="report-grid">
             <BarList title={t('reports.byDay')} rows={r.byDay.map((x) => [x.day, x.total, x.orders])} m={m} />
@@ -54,6 +57,7 @@ export default function Reports() {
             <BarList title={t('reports.byCategory')} rows={r.byCategory.map((x) => [x.name || t('products.noCategory'), x.total])} m={m} />
             {settings.business_type === 'restaurant' && <BarList title={t('reports.byType')} rows={r.byType.map((x) => [t(`order.${x.order_type}`), x.total, x.orders])} m={m} />}
             <BarList title={t('reports.byHour')} rows={r.byHour.map((x) => [`${String(x.hour).padStart(2, '0')}:00`, x.total, x.orders])} m={m} />
+            <BarList title={t('reports.expensesByCategory')} rows={r.expensesByCategory.map((x) => [x.category || '—', x.total])} m={m} />
             <BarList title={t('reports.byCashier')} rows={r.byCashier.map((x) => [x.name, x.total, x.orders])} m={m} />
           </div>
         </>
@@ -62,8 +66,8 @@ export default function Reports() {
   );
 }
 
-function Stat({ label, value }) {
-  return <div className="stat"><small>{label}</small><b>{value}</b></div>;
+function Stat({ label, value, strong }) {
+  return <div className={`stat ${strong ? 'strong' : ''}`}><small>{label}</small><b>{value}</b></div>;
 }
 
 // A compact table with inline bars — readable without a chart library.

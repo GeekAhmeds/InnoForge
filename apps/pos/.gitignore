@@ -2,3 +2,6 @@ node_modules
 dist
 release
 *.db
+stage
+# never commit the vendor private key
+*.pem

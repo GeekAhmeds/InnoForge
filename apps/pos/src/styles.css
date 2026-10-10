@@ -238,3 +238,25 @@ tr.dim td { opacity: .5; }
   .pos { grid-template-columns: 1fr 360px; }
   .two-col { grid-template-columns: 1fr; }
 }
+
+/* ---------- activation ---------- */
+.activation { width: 560px; max-width: 100%; }
+.machine-id { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+.machine-id code { flex: 1; font-size: 22px; font-weight: 700; letter-spacing: 1px; background: var(--brand-soft); color: var(--brand); padding: 10px 14px; border-radius: 8px; text-align: center; user-select: all; }
+.activation .primary.lg { width: 100%; }
+
+/* ---------- purchasing ---------- */
+.toolbar { margin-bottom: 12px; }
+.search-add { position: relative; margin: 4px 0 12px; }
+.search-add > input { font-size: 16px; padding: 11px 14px; }
+.dropdown { position: absolute; inset-inline: 0; top: 100%; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); max-height: 280px; overflow: auto; }
+.dropdown button { display: flex; justify-content: space-between; width: 100%; border: 0; border-radius: 0; border-bottom: 1px solid #f1f2f4; text-align: start; }
+.compact-inputs td input { padding: 6px 8px; min-width: 80px; }
+.top-gap { margin-top: 14px; }
+.big-num { font-size: 20px; color: var(--text); }
+.row.grow { flex: 1; }
+.w-amount { width: 140px; }
+.w-auto { width: auto; }
+.stat.strong { background: var(--brand); border-color: var(--brand); }
+.stat.strong small, .stat.strong b { color: #fff; }
+.sidebar nav button { padding: 8px 4px; }
