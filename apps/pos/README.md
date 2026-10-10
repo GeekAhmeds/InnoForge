@@ -1,0 +1,106 @@
+# 🧾 InnoForge POS
+
+**An offline desktop point-of-sale for shops, bookstores and restaurants.** It's the first ready-made system in InnoForge.
+
+Everything runs locally: data lives in a SQLite file on the machine, so you don't need internet, a server, or a subscription.
+
+![POS payment](docs/pos-payment.png)
+
+## Features
+
+| | Shop / Supermarket | Bookstore | Restaurant / Café |
+|---|:-:|:-:|:-:|
+| Fast sales screen, barcode scanner support (`3*barcode` for qty) | ✅ | ✅ | ✅ |
+| Categories, products, cost & price | ✅ | ✅ | ✅ |
+| Stock tracking, purchases, count adjustments, low-stock list | ✅ | ✅ | optional |
+| ISBN, author, publisher fields | | ✅ | |
+| Held / parked carts | ✅ | ✅ | |
+| Tables, dine-in / takeaway / delivery | | | ✅ |
+| Kitchen tickets (only new items are sent) | | | ✅ |
+| Service charge on dine-in | | | ✅ |
+
+**Shared core**
+
+- Payments: cash, card, and wallet, with split payments and automatic change.
+- Discounts per line or on the whole invoice (amount or %).
+- Tax, either inclusive or added on top.
+- 58 / 80 mm thermal receipts, with optional silent printing and a separate kitchen printer.
+- Shifts: opening float, expected vs. counted cash, and a printable Z-report.
+- Returns (partial or full) that restock items and refund proportionally.
+- Reports: sales, net, profit, and breakdowns by payment method, day, hour, category, product, cashier and order type.
+- Users with PIN login and **Admin / Cashier** roles.
+- Arabic (RTL) and English UI.
+- One-click backup & restore of the database file.
+
+| Restaurant | Reports | Receipt |
+|---|---|---|
+| ![](docs/restaurant.png) | ![](docs/reports.png) | ![](docs/receipt.png) |
+
+## Run it
+
+Requires Node.js 22+.
+
+```bash
+cd apps/pos
+npm install
+npm start          # build the UI and open the app
+npm run dev        # hot-reload development
+npm test           # business-logic tests
+```
+
+### Build an installer
+
+```bash
+npm run dist:win     # Windows installer + portable .exe
+npm run dist:mac     # macOS .dmg
+npm run dist:linux   # AppImage + .deb
+```
+
+Output goes to `release/`. Build each platform on that OS, or use CI.
+
+## How it's built — understand what's inside
+
+```
+apps/pos
+├── electron/
+│   ├── main.cjs            # window, IPC router, printing, backup/restore
+│   ├── preload.cjs         # the only bridge the UI can use (contextIsolation on)
+│   ├── db.cjs              # SQLite schema + migrations (node:sqlite, no native modules)
+│   └── services/
+│       ├── index.cjs       # all business rules: auth, catalog, orders, shifts, reports
+│       └── totals.cjs      # pure pricing math (discount → service → tax)
+├── src/                    # React UI (Vite)
+│   ├── pages/              # Setup, Login, Pos, Orders, Products, Shift, Reports, Settings
+│   ├── lib/receipt.js      # receipt / kitchen / shift-report HTML for the printer
+│   └── i18n/               # ar.js / en.js
+└── test/                   # node:test suites for the services
+```
+
+Key design decisions:
+
+- **Money is stored as integers** (piasters/cents), never floats.
+- **The main process is authoritative.** The UI sends product IDs and quantities. Prices, tax, stock checks and permissions are all enforced in `services/index.cjs`, so the UI can't be used to tamper with them.
+- **One `orders` table for everything.** An order is `open` (parked cart or restaurant table) or `completed` (paid, gets a sequential invoice number). That's why held carts, tables and kitchen tickets share one code path.
+- **Migrations are append-only** (`db.cjs`), tracked with `PRAGMA user_version`.
+- Data file location is shown in **Settings → Data**. Set `INNOFORGE_POS_DATA_DIR` to override it (e.g. for a portable USB install).
+
+---
+
+<div dir="rtl">
+
+## بالعربي
+
+**InnoForge POS** سيستم كاشير بيشتغل على الكمبيوتر **من غير إنترنت**. ينفع للمحلات والسوبر ماركت، وللمكتبات (ISBN واسم المؤلف)، وللمطاعم والكافيهات (طاولات، وطلبات مطبخ، وصالة وتيك أواي ودليفري، ونسبة خدمة).
+
+- كل البيانات بتتحفظ على الجهاز في ملف واحد، وتقدر تاخد منه نسخة احتياطية بضغطة من الإعدادات.
+- فيه ورديات بتقفلها في آخر اليوم، وبتشوف فيها النقدية المتوقعة جنب النقدية الفعلية.
+- فيه مرتجعات، وتقارير مبيعات وأرباح، وطباعة إيصالات على طابعات حرارية مقاس 58 أو 80 مم.
+- فيه صلاحيات للمدير والكاشير، والدخول برقم سري.
+
+**التشغيل:**
+
+</div>
+
+```bash
+cd apps/pos && npm install && npm start
+```

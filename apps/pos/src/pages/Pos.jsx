@@ -1,0 +1,524 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../lib/api.js';
+import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
+import { kitchenHtml, receiptHtml } from '../lib/receipt.js';
+import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
+
+const emptyCart = (orderType) => ({
+  id: null, order_type: orderType, table_id: null, table_name: '', items: [], discount: 0,
+  customer_name: '', customer_phone: '', customer_address: '', note: '',
+});
+
+// Converts a stored open order back into an editable cart.
+const cartFromOrder = (o) => ({
+  id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '',
+  discount: o.discount, customer_name: o.customer_name, customer_phone: o.customer_phone,
+  customer_address: o.customer_address, note: o.note,
+  items: o.items.map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, unit_price: i.unit_price, qty: i.qty, discount: i.discount, note: i.note, kitchen_sent: i.kitchen_sent })),
+});
+
+export default function Pos() {
+  const app = useApp();
+  const { settings, shift, t, tErr, notify, printDoc, lang } = app;
+  const restaurant = settings.business_type === 'restaurant';
+  const defaultType = restaurant ? 'takeaway' : 'sale';
+
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [categoryId, setCategoryId] = useState(null);
+  const [search, setSearch] = useState('');
+  const [cart, setCart] = useState(() => emptyCart(defaultType));
+  const [quote, setQuote] = useState(null);
+  const [modal, setModal] = useState(null); // {kind, ...}
+  const searchRef = useRef(null);
+  const m = (v) => formatMoney(v, settings);
+
+  const focusSearch = useCallback(() => setTimeout(() => searchRef.current?.focus(), 0), []);
+
+  useEffect(() => { api.categories.list().then(setCategories); }, []);
+  useEffect(() => {
+    const h = setTimeout(() => api.products.list({ search, categoryId }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
+    return () => clearTimeout(h);
+  }, [search, categoryId, notify, tErr]);
+
+  // Totals always come from the main process so tax/service rules live in one place.
+  useEffect(() => {
+    if (!cart.items.length) { setQuote(null); return; }
+    let live = true;
+    api.orders.quote(cart).then((q) => live && setQuote(q)).catch((e) => notify(tErr(e), 'error'));
+    return () => { live = false; };
+  }, [cart, notify, tErr]);
+
+  const addProduct = useCallback((p, qty = 1) => {
+    setCart((c) => {
+      const idx = c.items.findIndex((i) => i.product_id === p.id && !i.note && !i.discount);
+      const items = [...c.items];
+      if (idx >= 0) items[idx] = { ...items[idx], qty: items[idx].qty + qty };
+      else items.push({ product_id: p.id, name: p.name, unit_price: p.price, qty, discount: 0, note: '', kitchen_sent: 0 });
+      return { ...c, items };
+    });
+  }, []);
+
+  async function onSearchEnter() {
+    const q = search.trim();
+    if (!q) return;
+    // Barcode scanners type the code and press Enter; support "3*code" for quantity.
+    const [, qtyStr, code] = q.match(/^(\d+(?:\.\d+)?)\*(.+)$/) || [null, null, q];
+    const byCode = await api.products.byBarcode(code);
+    if (byCode) {
+      addProduct(byCode, qtyStr ? Number(qtyStr) : 1);
+      setSearch('');
+    } else if (products.length === 1) {
+      addProduct(products[0]);
+      setSearch('');
+    } else {
+      notify(t('pos.notFound'), 'error');
+    }
+  }
+
+  const reset = useCallback(() => { setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch]);
+
+  async function saveOpen() {
+    const saved = await api.orders.saveOpen(cart);
+    setCart(cartFromOrder(saved));
+    return saved;
+  }
+
+  async function run(fn) {
+    try { return await fn(); } catch (err) { notify(tErr(err), 'error'); return undefined; }
+  }
+
+  const holdOrSave = () => run(async () => {
+    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    await saveOpen();
+    notify(t('pos.orderSaved'));
+    reset();
+  });
+
+  const sendKitchen = () => run(async () => {
+    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    const saved = await saveOpen();
+    const { order, items } = await api.orders.sendToKitchen(saved.id);
+    setCart(cartFromOrder(order));
+    if (!items.length) return notify(t('pos.nothingNew'));
+    if (await printDoc(kitchenHtml(order, items, settings, t, lang), settings.kitchen_printer_name || settings.printer_name)) {
+      notify(t('pos.kitchenSent'));
+    }
+  });
+
+  const openPay = () => {
+    if (!cart.items.length || !quote) return;
+    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    setModal({ kind: 'pay' });
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (modal) return;
+      if (e.key === 'F2') { e.preventDefault(); focusSearch(); }
+      if (e.key === 'F9') { e.preventDefault(); openPay(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  if (!shift) return <NoShift />;
+
+  const setType = (order_type) => {
+    setCart((c) => ({ ...c, order_type, table_id: order_type === 'dine_in' ? c.table_id : null, table_name: order_type === 'dine_in' ? c.table_name : '' }));
+    if (order_type === 'dine_in' && !cart.table_id) setModal({ kind: 'tables' });
+  };
+
+  return (
+    <div className="pos">
+      <section className="catalog">
+        <div className="pos-search">
+          <input
+            ref={searchRef}
+            autoFocus
+            placeholder={t('pos.scan')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onSearchEnter()}
+          />
+          {!restaurant && <button onClick={() => setModal({ kind: 'held' })}>⏸ {t('pos.held')}</button>}
+          {restaurant && <button onClick={() => setModal({ kind: 'tables' })}>🍽 {t('nav.tables')}</button>}
+          {restaurant && <button onClick={() => setModal({ kind: 'held' })}>📋 {t('orders.open')}</button>}
+        </div>
+        <div className="chips">
+          <button className={!categoryId ? 'on' : ''} onClick={() => setCategoryId(null)}>{t('pos.allCategories')}</button>
+          {categories.map((c) => (
+            <button key={c.id} className={categoryId === c.id ? 'on' : ''} style={{ '--chip': c.color }} onClick={() => setCategoryId(c.id)}>{c.name}</button>
+          ))}
+        </div>
+        <div className="product-grid">
+          {products.map((p) => (
+            <button key={p.id} className="product" style={{ '--chip': p.category_color || '#94a3b8' }} onClick={() => { addProduct(p); focusSearch(); }}>
+              <span className="p-name">{p.name}</span>
+              {p.author && <span className="p-sub">{p.author}</span>}
+              <span className="p-price">{m(p.price)}</span>
+              {p.track_stock ? <span className={`p-stock ${p.stock <= p.min_stock ? 'low' : ''}`}>{p.stock > 0 ? formatQty(p.stock) : t('pos.outOfStock')}</span> : null}
+            </button>
+          ))}
+          {!products.length && <Empty>{t('common.none')}</Empty>}
+        </div>
+      </section>
+
+      <section className="cart">
+        {restaurant && (
+          <div className="seg full">
+            {['dine_in', 'takeaway', 'delivery'].map((ty) => (
+              <button key={ty} className={cart.order_type === ty ? 'on' : ''} onClick={() => setType(ty)}>{t(`order.${ty}`)}</button>
+            ))}
+          </div>
+        )}
+        <div className="cart-head">
+          <b>{t('pos.cart')}{cart.id ? ` #${cart.id}` : ''}</b>
+          {cart.order_type === 'dine_in' && (
+            <button className="ghost" onClick={() => setModal({ kind: 'tables' })}>
+              {cart.table_id ? `${t('pos.table')} ${cart.table_name}` : t('pos.chooseTable')}
+            </button>
+          )}
+          <button className="ghost" onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
+        </div>
+
+        <div className="cart-lines">
+          {!cart.items.length && <Empty>{t('pos.empty')}</Empty>}
+          {cart.items.map((it, idx) => {
+            const ql = quote?.lines?.[idx];
+            return (
+              <div key={idx} className="line" onClick={() => setModal({ kind: 'line', idx })}>
+                <div className="line-main">
+                  <span className="line-name">{it.name}</span>
+                  {it.note && <small className="muted">{it.note}</small>}
+                  {it.kitchen_sent > 0 && <small className="sent">✓ {formatQty(it.kitchen_sent)}</small>}
+                </div>
+                <div className="qty" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x)) }))}>−</button>
+                  <span>{formatQty(it.qty)}</span>
+                  <button onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: x.qty + 1 } : x)) }))}>+</button>
+                </div>
+                <span className="line-total">{m(ql ? ql.line_total : it.unit_price * it.qty)}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="totals">
+          <Row label={t('pos.subtotal')} value={m(quote?.subtotal)} />
+          <Row label={t('pos.discount')} value={quote?.discount ? '− ' + m(quote.discount) : m(0)} onClick={() => cart.items.length && setModal({ kind: 'discount' })} link />
+          {quote?.service ? <Row label={`${t('pos.service')} (${settings.service_rate}%)`} value={m(quote.service)} /> : null}
+          {settings.tax_rate ? <Row label={`${t('pos.tax')} (${settings.tax_rate}%)`} value={m(quote?.tax)} /> : null}
+          <Row label={t('pos.total')} value={m(quote?.total)} big />
+        </div>
+
+        <div className={`cart-actions ${restaurant ? 'three' : ''}`}>
+          {restaurant && <button onClick={sendKitchen} disabled={!cart.items.length}>🔔 {t('pos.kitchen')}</button>}
+          <button onClick={holdOrSave} disabled={!cart.items.length}>{restaurant ? t('pos.saveOrder') : `⏸ ${t('pos.hold')}`}</button>
+          <button
+            className="danger-ghost"
+            onClick={() => run(async () => {
+              if (cart.id) {
+                if (!window.confirm(t('common.areYouSure'))) return;
+                await api.orders.voidOpen(cart.id);
+              }
+              reset();
+            })}
+          >
+            {cart.id ? t('pos.voidOrder') : t('pos.clear')}
+          </button>
+          <button className="primary pay" onClick={openPay} disabled={!cart.items.length}>{t('pos.pay')}</button>
+        </div>
+      </section>
+
+      {modal?.kind === 'line' && (
+        <LineModal
+          item={cart.items[modal.idx]}
+          onClose={() => { setModal(null); focusSearch(); }}
+          onSave={(patch) => { setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === modal.idx ? { ...x, ...patch } : x)) })); setModal(null); focusSearch(); }}
+          onRemove={() => { setCart((c) => ({ ...c, items: c.items.filter((_, i) => i !== modal.idx) })); setModal(null); focusSearch(); }}
+        />
+      )}
+      {modal?.kind === 'discount' && (
+        <DiscountModal
+          subtotal={quote?.subtotal || 0}
+          current={cart.discount}
+          onClose={() => setModal(null)}
+          onSave={(discount) => { setCart((c) => ({ ...c, discount })); setModal(null); }}
+        />
+      )}
+      {modal?.kind === 'customer' && (
+        <CustomerModal cart={cart} onClose={() => setModal(null)} onSave={(patch) => { setCart((c) => ({ ...c, ...patch })); setModal(null); }} />
+      )}
+      {modal?.kind === 'tables' && (
+        <TablesModal
+          onClose={() => setModal(null)}
+          onPick={(table) => run(async () => {
+            if (table.order_id && table.order_id !== cart.id) {
+              setCart(cartFromOrder(await api.orders.get(table.order_id)));
+            } else {
+              setCart((c) => ({ ...c, order_type: 'dine_in', table_id: table.id, table_name: table.name }));
+            }
+            setModal(null);
+          })}
+        />
+      )}
+      {modal?.kind === 'held' && (
+        <HeldModal
+          onClose={() => setModal(null)}
+          onPick={(id) => run(async () => { setCart(cartFromOrder(await api.orders.get(id))); setModal(null); })}
+        />
+      )}
+      {modal?.kind === 'pay' && quote && (
+        <PayModal
+          total={quote.total}
+          onClose={() => { setModal(null); focusSearch(); }}
+          onPay={(payments, printReceipt) => run(async () => {
+            const order = await api.orders.checkout({ ...cart, payments });
+            setModal(null);
+            notify(t('pay.done', { n: order.invoice_no }));
+            if (printReceipt) await printDoc(receiptHtml(order, settings, t, lang));
+            reset();
+          })}
+        />
+      )}
+    </div>
+  );
+}
+
+function Row({ label, value, big, link, onClick }) {
+  return (
+    <div className={`trow ${big ? 'big' : ''} ${link ? 'link' : ''}`} onClick={onClick}>
+      <span>{label}</span><span>{value}</span>
+    </div>
+  );
+}
+
+function NoShift() {
+  const { t, tErr, notify, reloadShift, settings } = useApp();
+  const [cash, setCash] = useState('');
+  return (
+    <div className="center-screen inner">
+      <form
+        className="card narrow"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try { await api.shifts.open({ openingCash: toMinor(cash, settings.decimals) }); await reloadShift(); } catch (err) { notify(tErr(err), 'error'); }
+        }}
+      >
+        <h2>⏱ {t('shift.none')}</h2>
+        <p className="muted">{t('shift.openPrompt')}</p>
+        <Field label={t('shift.openingCash')}><input autoFocus inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="0" /></Field>
+        <button className="primary lg">{t('shift.open')}</button>
+      </form>
+    </div>
+  );
+}
+
+function LineModal({ item, onClose, onSave, onRemove }) {
+  const { t, settings } = useApp();
+  const [qty, setQty] = useState(String(item.qty));
+  const [discount, setDiscount] = useState(item.discount ? fromMinor(item.discount, settings.decimals) : '');
+  const [note, setNote] = useState(item.note);
+  const save = () => onSave({ qty: Math.max(0.001, Number(qty) || 1), discount: toMinor(discount, settings.decimals), note });
+  return (
+    <Modal
+      title={item.name}
+      onClose={onClose}
+      footer={<>
+        <button className="danger-ghost" onClick={onRemove}>{t('common.delete')}</button>
+        <span className="spacer" />
+        <button onClick={onClose}>{t('common.cancel')}</button>
+        <button className="primary" onClick={save}>{t('common.save')}</button>
+      </>}
+    >
+      <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid2">
+        <Field label={t('pos.qty')}><input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} onFocus={(e) => e.target.select()} /></Field>
+        <Field label={t('pos.lineDiscount')}><input inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" /></Field>
+        <div className="span2"><Field label={t('pos.note')}><input value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
+        <button hidden />
+      </form>
+    </Modal>
+  );
+}
+
+function DiscountModal({ subtotal, current, onClose, onSave }) {
+  const { t, settings } = useApp();
+  const [mode, setMode] = useState('amount');
+  const [value, setValue] = useState(current ? fromMinor(current, settings.decimals) : '');
+  const compute = () => (mode === 'percent' ? Math.round((subtotal * (Number(value) || 0)) / 100) : toMinor(value, settings.decimals));
+  return (
+    <Modal
+      title={t('pos.orderDiscount')}
+      onClose={onClose}
+      width={420}
+      footer={<>
+        <button onClick={() => onSave(0)}>{t('pos.clear')}</button>
+        <span className="spacer" />
+        <button className="primary" onClick={() => onSave(compute())}>{t('common.save')}</button>
+      </>}
+    >
+      <form onSubmit={(e) => { e.preventDefault(); onSave(compute()); }}>
+        <div className="seg full">
+          <button type="button" className={mode === 'amount' ? 'on' : ''} onClick={() => setMode('amount')}>{t('pos.discountAmount')}</button>
+          <button type="button" className={mode === 'percent' ? 'on' : ''} onClick={() => setMode('percent')}>{t('pos.discountPercent')}</button>
+        </div>
+        <input className="xl" autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
+        <p className="muted">= {formatMoney(compute(), settings)}</p>
+      </form>
+    </Modal>
+  );
+}
+
+function CustomerModal({ cart, onClose, onSave }) {
+  const { t } = useApp();
+  const [f, setF] = useState({ customer_name: cart.customer_name, customer_phone: cart.customer_phone, customer_address: cart.customer_address, note: cart.note });
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  return (
+    <Modal title={t('pos.customer')} onClose={onClose} footer={<><span className="spacer" /><button className="primary" onClick={() => onSave(f)}>{t('common.save')}</button></>}>
+      <div className="grid2">
+        <Field label={t('pos.customerName')}><input autoFocus value={f.customer_name} onChange={set('customer_name')} /></Field>
+        <Field label={t('pos.customerPhone')}><input value={f.customer_phone} onChange={set('customer_phone')} /></Field>
+        <div className="span2"><Field label={t('pos.customerAddress')}><input value={f.customer_address} onChange={set('customer_address')} /></Field></div>
+        <div className="span2"><Field label={t('pos.note')}><input value={f.note} onChange={set('note')} /></Field></div>
+      </div>
+    </Modal>
+  );
+}
+
+function TablesModal({ onClose, onPick }) {
+  const { t, settings } = useApp();
+  const [tables, setTables] = useState(null);
+  useEffect(() => { api.tables.list().then(setTables); }, []);
+  const areas = useMemo(() => [...new Set((tables || []).map((x) => x.area))], [tables]);
+  return (
+    <Modal title={t('pos.chooseTable')} onClose={onClose} width={760}>
+      {!tables ? t('common.loading') : !tables.length ? <Empty>{t('common.none')}</Empty> : areas.map((area) => (
+        <div key={area}>
+          {area && <h4>{area}</h4>}
+          <div className="table-grid">
+            {tables.filter((x) => x.area === area).map((x) => (
+              <button key={x.id} className={`table-tile ${x.order_id ? 'busy' : ''}`} onClick={() => onPick(x)}>
+                <b>{x.name}</b>
+                <small>{x.order_id ? formatMoney(x.order_total, settings) : t('pos.free')}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+function HeldModal({ onClose, onPick }) {
+  const { t, settings } = useApp();
+  const [list, setList] = useState(null);
+  useEffect(() => { api.orders.listOpen().then(setList); }, []);
+  return (
+    <Modal title={settings.business_type === 'restaurant' ? t('orders.open') : t('pos.held')} onClose={onClose} width={640}>
+      {!list ? t('common.loading') : !list.length ? <Empty>{t('common.none')}</Empty> : (
+        <table className="grid">
+          <tbody>
+            {list.map((o) => (
+              <tr key={o.id} className="clickable" onClick={() => onPick(o.id)}>
+                <td>#{o.id}</td>
+                <td>{t(`order.${o.order_type}`)}{o.table_name ? ` — ${t('pos.table')} ${o.table_name}` : ''}</td>
+                <td>{o.customer_name}</td>
+                <td>{o.item_count}</td>
+                <td className="muted">{o.created_at.slice(11, 16)}</td>
+                <td className="num">{formatMoney(o.total, settings)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}
+
+const METHODS = ['cash', 'card', 'wallet'];
+
+function PayModal({ total, onClose, onPay }) {
+  const { t, settings } = useApp();
+  const d = settings.decimals;
+  const [amounts, setAmounts] = useState({ cash: fromMinor(total, d), card: '', wallet: '' });
+  const [active, setActive] = useState('cash');
+  const [printReceipt, setPrintReceipt] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+
+  const paid = METHODS.reduce((s, k) => s + toMinor(amounts[k], d), 0);
+  const remaining = Math.max(0, total - paid);
+  const change = Math.max(0, paid - total);
+  const m = (v) => formatMoney(v, settings);
+
+  // Quick cash buttons: exact, then the next round banknotes above the total.
+  const unit = 10 ** d;
+  const quick = [...new Set([total, ...[5, 10, 20, 50, 100, 200, 500, 1000].map((n) => Math.ceil(total / (n * unit)) * n * unit)])]
+    .filter((v) => v >= total).sort((a, b) => a - b).slice(0, 5);
+
+  const select = (k) => {
+    setActive(k);
+    // Switching to card/wallet takes over the unpaid part; cash can then be typed for a split.
+    if (k !== 'cash' && !amounts[k]) {
+      const otherNonCash = METHODS.filter((x) => x !== k && x !== 'cash').reduce((s, x) => s + toMinor(amounts[x], d), 0);
+      setAmounts((a) => ({ ...a, cash: '', [k]: fromMinor(Math.max(0, total - otherNonCash), d) }));
+    }
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  async function submit() {
+    if (busy || paid < total) return;
+    setBusy(true);
+    await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt);
+    setBusy(false);
+  }
+
+  return (
+    <Modal
+      title={t('pay.title')}
+      onClose={onClose}
+      width={620}
+      footer={<>
+        <Toggle checked={printReceipt} onChange={setPrintReceipt} label={t('pay.printReceipt')} />
+        <span className="spacer" />
+        <button onClick={onClose}>{t('common.cancel')}</button>
+        <button className="primary lg" disabled={busy || paid < total} onClick={submit}>{t('pay.complete')}</button>
+      </>}
+    >
+      <div className="pay-due"><span>{t('pay.due')}</span><b>{m(total)}</b></div>
+      <div className="seg full">
+        {METHODS.map((k) => (
+          <button key={k} className={active === k ? 'on' : ''} onClick={() => select(k)}>
+            {t(`pay.${k}`)}{toMinor(amounts[k], d) ? ` · ${fromMinor(toMinor(amounts[k], d), d)}` : ''}
+          </button>
+        ))}
+      </div>
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <input
+          ref={inputRef}
+          className="xl"
+          autoFocus
+          onFocus={(e) => e.target.select()}
+          inputMode="decimal"
+          value={amounts[active]}
+          onChange={(e) => setAmounts((a) => ({ ...a, [active]: e.target.value }))}
+        />
+      </form>
+      {active === 'cash' && (
+        <div className="quick-cash">
+          {quick.map((v) => (
+            <button key={v} onClick={() => { setAmounts((a) => ({ ...a, cash: fromMinor(v, d) })); inputRef.current?.focus(); }}>
+              {v === total ? t('pay.exact') : fromMinor(v, d)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="pay-summary">
+        <div><span>{t('pay.paid')}</span><b>{m(paid)}</b></div>
+        <div className={remaining ? 'warn' : ''}><span>{t('pay.remaining')}</span><b>{m(remaining)}</b></div>
+        <div className={change ? 'good' : ''}><span>{t('pay.change')}</span><b>{m(change)}</b></div>
+      </div>
+    </Modal>
+  );
+}

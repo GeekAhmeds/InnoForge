@@ -60,6 +60,14 @@ InnoForge is different:
 
 ---
 
+## Ready-made systems
+
+| System | Description |
+|---|---|
+| [🧾 InnoForge POS](./apps/pos) | Offline desktop point-of-sale for shops, bookstores and restaurants (Arabic / English). |
+
+---
+
 ## Roadmap
 
 - [ ] Prompt → application scaffolding engine
