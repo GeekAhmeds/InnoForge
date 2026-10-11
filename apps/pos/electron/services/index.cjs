@@ -98,7 +98,13 @@ function dateRange(from, to) {
  * Builds the service layer. `session` holds the logged-in user for this
  * window; every method that changes data checks it.
  */
-function createServices(db, { entitlements = () => FULL } = {}) {
+// Settings that belong to one computer rather than the business: with several devices on
+// one database each keeps its own printers, drawer, scale, selling warehouse, screens, language.
+const DEVICE_KEYS = ['printer_name', 'kitchen_printer_name', 'a4_printer_name', 'label_printer_name', 'silent_print', 'paper_width', 'label_size',
+  'invoice_format', 'cash_drawer', 'drawer_pin', 'scale_serial', 'scale_port', 'scale_baud', 'scale_request', 'customer_display', 'sale_warehouse_id',
+  'sell_screens', 'language'];
+
+function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = {}) {
   const session = { user: null };
 
   // What this copy's license allows (edition features, add-ons, limits; 0 = unlimited).
@@ -165,11 +171,15 @@ function createServices(db, { entitlements = () => FULL } = {}) {
   // ---------- settings ----------
   function getSettings() {
     const out = { ...DEFAULT_SETTINGS };
-    for (const { key, value } of db.prepare('SELECT key, value FROM settings').all()) {
-      if (!(key in DEFAULT_SETTINGS)) continue;
+    const put = ({ key, value }) => {
+      if (!(key in DEFAULT_SETTINGS)) return;
       const def = DEFAULT_SETTINGS[key];
       out[key] = typeof def === 'boolean' ? value === '1' : typeof def === 'number' ? Number(value) : value;
-    }
+    };
+    db.prepare('SELECT key, value FROM settings').all().forEach(put);
+    // This computer's own values win over the shared ones.
+    db.prepare('SELECT key, value FROM device_settings WHERE device_id = ?').all(deviceId).forEach(put);
+    out.device_id = deviceId;
     return out;
   }
 
@@ -177,11 +187,13 @@ function createServices(db, { entitlements = () => FULL } = {}) {
     const stmt = db.prepare(
       'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     );
+    const devStmt = db.prepare('INSERT INTO device_settings (device_id, key, value) VALUES (?, ?, ?) ON CONFLICT(device_id, key) DO UPDATE SET value = excluded.value');
     for (const [key, raw] of Object.entries(patch || {})) {
       if (!(key in DEFAULT_SETTINGS) || key === 'setup_done') continue;
       const def = DEFAULT_SETTINGS[key];
       const value = typeof def === 'boolean' ? (raw ? '1' : '0') : typeof def === 'number' ? String(num(raw, def)) : str(raw);
-      stmt.run(key, value);
+      if (DEVICE_KEYS.includes(key)) devStmt.run(deviceId, key, value);
+      else stmt.run(key, value);
     }
   }
 
@@ -706,8 +718,9 @@ function createServices(db, { entitlements = () => FULL } = {}) {
   };
 
   // ---------- shifts ----------
+  // Every computer has its own drawer, so its own shift.
   function currentShift() {
-    return plain(db.prepare('SELECT * FROM shifts WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1').get()) || null;
+    return plain(db.prepare('SELECT * FROM shifts WHERE closed_at IS NULL AND device_id = ? ORDER BY id DESC LIMIT 1').get(deviceId)) || null;
   }
 
   function shiftSummary(shiftId) {
@@ -738,7 +751,7 @@ function createServices(db, { entitlements = () => FULL } = {}) {
     open({ openingCash = 0 } = {}) {
       const u = requireUser();
       if (currentShift()) throw new PosError('SHIFT_ALREADY_OPEN');
-      const id = Number(db.prepare('INSERT INTO shifts (user_id, opening_cash) VALUES (?, ?)').run(u.id, Math.max(0, int(openingCash))).lastInsertRowid);
+      const id = Number(db.prepare('INSERT INTO shifts (user_id, opening_cash, device_id) VALUES (?, ?, ?)').run(u.id, Math.max(0, int(openingCash)), deviceId).lastInsertRowid);
       audit('shift_open', { entity: 'shift', entityId: id, details: { opening_cash: Math.max(0, int(openingCash)) } });
       return plain(db.prepare('SELECT * FROM shifts WHERE id = ?').get(id));
     },
@@ -1175,8 +1188,8 @@ function createServices(db, { entitlements = () => FULL } = {}) {
 
         const orderId = persistOrder(cart, priced, u, 'completed');
         const invoiceNo = (db.prepare('SELECT MAX(invoice_no) AS n FROM orders').get().n || 0) + 1;
-        db.prepare("UPDATE orders SET status = 'completed', invoice_no = ?, shift_id = ?, user_id = ?, paid = ?, change_due = ?, credit = ?, completed_at = datetime('now', 'localtime') WHERE id = ?")
-          .run(invoiceNo, shift.id, u.id, tendered, change, credit, orderId);
+        db.prepare("UPDATE orders SET status = 'completed', invoice_no = ?, shift_id = ?, user_id = ?, paid = ?, change_due = ?, credit = ?, device_id = ?, completed_at = datetime('now', 'localtime') WHERE id = ?")
+          .run(invoiceNo, shift.id, u.id, tendered, change, credit, deviceId, orderId);
         if (credit > 0) {
           // When the unpaid part is due: an explicit date, else the customer's terms, else the general setting.
           const due = /^\d{4}-\d{2}-\d{2}$/.test(str(cart.due_date)) ? str(cart.due_date) : addDays(new Date().toLocaleDateString('en-CA'), termsOf(customer));
@@ -3508,10 +3521,39 @@ function createServices(db, { entitlements = () => FULL } = {}) {
     },
   };
 
+  // ---------- devices (several computers on one database) ----------
+  const devices = {
+    list() {
+      requirePerm('settings');
+      return plainAll(db.prepare("SELECT d.*, (SELECT COUNT(*) FROM shifts s WHERE s.device_id = d.id AND s.closed_at IS NULL) AS open_shifts FROM devices d ORDER BY d.kind = 'main' DESC, d.created_at")).map((d) => ({ ...d, active: !!d.active, me: d.id === deviceId }));
+    },
+    save({ id, name, active = true } = {}) {
+      requirePerm('settings');
+      const dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(str(id));
+      if (!dev) throw new PosError('NOT_FOUND');
+      if (active && !dev.active) checkLimit('devices', db.prepare('SELECT COUNT(*) AS n FROM devices WHERE active = 1').get().n);
+      db.prepare('UPDATE devices SET name = ?, active = ? WHERE id = ?').run(str(name), dev.kind === 'main' || active ? 1 : 0, dev.id);
+      audit('device_update', { entity: 'device', details: { name: str(name), active: !!active } });
+      return true;
+    },
+  };
+  /** Called by the main computer's network server for every request from another computer. */
+  function admitDevice(id, name) {
+    const dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
+    if (dev && !dev.active) throw new PosError('DEVICE_BLOCKED');
+    if (!dev) {
+      checkLimit('devices', db.prepare('SELECT COUNT(*) AS n FROM devices WHERE active = 1').get().n);
+      db.prepare("INSERT INTO devices (id, name, kind, last_seen) VALUES (?, ?, 'client', datetime('now', 'localtime'))").run(id, str(name));
+    } else {
+      db.prepare("UPDATE devices SET last_seen = datetime('now', 'localtime'), name = CASE WHEN name = '' THEN ? ELSE name END WHERE id = ?").run(str(name), id);
+    }
+  }
+
   const api = {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
     auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
     license: { get: () => toJSON(entitlements()), has, requireFeature },
+    devices, admitDevice, deviceId,
   };
   // Whole namespaces that belong to a licensed feature. Read-only methods other screens rely
   // on stay open, so data made under a bigger license can still be seen.
@@ -3531,4 +3573,4 @@ function createServices(db, { entitlements = () => FULL } = {}) {
   return api;
 }
 
-module.exports = { createServices, PosError, DEFAULT_SETTINGS, hashPin, verifyPin };
+module.exports = { createServices, PosError, DEFAULT_SETTINGS, DEVICE_KEYS, hashPin, verifyPin };

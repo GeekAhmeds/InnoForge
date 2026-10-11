@@ -8,7 +8,7 @@ const FEATURES = Object.keys(DATA.features);
 const EDITIONS = Object.keys(DATA.editions);
 const LIMITS = Object.keys(DATA.limits);
 
-const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addons: [], limits: { users: 0, warehouses: 0 } });
+const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addons: [], limits: { users: 0, warehouses: 0, devices: 0 } });
 
 /**
  * Turns a license payload into what it allows. Keys issued before editions existed carry
@@ -17,7 +17,7 @@ const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addon
 function entitlements(payload) {
   if (!payload || !payload.edition) return FULL;
   const ed = DATA.editions[payload.edition];
-  if (!ed) return { edition: payload.edition, features: new Set(), addons: [], limits: { users: 1, warehouses: 1 } };
+  if (!ed) return { edition: payload.edition, features: new Set(), addons: [], limits: { users: 1, warehouses: 1, devices: 1 } };
   const base = ed.features === '*' ? FEATURES : ed.features;
   const addons = (Array.isArray(payload.addons) ? payload.addons : []).filter((f) => FEATURES.includes(f));
   const limits = {};

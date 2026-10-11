@@ -81,6 +81,10 @@
     "warehouses": {
       "ar": "عدد المخازن",
       "en": "Warehouses"
+    },
+    "devices": {
+      "ar": "عدد الأجهزة على نفس البيانات",
+      "en": "Computers on the same data"
     }
   },
   "editions": {
@@ -90,7 +94,8 @@
       "features": [],
       "limits": {
         "users": 2,
-        "warehouses": 1
+        "warehouses": 1,
+        "devices": 1
       }
     },
     "market": {
@@ -108,7 +113,8 @@
       ],
       "limits": {
         "users": 5,
-        "warehouses": 1
+        "warehouses": 1,
+        "devices": 3
       }
     },
     "restaurant": {
@@ -125,7 +131,8 @@
       ],
       "limits": {
         "users": 10,
-        "warehouses": 1
+        "warehouses": 1,
+        "devices": 5
       }
     },
     "trading": {
@@ -144,7 +151,8 @@
       ],
       "limits": {
         "users": 10,
-        "warehouses": 1
+        "warehouses": 1,
+        "devices": 5
       }
     },
     "full": {
@@ -153,7 +161,8 @@
       "features": "*",
       "limits": {
         "users": 0,
-        "warehouses": 0
+        "warehouses": 0,
+        "devices": 0
       }
     }
   },

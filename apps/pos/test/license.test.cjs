@@ -59,7 +59,7 @@ test('editions: old keys stay full, editions bring their features and limits, ad
   assert.equal(entitlements(old.payload).features.has('employees'), true);
   const basic = entitlements({ edition: 'basic' });
   assert.equal(basic.features.size, 0);
-  assert.deepEqual(basic.limits, { users: 2, warehouses: 1 });
+  assert.deepEqual(basic.limits, { users: 2, warehouses: 1, devices: 1 });
   const rest = entitlements({ edition: 'restaurant', addons: ['employees', 'nonsense'], limits: { users: 4 } });
   assert.equal(rest.features.has('restaurant'), true);
   assert.equal(rest.features.has('employees'), true);

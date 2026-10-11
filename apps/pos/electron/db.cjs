@@ -865,6 +865,28 @@ const MIGRATIONS = [
   );
   CREATE INDEX idx_gift_moves_card ON gift_card_moves(card_id);
   `,
+  // v17: several computers on one database (a main computer serves the others over the
+  // network): known devices, settings that belong to one device (printers, drawer, scale,
+  // selling warehouse…), and the device of each shift and invoice.
+  `
+  CREATE TABLE devices (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL DEFAULT 'client', -- main | client
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    last_seen  TEXT
+  );
+  INSERT INTO devices (id, name, kind) VALUES ('local', '', 'main');
+  CREATE TABLE device_settings (
+    device_id TEXT NOT NULL,
+    key       TEXT NOT NULL,
+    value     TEXT NOT NULL,
+    PRIMARY KEY (device_id, key)
+  );
+  ALTER TABLE shifts ADD COLUMN device_id TEXT NOT NULL DEFAULT 'local';
+  ALTER TABLE orders ADD COLUMN device_id TEXT NOT NULL DEFAULT 'local';
+  `,
 ];
 
 function openDatabase(file) {
