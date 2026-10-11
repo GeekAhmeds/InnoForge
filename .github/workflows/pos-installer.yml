@@ -1,6 +1,6 @@
 name: POS installer
 
-# Every push builds a signed Windows installer + the update files as artifacts.
+# Every push builds signed Windows and Linux installers + the update files as artifacts.
 # Running it manually with "publish" ticked also uploads the update to the server,
 # so every installed copy picks it up automatically.
 #
@@ -25,8 +25,18 @@ on:
       - '.github/workflows/pos-installer.yml'
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+            label: Windows
+          - os: ubuntu-latest
+            target: linux
+            label: Linux
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: apps/pos
@@ -47,18 +57,21 @@ jobs:
         run: echo "POS_VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}" >> "$GITHUB_ENV"
 
       - name: Build signed installer
-        run: npm run dist:win
+        run: npm run dist:${{ matrix.target }}
         env:
           POS_SIGNING_KEY: ${{ secrets.POS_SIGNING_KEY }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: InnoForge-POS-Setup-${{ env.POS_VERSION }}
-          path: apps/pos/release/*.exe
+          name: InnoForge-POS-${{ matrix.label }}-${{ env.POS_VERSION }}
+          path: |
+            apps/pos/release/*.exe
+            apps/pos/release/*.AppImage
+            apps/pos/release/*.deb
           retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
-          name: update-server-files-${{ env.POS_VERSION }}
+          name: update-server-files-${{ matrix.label }}-${{ env.POS_VERSION }}
           path: apps/pos/release/update/
           retention-days: 30
 

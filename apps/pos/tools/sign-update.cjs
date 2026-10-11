@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// Signs an update so installed apps accept it. Reads latest.yml from the release
-// folder and writes "<installer>.sig" next to the installer.
+// Signs an update so installed apps accept it. Reads every latest*.yml in the release
+// folder (latest.yml = Windows, latest-linux.yml = Linux AppImage) and writes
+// "<installer>.sig" next to each installer.
 //
 //   node tools/sign-update.cjs release/update --key ~/.innoforge/pos-license-private.pem
 //   (or set POS_SIGNING_KEY to the PEM text, as in CI secrets)
@@ -11,23 +12,28 @@ const os = require('node:os');
 const path = require('node:path');
 const { updateMessage } = require('../electron/updater.cjs');
 
-function readLatest(dir) {
-  const yml = fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8');
+function readLatest(dir, file = 'latest.yml') {
+  const yml = fs.readFileSync(path.join(dir, file), 'utf8');
   const pick = (re) => (yml.match(re) || [])[1]?.trim().replace(/^['"]|['"]$/g, '');
   // latest.yml lists the installer under "files"; the first url/sha512 pair is the installer.
   const version = pick(/^version:\s*(.+)$/m);
   const url = pick(/^\s*-\s*url:\s*(.+)$/m);
   const sha512 = pick(/^\s+sha512:\s*(.+)$/m);
-  if (!version || !url || !sha512) throw new Error('latest.yml is missing version/url/sha512');
+  if (!version || !url || !sha512) throw new Error(`${file} is missing version/url/sha512`);
   return { version, url, sha512 };
 }
 
 function signUpdate(dir, privateKeyPem) {
-  const { version, url, sha512 } = readLatest(dir);
-  const sig = crypto.sign(null, Buffer.from(updateMessage(version, sha512)), crypto.createPrivateKey(privateKeyPem)).toString('base64');
-  const out = path.join(dir, `${url}.sig`);
-  fs.writeFileSync(out, sig + '\n');
-  return { version, file: out };
+  const feeds = fs.readdirSync(dir).filter((f) => /^latest.*\.yml$/.test(f));
+  if (!feeds.length) throw new Error(`No latest*.yml in ${dir}`);
+  const signed = feeds.map((feed) => {
+    const { version, url, sha512 } = readLatest(dir, feed);
+    const sig = crypto.sign(null, Buffer.from(updateMessage(version, sha512)), crypto.createPrivateKey(privateKeyPem)).toString('base64');
+    const out = path.join(dir, `${url}.sig`);
+    fs.writeFileSync(out, sig + '\n');
+    return { version, file: out };
+  });
+  return { version: signed[0].version, file: signed[0].file, files: signed.map((s) => s.file) };
 }
 
 function loadKey(explicit) {
@@ -47,6 +53,6 @@ if (require.main === module) {
     console.error('No signing key: pass --key <private.pem> or set POS_SIGNING_KEY.');
     process.exit(1);
   }
-  const { version, file } = signUpdate(dir, key);
-  console.log(`Signed v${version}: ${file}`);
+  const { version, files } = signUpdate(dir, key);
+  console.log(`Signed v${version}:\n  ${files.join('\n  ')}`);
 }

@@ -118,12 +118,12 @@ execSync('npm install --omit=dev --no-package-lock --no-audit --no-fund', { cwd:
 run(`npx electron-builder ${platform} ${dirOnly ? '--dir' : ''} --publish never --config.directories.app=stage`);
 
 // Everything the update server needs, in one folder: upload its contents as-is.
-if (!dirOnly && fs.existsSync(path.join(ROOT, 'release', 'latest.yml'))) {
+if (!dirOnly && fs.readdirSync(path.join(ROOT, 'release')).some((f) => /^latest.*\.yml$/.test(f))) {
   const out = path.join(ROOT, 'release', 'update');
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out);
   for (const f of fs.readdirSync(path.join(ROOT, 'release'))) {
-    if (f === 'latest.yml' || /\.(exe|blockmap)$/.test(f)) fs.copyFileSync(path.join(ROOT, 'release', f), path.join(out, f));
+    if (/^latest.*\.yml$/.test(f) || /\.(exe|blockmap|AppImage|deb)$/.test(f)) fs.copyFileSync(path.join(ROOT, 'release', f), path.join(out, f));
   }
   const key = loadKey();
   if (key) console.log(`Signed update v${signUpdate(out, key).version}`);

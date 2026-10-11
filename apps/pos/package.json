@@ -52,7 +52,11 @@
         "deb"
       ],
       "category": "Office",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "InnoForge-POS-${version}-${arch}.${ext}",
+      "executableName": "innoforge-pos",
+      "synopsis": "Offline point of sale",
+      "maintainer": "Inno Source <info@innovationsrc.com>"
     },
     "nsis": {
       "oneClick": false,
@@ -84,7 +88,20 @@
         "url": "https://0x01source.com:7788/srv/InnoForge/PoS/",
         "channel": "latest"
       }
-    ]
+    ],
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    }
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.2",
