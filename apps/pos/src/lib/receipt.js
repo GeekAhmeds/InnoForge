@@ -38,6 +38,7 @@ export function receiptHtml(order, settings, t, lang) {
   const rows = order.items.map((i) => `
     <tr><td>${esc(i.name)}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>
     ${i.qty !== 1 ? `<tr><td class="note" colspan="3">${formatQty(i.qty)} × ${m(i.unit_price)}${i.discount ? ` − ${m(i.discount)}` : ''}</td></tr>` : ''}
+    ${i.modifiers?.length ? `<tr><td class="note" colspan="3">+ ${i.modifiers.map((x) => esc(x.name)).join('، ')}</td></tr>` : ''}
     ${i.note ? `<tr><td class="note" colspan="3">${esc(i.note)}</td></tr>` : ''}
     ${i.promo_name ? `<tr><td class="note" colspan="3">🏷 ${esc(i.promo_name)} −${m(i.promo_discount)}</td></tr>` : ''}`).join('');
   const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
@@ -54,6 +55,7 @@ export function receiptHtml(order, settings, t, lang) {
     ${order.order_type !== 'sale' ? line(t('orders.type'), t(`order.${order.order_type}`) + (order.table_name ? ` — ${t('pos.table')} ${esc(order.table_name)}` : '')) : ''}
   </table>
   ${customer ? `<div class="muted">${t('pos.customer')}: ${customer}</div>` : ''}
+  ${order.order_type === 'delivery' && (order.zone_name || order.driver_name) ? `<div class="muted">🛵 ${esc([order.zone_name, order.driver_name].filter(Boolean).join(' — '))}</div>` : ''}
   <hr>
   <table>
     <tr><th>${t('receipt.item')}</th><th class="n">${t('receipt.qty')}</th><th class="n">${t('receipt.amount')}</th></tr>
@@ -64,6 +66,7 @@ export function receiptHtml(order, settings, t, lang) {
     ${line(t('pos.subtotal'), m(order.subtotal))}
     ${order.discount ? line(t('pos.discount'), '− ' + m(order.discount)) : ''}
     ${order.service ? line(t('pos.service'), m(order.service)) : ''}
+    ${order.delivery_fee ? line(t('delivery.fee'), m(order.delivery_fee)) : ''}
     ${order.tax ? line(settings.prices_include_tax ? `${t('pos.tax')} (${t('receipt.taxIncluded')})` : t('pos.tax'), m(order.tax)) : ''}
     ${line(t('pos.total'), m(order.total), 'big')}
     ${pays}
@@ -84,7 +87,7 @@ export function receiptHtml(order, settings, t, lang) {
 export function checkHtml(order, settings, t, lang) {
   const m = (v) => formatMoney(v, settings);
   const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
-  const rows = order.items.map((i) => `<tr><td>${esc(i.name)}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>`).join('');
+  const rows = order.items.map((i) => `<tr><td>${esc(i.name)}${i.modifiers?.length ? `<div class="note">+ ${i.modifiers.map((x) => esc(x.name)).join('، ')}</div>` : ''}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>`).join('');
   return page(settings, lang, `${header(settings, t)}
   <hr><div class="c"><b>${t('floor.checkTitle')}</b></div>
   <div class="c">${order.table_name ? `${t('pos.table')} <b>${esc(order.table_name)}</b>` : t(`order.${order.order_type}`)}${order.guests ? ` · 👥 ${order.guests}` : ''}</div>

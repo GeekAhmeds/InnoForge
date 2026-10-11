@@ -98,10 +98,10 @@ const fmtMinutes = (n, t) => (n >= 60 ? `${Math.floor(n / 60)}:${String(n % 60).
 export const cartFromOrderLite = (o) => ({
   id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '', guests: o.guests || 0,
   discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
-  customer_address: o.customer_address, note: o.note, salesperson_id: o.salesperson_id,
+  customer_address: o.customer_address, note: o.note, salesperson_id: o.salesperson_id, zone_id: o.zone_id, driver_id: o.driver_id,
   items: o.items.map((i) => ({
     id: i.id, product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty,
-    discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent,
+    discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent, modifiers: i.modifiers || [],
   })),
 });
 

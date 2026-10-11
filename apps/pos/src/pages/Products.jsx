@@ -5,6 +5,7 @@ import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.j
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import LabelsModal from '../components/Labels.jsx';
 import { sellScreens } from '../lib/screens.js';
+import { ModifierGroups, ProductKitchenFields } from '../components/Modifiers.jsx';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -31,6 +32,7 @@ export default function Products() {
           <button className={tab === 'categories' ? 'on' : ''} onClick={() => setTab('categories')}>{t('products.categories')}</button>
           {can('purchases') && <button className={tab === 'counts' ? 'on' : ''} onClick={() => setTab('counts')}>{t('counts.title')}</button>}
           <button className={tab === 'expiry' ? 'on' : ''} onClick={() => setTab('expiry')}>{t('expiry.title')}</button>
+          {sellScreens(settings).includes('restaurant') && can('products') && <button className={tab === 'modifiers' ? 'on' : ''} onClick={() => setTab('modifiers')}>{t('mods.title')}</button>}
         </div>
         {tab === 'products' && (
           <div className="filters">
@@ -49,6 +51,7 @@ export default function Products() {
 
       {tab === 'counts' && <StockCounts categories={categories || []} />}
       {tab === 'expiry' && <Expiring />}
+      {tab === 'modifiers' && <ModifierGroups />}
       {tab === 'categories' ? (
         <Categories categories={categories || []} reload={reloadCategories} />
       ) : tab !== 'products' ? null : (
@@ -122,6 +125,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     station_id: product.station_id || '',
     by_weight: !!product.by_weight,
     plu: product.plu || '',
+    is_ingredient: !!product.is_ingredient,
     units: (product.units || []).map((u) => ({ ...u, price: u.price == null ? '' : fromMinor(u.price, d) })),
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
   });
@@ -212,6 +216,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
           {f.by_weight && <input className="w-amount mono" dir="ltr" placeholder={t('products.plu')} title={t('products.pluHint')} value={f.plu} onChange={set('plu')} />}
           <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />
         </div>
+        {restaurant && <ProductKitchenFields productId={product.id} f={f} setF={setF} />}
         {f.track_stock && <>
           {isNew
             ? <Field label={t('products.initialStock')}><input inputMode="decimal" value={f.stock} onChange={set('stock')} placeholder="0" /></Field>

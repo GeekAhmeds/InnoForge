@@ -610,6 +610,63 @@ const MIGRATIONS = [
   );
   ALTER TABLE purchases ADD COLUMN po_id INTEGER REFERENCES purchase_orders(id);
   `,
+  // v13: restaurants — modifiers/sizes, recipes (ingredients consumed per dish), delivery zones and drivers.
+  `
+  CREATE TABLE modifier_groups (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    min_select INTEGER NOT NULL DEFAULT 0, -- 1 = must choose (e.g. size)
+    max_select INTEGER NOT NULL DEFAULT 1, -- 0 = no limit
+    sort       INTEGER NOT NULL DEFAULT 0,
+    active     INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE modifier_options (
+    id             INTEGER PRIMARY KEY,
+    group_id       INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    price          INTEGER NOT NULL DEFAULT 0, -- added to the item price (can be 0)
+    ingredient_id  INTEGER REFERENCES products(id) ON DELETE SET NULL,
+    ingredient_qty REAL NOT NULL DEFAULT 0,    -- consumed per item when chosen
+    sort           INTEGER NOT NULL DEFAULT 0,
+    active         INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE product_modifier_groups (
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    group_id   INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (product_id, group_id)
+  );
+  ALTER TABLE order_items ADD COLUMN modifiers TEXT NOT NULL DEFAULT ''; -- JSON [{ id, name, price }]
+  ALTER TABLE order_items ADD COLUMN modifiers_price INTEGER NOT NULL DEFAULT 0;
+
+  -- A dish made from ingredients: selling it consumes them (and sets its cost).
+  CREATE TABLE recipe_items (
+    product_id    INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    ingredient_id INTEGER NOT NULL REFERENCES products(id),
+    qty           REAL NOT NULL CHECK (qty > 0),
+    PRIMARY KEY (product_id, ingredient_id)
+  );
+  ALTER TABLE products ADD COLUMN is_ingredient INTEGER NOT NULL DEFAULT 0; -- raw material, hidden from the sales screens
+
+  CREATE TABLE delivery_zones (
+    id     INTEGER PRIMARY KEY,
+    name   TEXT NOT NULL,
+    fee    INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE drivers (
+    id     INTEGER PRIMARY KEY,
+    name   TEXT NOT NULL,
+    phone  TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1
+  );
+  ALTER TABLE orders ADD COLUMN zone_id INTEGER REFERENCES delivery_zones(id);
+  ALTER TABLE orders ADD COLUMN delivery_fee INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN driver_id INTEGER REFERENCES drivers(id);
+  ALTER TABLE orders ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''; -- '' | out | delivered
+  ALTER TABLE orders ADD COLUMN out_at TEXT;
+  ALTER TABLE orders ADD COLUMN delivered_at TEXT;
+  `,
 ];
 
 function openDatabase(file) {

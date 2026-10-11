@@ -341,7 +341,7 @@ function ProductSearch({ onPick, onCode, inputRef }) {
   const [hi, setHi] = useState(0);
   useEffect(() => {
     if (!q.trim()) { setList([]); return undefined; }
-    const h = setTimeout(() => api.products.list({ search: q }).then((r) => { setList(r.slice(0, 10)); setHi(0); }).catch(() => {}), 120);
+    const h = setTimeout(() => api.products.list({ search: q, forSale: true }).then((r) => { setList(r.slice(0, 10)); setHi(0); }).catch(() => {}), 120);
     return () => clearTimeout(h);
   }, [q]);
   async function onKey(e) {

@@ -682,3 +682,47 @@ test('purchase orders from low stock, receiving them, dashboard, drawer permissi
   assert.equal(s.drawer.authorize({ approval: { username: 'sup', pin: '2222' } }), true);
   assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'drawer_open' AND approved_by IS NOT NULL").get());
 });
+
+test('restaurant: sizes and extras, recipes consume ingredients, delivery zones and drivers', () => {
+  const { s, db } = setup({ business_type: 'restaurant', tax_rate: 0, service_rate: 0 });
+  const bread = s.products.save({ name: 'Bread', price: 0, cost: 200, stock: 100, is_ingredient: true });
+  const chicken = s.products.save({ name: 'Chicken (kg)', price: 0, cost: 20000, stock: 10, unit: 'kg', is_ingredient: true });
+  const cheese = s.products.save({ name: 'Cheese (kg)', price: 0, cost: 30000, stock: 5, unit: 'kg', is_ingredient: true });
+  const size = s.modifiers.save({ name: 'Size', min_select: 1, max_select: 1, options: [{ name: 'Regular', price: 0 }, { name: 'Large', price: 2000 }] });
+  const extras = s.modifiers.save({ name: 'Extras', min_select: 0, max_select: 0, options: [{ name: 'Extra cheese', price: 1000, ingredient_id: cheese, ingredient_qty: 0.05 }, { name: 'No onion', price: 0 }] });
+  const sandwich = s.products.save({ name: 'Chicken sandwich', price: 8000, track_stock: false, kitchen: true, modifier_group_ids: [size, extras], recipe: [{ ingredient_id: bread, qty: 1 }, { ingredient_id: chicken, qty: 0.15 }] });
+  const groups = s.modifiers.forProduct(sandwich);
+  assert.deepEqual(groups.map((g) => g.name), ['Size', 'Extras']);
+  const [regular, large] = groups[0].options; const [extraCheese, noOnion] = groups[1].options;
+  assert.equal(s.products.list({ forSale: true }).some((p) => p.id === bread), false);
+  assert.equal(s.products.get(sandwich).recipe_cost, 200 + 3000);
+  s.shifts.open({});
+  // size is required
+  assert.equal(tryCode(() => s.orders.quote({ items: [{ product_id: sandwich, qty: 1 }] })), 'MODIFIERS_REQUIRED');
+  assert.equal(tryCode(() => s.orders.quote({ items: [{ product_id: sandwich, qty: 1, modifiers: [regular.id, large.id] }] })), 'MODIFIERS_REQUIRED');
+  const q = s.orders.quote({ items: [{ product_id: sandwich, qty: 2, modifiers: [large.id, extraCheese.id, noOnion.id] }] });
+  assert.equal(q.lines[0].unit_price, 11000);
+  assert.equal(q.total, 22000);
+  // delivery with a zone fee, driver, then paid on return
+  const zone = s.delivery.saveZone({ name: 'Downtown', fee: 1500 });
+  const driver = s.delivery.saveDriver({ name: 'Mido', phone: '0100' });
+  const o = s.orders.saveOpen({ order_type: 'delivery', zone_id: zone, customer_name: 'Ali', customer_address: '5 Nile St', items: [{ product_id: sandwich, qty: 2, modifiers: [large.id, extraCheese.id, noOnion.id] }] });
+  assert.equal(o.total, 23500);
+  assert.equal(o.delivery_fee, 1500);
+  const sent = s.orders.sendToKitchen(o.id);
+  assert.match(sent.tickets[0].items[0].note, /Large/);
+  assert.equal(s.delivery.board().waiting.length, 1);
+  s.delivery.dispatch({ orderId: o.id, driverId: driver });
+  assert.equal(s.delivery.board().out.length, 1);
+  const paid = s.orders.checkout({ ...s.orders.get(o.id), items: s.orders.get(o.id).items.map((i) => ({ id: i.id, product_id: i.product_id, qty: i.qty, modifiers: i.modifiers })), payments: [{ method: 'cash', amount: 23500 }] });
+  assert.equal(paid.delivery_status, 'delivered');
+  assert.equal(paid.items[0].unit_cost, 200 + 3000 + 1500);
+  // ingredients consumed: 2 breads, 0.3 kg chicken, 0.1 kg cheese
+  const stock = (id) => Math.round(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock * 1000) / 1000;
+  assert.deepEqual([stock(bread), stock(chicken), stock(cheese)], [98, 9.7, 4.9]);
+  const rep = s.delivery.drivers_report({});
+  assert.deepEqual([rep[0].name, rep[0].orders, rep[0].cash, rep[0].fees], ['Mido', 1, 23500, 1500]);
+  // returning one sandwich puts its ingredients back
+  s.orders.refund({ orderId: paid.id, items: [{ order_item_id: paid.items[0].id, qty: 1 }] });
+  assert.deepEqual([stock(bread), stock(chicken), stock(cheese)], [99, 9.85, 4.95]);
+});

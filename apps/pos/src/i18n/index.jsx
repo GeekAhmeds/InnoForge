@@ -16,7 +16,12 @@ export function I18nProvider({ lang = 'ar', children }) {
     // Error codes from the main process map to "err.<CODE>" keys.
     const tErr = (err) => {
       const key = `err.${err?.code}`;
-      return dict[key] || en[key] ? t(key) + (err.code === 'OUT_OF_STOCK' && err.message ? `: ${err.message}` : '') : err?.message || String(err);
+      if (!(dict[key] || en[key])) return err?.message || String(err);
+      // "{0}" in a message is filled with the detail the main process sent (e.g. the product name).
+      const detail = err.message && err.message !== err.code ? err.message : '';
+      const text = t(key);
+      if (text.includes('{0}')) return text.replace('{0}', detail);
+      return text + (err.code === 'OUT_OF_STOCK' && detail ? `: ${detail}` : '');
     };
     return { lang, dir: lang === 'ar' ? 'rtl' : 'ltr', t, tErr };
   }, [lang]);

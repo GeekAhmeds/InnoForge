@@ -7,6 +7,7 @@ import { printKitchenTickets } from '../components/Kitchen.jsx';
 import { connectScale, onScale, stableWeight } from '../lib/scale.js';
 import { openCustomerDisplay, openDrawer, sendDisplay } from '../lib/api.js';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
+import { ModifierPicker } from '../components/Modifiers.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -18,12 +19,12 @@ const emptyCart = (orderType) => ({
 const cartFromOrder = (o) => ({
   id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '', guests: o.guests || 0,
   discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
-  customer_address: o.customer_address, note: o.note,
+  customer_address: o.customer_address, note: o.note, zone_id: o.zone_id, driver_id: o.driver_id,
   salesperson_id: o.salesperson_id,
   items: o.items.map((i) => ({
     id: i.id, product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty,
     // Stored discounts include automatic promotions, which are re-applied on their own.
-    discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent,
+    discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent, modifiers: i.modifiers || [],
   })),
 });
 
@@ -37,6 +38,9 @@ export default function Pos() {
   // Only offer the salesperson picker when someone besides the cashier earns commission.
   const reps = salespeople.filter((p) => p.commission_rate > 0);
   const [priceLists, setPriceLists] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  useEffect(() => { api.delivery.zones().then(setZones).catch(() => {}); api.delivery.drivers().then(setDrivers).catch(() => {}); }, []);
   useEffect(() => { api.priceLists.list().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => {}); }, []);
   const restaurant = settings.business_type === 'restaurant' || floorOn;
   const defaultType = restaurant ? 'takeaway' : 'sale';
@@ -73,7 +77,7 @@ export default function Pos() {
 
   useEffect(() => { api.categories.list().then(setCategories); }, []);
   useEffect(() => {
-    const h = setTimeout(() => api.products.list(categoryId === 'top' && !search ? { top: true } : { search, categoryId: categoryId === 'top' ? null : categoryId }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
+    const h = setTimeout(() => api.products.list(categoryId === 'top' && !search ? { top: true } : { search, categoryId: categoryId === 'top' ? null : categoryId, forSale: true }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
     return () => clearTimeout(h);
   }, [search, categoryId, notify, tErr]);
 
@@ -94,15 +98,17 @@ export default function Pos() {
   }, [cart.items.length, quote, lastSale]);
 
   // A scanned unit barcode (e.g. a carton) adds that unit; the server prices it.
-  const addProduct = useCallback((p, qty = 1, unit = null, { separate = false } = {}) => {
+  const addProduct = useCallback((p, qty = 1, unit = null, { separate = false, modifiers = [], price = null } = {}) => {
     setCart((c) => {
       const unitId = unit?.id ?? null;
-      // Weighed items stay on their own lines (each has its own weight/label).
-      const idx = separate ? -1 : c.items.findIndex((i) => i.product_id === p.id && (i.unit_id ?? null) === unitId && !i.note && !i.discount && !i.price_override);
+      const modKey = modifiers.map((x) => x.id).sort().join(',');
+      // Weighed items stay on their own lines (each has its own weight/label); different options too.
+      const idx = separate ? -1 : c.items.findIndex((i) => i.product_id === p.id && (i.unit_id ?? null) === unitId && !i.note && !i.discount && !i.price_override
+        && (i.modifiers || []).map((x) => x.id).sort().join(',') === modKey);
       const items = [...c.items];
-      const price = unit ? unit.price ?? Math.round(p.price * unit.factor) : p.price;
+      const unitPrice = price ?? (unit ? unit.price ?? Math.round(p.price * unit.factor) : p.price);
       if (idx >= 0) items[idx] = { ...items[idx], qty: items[idx].qty + qty };
-      else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: price, list_price: price, qty, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial, by_weight: !!p.by_weight });
+      else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: unitPrice, list_price: unitPrice, qty, modifiers, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial, by_weight: !!p.by_weight });
       return { ...c, items };
     });
     setLastSale(null);
@@ -117,6 +123,7 @@ export default function Pos() {
 
   /** Tapping a product sold by weight takes the scale's weight, or asks for it. */
   async function pick(p) {
+    if (p.modifier_count > 0) { setModal({ kind: 'modifiers', product: p }); return; }
     if (!p.by_weight) { addProduct(p); focusSearch(); return; }
     let w = stableWeight();
     if (!w) {
@@ -300,6 +307,18 @@ export default function Pos() {
             </button>
           )}
           {cart.order_type === 'dine_in' && <button className="ghost" onClick={setGuests}>👥 {cart.guests || '—'}</button>}
+          {cart.order_type === 'delivery' && (
+            <>
+              <select className="rep-select" title={t('delivery.zone')} value={cart.zone_id || ''} onChange={(e) => setCart((c) => ({ ...c, zone_id: Number(e.target.value) || null }))}>
+                <option value="">📍 {t('delivery.zone')}</option>
+                {zones.filter((z) => z.active).map((z) => <option key={z.id} value={z.id}>{z.name} (+{m(z.fee)})</option>)}
+              </select>
+              <select className="rep-select" title={t('delivery.driver')} value={cart.driver_id || ''} onChange={(e) => setCart((c) => ({ ...c, driver_id: Number(e.target.value) || null }))}>
+                <option value="">🛵 {t('delivery.driver')}</option>
+                {drivers.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </>
+          )}
           <button className={cart.customer_id ? 'customer-chip' : 'ghost'} onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
           {priceLists.length > 0 && (
             <select className="rep-select" title={t('priceLists.title')} value={cart.price_list_id || ''} onChange={(e) => setCart((c) => ({ ...c, price_list_id: Number(e.target.value) || null }))}>
@@ -333,6 +352,7 @@ export default function Pos() {
                   <span className="line-name">{it.name}</span>
                   {it.note && <small className="muted">{it.note}</small>}
                   {it.kitchen_sent > 0 && <small className="sent">✓ {formatQty(it.kitchen_sent)}</small>}
+                  {it.modifiers?.length > 0 && <small className="mods">+ {it.modifiers.map((x) => x.name).join('، ')}</small>}
                   {ql?.customer_discount > 0 && <small className="promo">👤 {t('pos.customerDiscount', { p: quote.customerPct })} −{m(ql.customer_discount)}</small>}
                   {ql?.promo_name && <small className="promo">🏷 {ql.promo_name} −{m(ql.promo_discount)}</small>}
                 </div>
@@ -352,6 +372,7 @@ export default function Pos() {
           <Row label={t('pos.subtotal')} value={m(quote?.subtotal)} />
           <Row label={t('pos.discount')} value={quote?.discount ? '− ' + m(quote.discount) : m(0)} onClick={() => cart.items.length && setModal({ kind: 'discount' })} link />
           {quote?.service ? <Row label={`${t('pos.service')} (${settings.service_rate}%)`} value={m(quote.service)} /> : null}
+          {quote?.delivery_fee ? <Row label={t('delivery.fee')} value={m(quote.delivery_fee)} /> : null}
           {settings.tax_rate ? <Row label={`${t('pos.tax')} (${settings.tax_rate}%)`} value={m(quote?.tax)} /> : null}
           <Row label={t('pos.total')} value={m(quote?.total)} big />
         </div>
@@ -384,6 +405,10 @@ export default function Pos() {
           onSave={(patch) => { setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === modal.idx ? { ...x, ...patch } : x)) })); setModal(null); focusSearch(); }}
           onRemove={() => { setCart((c) => ({ ...c, items: c.items.filter((_, i) => i !== modal.idx) })); setModal(null); focusSearch(); }}
         />
+      )}
+      {modal?.kind === 'modifiers' && (
+        <ModifierPicker product={modal.product} onClose={() => { setModal(null); focusSearch(); }}
+          onPick={(mods, price) => { addProduct(modal.product, 1, null, { modifiers: mods, price }); setModal(null); focusSearch(); }} />
       )}
       {modal?.kind === 'discount' && (
         <DiscountModal

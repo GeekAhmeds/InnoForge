@@ -15,6 +15,7 @@ import Purchases from './pages/Purchases.jsx';
 import Customers from './pages/Customers.jsx';
 import Floor from './pages/Floor.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Delivery from './pages/Delivery.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { UpdateBanner } from './components/Updates.jsx';
@@ -117,8 +118,10 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   } else {
     const screens = sellScreens(settings);
     const sellNav = screens.map((id) => SCREENS.find((x) => x.id === id)).map((x) => ({ id: x.page, icon: x.icon, label: screens.length > 1 ? `nav.${x.page === 'pos' ? 'cashier' : x.page}` : 'nav.pos' }));
+    // Restaurants also get the delivery board right after the floor.
+    if (screens.includes('restaurant')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
     const nav = [...sellNav, ...NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]))];
-    const Page = { dashboard: Dashboard, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { dashboard: Dashboard, delivery: Delivery, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

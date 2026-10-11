@@ -323,7 +323,9 @@ function createServices(db) {
     },
   };
 
-  const PRODUCT_SELECT = `SELECT p.*, c.name AS category_name, c.color AS category_color
+  const PRODUCT_SELECT = `SELECT p.*, c.name AS category_name, c.color AS category_color,
+      (SELECT COUNT(*) FROM product_modifier_groups pmg JOIN modifier_groups g ON g.id = pmg.group_id WHERE pmg.product_id = p.id AND g.active = 1) AS modifier_count,
+      (SELECT COUNT(*) FROM recipe_items r WHERE r.product_id = p.id) AS recipe_count
     FROM products p LEFT JOIN categories c ON c.id = p.category_id`;
 
   /** Attaches selling units and price-list prices ({ listId: price }) to product rows. */
@@ -399,20 +401,55 @@ function createServices(db) {
     return { ...p, scale: { qty, value, kind: s.scale_value } };
   }
 
+  // Replaces a product's modifier groups / recipe when the editor sent them.
+  function saveModifiersAndRecipe(productId, p) {
+    if (Array.isArray(p.modifier_group_ids)) {
+      db.prepare('DELETE FROM product_modifier_groups WHERE product_id = ?').run(productId);
+      p.modifier_group_ids.forEach((g, i) => db.prepare('INSERT OR IGNORE INTO product_modifier_groups (product_id, group_id, sort) VALUES (?, ?, ?)').run(productId, int(g), i));
+    }
+    if (Array.isArray(p.recipe)) {
+      db.prepare('DELETE FROM recipe_items WHERE product_id = ?').run(productId);
+      for (const r of p.recipe) {
+        const ing = int(r.ingredient_id);
+        if (!ing || ing === productId || !(num(r.qty) > 0)) continue;
+        db.prepare('INSERT OR REPLACE INTO recipe_items (product_id, ingredient_id, qty) VALUES (?, ?, ?)').run(productId, ing, num(r.qty));
+      }
+    }
+  }
+
+  /**
+   * Takes stock out (sign -1) or puts it back (+1) for `qty` of a sold line: a dish with a
+   * recipe consumes its ingredients, other products their own stock; chosen modifiers
+   * consume their ingredient too.
+   */
+  function consumeStock(productId, qty, factor, modifiers, sign, reason, refId, userId) {
+    const recipe = db.prepare('SELECT ingredient_id, qty FROM recipe_items WHERE product_id = ?').all(productId);
+    if (recipe.length) {
+      for (const r of recipe) moveStock(r.ingredient_id, sign * r.qty * qty * factor, reason, refId, userId);
+    } else if (db.prepare('SELECT track_stock FROM products WHERE id = ?').get(productId)?.track_stock) {
+      moveStock(productId, sign * qty * factor, reason, refId, userId);
+    }
+    for (const m of modifiers || []) {
+      const opt = db.prepare('SELECT ingredient_id, ingredient_qty FROM modifier_options WHERE id = ?').get(m.id);
+      if (opt?.ingredient_id && opt.ingredient_qty > 0) moveStock(opt.ingredient_id, sign * opt.ingredient_qty * qty, reason, refId, userId);
+    }
+  }
+
   const products = {
-    list({ search = '', categoryId = null, includeInactive = false, top = false } = {}) {
+    list({ search = '', categoryId = null, includeInactive = false, top = false, forSale = false } = {}) {
       requireUser();
       if (top) {
         // Best sellers of the last 30 days, for the cashier's quick tab.
         const rows = withUnitsAndPrices(plainAll(db.prepare(`${PRODUCT_SELECT}
           JOIN (SELECT i.product_id, SUM(i.qty) AS sold FROM order_items i JOIN orders o ON o.id = i.order_id
                 WHERE o.status = 'completed' AND o.completed_at >= datetime('now', 'localtime', '-30 days') GROUP BY i.product_id) t ON t.product_id = p.id
-          WHERE p.active = 1 ORDER BY t.sold DESC LIMIT 40`).all()));
+          WHERE p.active = 1 AND p.is_ingredient = 0 ORDER BY t.sold DESC LIMIT 40`).all()));
         return can('view_cost') ? rows : rows.map(({ cost, ...r }) => r);
       }
       const where = [];
       const params = [];
       if (!includeInactive) where.push('p.active = 1');
+      if (forSale) where.push('p.is_ingredient = 0');
       if (categoryId) { where.push('p.category_id = ?'); params.push(categoryId); }
       if (str(search)) {
         where.push('(p.name LIKE ? OR p.barcode LIKE ? OR p.author LIKE ?)');
@@ -428,7 +465,10 @@ function createServices(db) {
       const p = db.prepare(`${PRODUCT_SELECT} WHERE p.id = ?`).get(id);
       if (!p) throw new PosError('NOT_FOUND');
       const [row] = withUnitsAndPrices([plain(p)]);
-      if (!can('view_cost')) delete row.cost;
+      row.modifier_group_ids = db.prepare('SELECT group_id FROM product_modifier_groups WHERE product_id = ? ORDER BY sort').all(id).map((r) => r.group_id);
+      row.recipe = plainAll(db.prepare(`SELECT r.ingredient_id, r.qty, i.name, i.unit, i.cost FROM recipe_items r JOIN products i ON i.id = r.ingredient_id WHERE r.product_id = ? ORDER BY i.name`).all(id));
+      row.recipe_cost = row.recipe.reduce((sum, r) => sum + Math.round(r.cost * r.qty), 0);
+      if (!can('view_cost')) { delete row.cost; delete row.recipe_cost; row.recipe = row.recipe.map(({ cost, ...r }) => r); }
       return row;
     },
     /** Finds a product by its own barcode or one of its units' barcodes (returned as `unit`). */
@@ -498,6 +538,7 @@ function createServices(db) {
         supplier_id: 'supplier_id' in p ? int(p.supplier_id) || null : p.id ? db.prepare('SELECT supplier_id FROM products WHERE id = ?').get(p.id)?.supplier_id ?? null : null,
         track_expiry: p.track_expiry ? 1 : 0,
         by_weight: p.by_weight ? 1 : 0,
+        is_ingredient: p.is_ingredient ? 1 : 0,
         plu: str(p.plu) || null,
         track_serial: p.track_serial ? 1 : 0,
         active: p.active === false ? 0 : 1,
@@ -516,6 +557,7 @@ function createServices(db) {
           for (const k of ['price', 'cost', 'active']) if (before && before[k] !== fields[k]) changes[k] = [before[k], fields[k]];
           audit(changes.price ? 'product_price_change' : 'product_update', { entity: 'product', entityId: p.id, details: { name: fields.name, ...changes } });
           saveUnitsAndPrices(p.id, p);
+          saveModifiersAndRecipe(p.id, p);
           return p.id;
         }
         const id = Number(
@@ -526,6 +568,7 @@ function createServices(db) {
         if (initial) moveStock(id, initial, 'purchase', null, session.user.id);
         audit('product_create', { entity: 'product', entityId: id, details: { name: fields.name, price: fields.price } });
         saveUnitsAndPrices(id, p);
+        saveModifiersAndRecipe(id, p);
         return id;
       });
     },
@@ -677,7 +720,10 @@ function createServices(db) {
       FROM orders o JOIN users u ON u.id = o.user_id LEFT JOIN dining_tables t ON t.id = o.table_id
       WHERE o.id = ?`).get(id));
     if (!order) throw new PosError('NOT_FOUND');
-    order.items = plainAll(db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id));
+    order.items = plainAll(db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id))
+      .map((i) => ({ ...i, modifiers: i.modifiers ? JSON.parse(i.modifiers) : [] }));
+    order.driver_name = order.driver_id ? db.prepare('SELECT name FROM drivers WHERE id = ?').get(order.driver_id)?.name || '' : '';
+    order.zone_name = order.zone_id ? db.prepare('SELECT name FROM delivery_zones WHERE id = ?').get(order.zone_id)?.name || '' : '';
     order.payments = plainAll(db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id').all(id));
     order.returns = plainAll(db.prepare('SELECT r.*, u.name AS user_name FROM returns r JOIN users u ON u.id = r.user_id WHERE r.order_id = ? ORDER BY r.id').all(id));
     order.customer_balance = order.customer_id ? customerBalance(order.customer_id) : null;
@@ -791,7 +837,19 @@ function createServices(db) {
       if (it.unit_id && !unit) throw new PosError('INVALID_UNIT');
       const factor = unit?.factor ?? 1;
       const listPrice = priceListId ? db.prepare('SELECT price FROM product_prices WHERE product_id = ? AND price_list_id = ?').get(p.id, priceListId)?.price : null;
-      const standard = unit?.price ?? Math.round((listPrice ?? p.price) * factor);
+      // Modifiers (size, extras): checked against the product's groups and their min/max.
+      const modIds = (Array.isArray(it.modifiers) ? it.modifiers : []).map((m) => int(typeof m === 'object' ? m.id : m)).filter(Boolean);
+      const groups = db.prepare('SELECT g.* FROM product_modifier_groups pmg JOIN modifier_groups g ON g.id = pmg.group_id WHERE pmg.product_id = ? AND g.active = 1').all(p.id);
+      const mods = modIds.map((id) => db.prepare('SELECT * FROM modifier_options WHERE id = ? AND active = 1').get(id));
+      if (mods.some((o) => !o || !groups.some((g) => g.id === o.group_id))) throw new PosError('INVALID_MODIFIER', p.name);
+      for (const g of groups) {
+        const n = mods.filter((o) => o.group_id === g.id).length;
+        if (n < g.min_select || (g.max_select > 0 && n > g.max_select)) throw new PosError('MODIFIERS_REQUIRED', `${p.name}: ${g.name}`);
+      }
+      const modPrice = mods.reduce((sum, o) => sum + o.price, 0);
+      const modCost = mods.reduce((sum, o) => sum + (o.ingredient_id ? Math.round((db.prepare('SELECT cost FROM products WHERE id = ?').get(o.ingredient_id)?.cost || 0) * o.ingredient_qty) : 0), 0);
+      const recipeCost = db.prepare('SELECT COALESCE(SUM(i.cost * r.qty), 0) AS c, COUNT(*) AS n FROM recipe_items r JOIN products i ON i.id = r.ingredient_id WHERE r.product_id = ?').get(p.id);
+      const standard = (unit?.price ?? Math.round((listPrice ?? p.price) * factor)) + modPrice;
       // The cart may only change a price when the line is explicitly flagged; checkout authorizes it.
       const overridePrice = it.price_override && int(it.unit_price, -1) >= 0 && int(it.unit_price) !== standard ? int(it.unit_price) : null;
       return {
@@ -806,7 +864,9 @@ function createServices(db) {
         list_price: standard,
         price_override: overridePrice != null,
         unit_price: overridePrice ?? standard,
-        unit_cost: Math.round(p.cost * factor),
+        unit_cost: (recipeCost.n ? Math.round(recipeCost.c) : Math.round(p.cost * factor)) + modCost,
+        modifiers: mods.map((o) => ({ id: o.id, name: o.name, price: o.price })),
+        modifiers_price: modPrice,
         qty,
         manual_discount: Math.max(0, int(it.discount)),
         customer_discount: 0,
@@ -826,13 +886,16 @@ function createServices(db) {
     }
     applyPromotions(items);
     const orderType = ['sale', 'dine_in', 'takeaway', 'delivery'].includes(cart.order_type) ? cart.order_type : 'sale';
+    // Delivery: the zone's fee (or a typed fee), added after tax and never discounted.
+    const zone = orderType === 'delivery' && int(cart.zone_id) ? db.prepare('SELECT * FROM delivery_zones WHERE id = ? AND active = 1').get(int(cart.zone_id)) : null;
+    const deliveryFee = orderType === 'delivery' ? (zone ? zone.fee : Math.max(0, int(cart.delivery_fee))) : 0;
     const totals = computeTotals(items, {
       discount: int(cart.discount),
       taxRate: s.tax_rate,
       pricesIncludeTax: s.prices_include_tax,
       serviceRate: orderType === 'dine_in' ? s.service_rate : 0,
     });
-    return { settings: s, orderType, priceListId, customerPct, ...totals };
+    return { settings: s, orderType, priceListId, customerPct, ...totals, total: totals.total + deliveryFee, delivery_fee: deliveryFee, zone_id: zone?.id ?? null };
   }
 
   /**
@@ -876,6 +939,9 @@ function createServices(db) {
       customer_address: str(cart.customer_address),
       note: str(cart.note),
       guests: Math.max(0, int(cart.guests)),
+      zone_id: priced.zone_id,
+      delivery_fee: priced.delivery_fee,
+      driver_id: priced.orderType === 'delivery' ? int(cart.driver_id) || null : null,
       subtotal: priced.subtotal,
       discount: priced.discount,
       tax: priced.tax,
@@ -914,6 +980,9 @@ function createServices(db) {
         ));
       }
     }
+    priced.lines.forEach((l, i) => {
+      db.prepare('UPDATE order_items SET modifiers = ?, modifiers_price = ? WHERE id = ?').run(l.modifiers?.length ? JSON.stringify(l.modifiers) : '', l.modifiers_price || 0, keep[i]);
+    });
     const existingIds = db.prepare('SELECT id FROM order_items WHERE order_id = ?').all(orderId).map((r) => r.id);
     for (const id of existingIds) if (!keep.includes(id)) db.prepare('DELETE FROM order_items WHERE id = ?').run(id);
     return orderId;
@@ -1043,7 +1112,8 @@ function createServices(db) {
           if (amount > 0) insPay.run(orderId, p.method, amount);
         }
 
-        for (const l of priced.lines) if (l.track_stock) moveStock(l.product_id, -l.qty * l.unit_factor, 'sale', orderId, u.id);
+        for (const l of priced.lines) consumeStock(l.product_id, l.qty, l.unit_factor, l.modifiers, -1, 'sale', orderId, u.id);
+        if (priced.orderType === 'delivery') db.prepare("UPDATE orders SET delivery_status = 'delivered', delivered_at = datetime('now', 'localtime') WHERE id = ?").run(orderId);
         if (loyalty) {
           // Points are earned on what the customer actually pays for (not on points spent).
           const pointsValue = payments.find((p) => p.method === 'points')?.amount || 0;
@@ -1122,8 +1192,7 @@ function createServices(db) {
         for (const l of lines) {
           db.prepare('INSERT INTO return_items (return_id, order_item_id, qty, amount) VALUES (?, ?, ?, ?)').run(returnId, l.line.id, l.qty, l.amount);
           db.prepare('UPDATE order_items SET returned_qty = returned_qty + ? WHERE id = ?').run(l.qty, l.line.id);
-          const p = l.line.product_id && db.prepare('SELECT track_stock FROM products WHERE id = ?').get(l.line.product_id);
-          if (p && p.track_stock) moveStock(l.line.product_id, l.qty * (l.line.unit_factor || 1), 'return', returnId, u.id);
+          if (l.line.product_id) consumeStock(l.line.product_id, l.qty, l.line.unit_factor || 1, l.line.modifiers, +1, 'return', returnId, u.id);
         }
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
         if (order.customer_id && order.points_earned > 0 && order.total > 0) {
@@ -1147,7 +1216,7 @@ function createServices(db) {
     const cart = {
       ...o,
       items: o.items.map((i) => ({
-        id: i.id, product_id: i.product_id, unit_id: i.unit_id, qty: i.qty, note: i.note, serials: i.serials,
+        id: i.id, product_id: i.product_id, unit_id: i.unit_id, qty: i.qty, note: i.note, serials: i.serials, modifiers: i.modifiers,
         discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)),
         price_override: true, unit_price: i.unit_price,
       })),
@@ -1209,8 +1278,8 @@ function createServices(db) {
             db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?').run(newId, l.id);
           } else {
             db.prepare('UPDATE order_items SET qty = qty - ?, kitchen_sent = MAX(0, kitchen_sent - ?) WHERE id = ?').run(m.qty, sent, l.id);
-            db.prepare(`INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, kitchen_sent)
-              VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)`).run(newId, l.product_id, l.name, l.unit_price, l.unit_cost, m.qty, l.note, l.unit_id, l.unit_name, l.unit_factor, sent);
+            db.prepare(`INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, kitchen_sent, modifiers, modifiers_price)
+              VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`).run(newId, l.product_id, l.name, l.unit_price, l.unit_cost, m.qty, l.note, l.unit_id, l.unit_name, l.unit_factor, sent, l.modifiers?.length ? JSON.stringify(l.modifiers) : '', l.modifiers_price || 0);
           }
         }
         audit('bill_split', { entity: 'order', entityId: orderId, details: { table: o.table_name, items: moves.map((m) => ({ name: m.line.name, qty: m.qty })) } });
@@ -2282,7 +2351,7 @@ function createServices(db) {
     const stations = activeStations();
     const byId = new Map(stations.map((st) => [st.id, st]));
     const rows = db.prepare(`
-      SELECT i.id, i.name, i.qty, i.kitchen_sent, i.note, p.station_id AS p_station, c.station_id AS c_station
+      SELECT i.id, i.name, i.qty, i.kitchen_sent, i.note, i.modifiers, p.station_id AS p_station, c.station_id AS c_station
       FROM order_items i JOIN products p ON p.id = i.product_id LEFT JOIN categories c ON c.id = p.category_id
       WHERE i.order_id = ? AND p.kitchen = 1 AND i.qty > i.kitchen_sent ORDER BY i.id`).all(order.id);
     const groups = new Map();
@@ -2290,7 +2359,8 @@ function createServices(db) {
       const st = byId.get(r.p_station) || byId.get(r.c_station) || stations[0] || null;
       const key = st?.id ?? 0;
       if (!groups.has(key)) groups.set(key, { station: st, items: [] });
-      groups.get(key).items.push({ name: r.name, qty: r.qty - r.kitchen_sent, note: r.note });
+      const mods = r.modifiers ? JSON.parse(r.modifiers).map((m) => m.name).join('، ') : '';
+      groups.get(key).items.push({ name: r.name, qty: r.qty - r.kitchen_sent, note: [mods, r.note].filter(Boolean).join(' — ') });
     }
     db.prepare('UPDATE order_items SET kitchen_sent = qty WHERE order_id = ?').run(order.id);
     const tickets = [];
@@ -2516,9 +2586,128 @@ function createServices(db) {
     };
   }
 
+  // ---------- modifiers (sizes, extras, "no onion") ----------
+  const modifierGroups = () => {
+    const groups = plainAll(db.prepare('SELECT * FROM modifier_groups ORDER BY sort, id').all());
+    const opts = plainAll(db.prepare(`SELECT o.*, p.name AS ingredient_name, p.unit AS ingredient_unit FROM modifier_options o LEFT JOIN products p ON p.id = o.ingredient_id ORDER BY o.sort, o.id`).all());
+    return groups.map((g) => ({ ...g, options: opts.filter((o) => o.group_id === g.id) }));
+  };
+  const modifiers = {
+    list() {
+      requireUser();
+      return modifierGroups();
+    },
+    /** The groups (with active options) to choose from when selling a product. */
+    forProduct(productId) {
+      requireUser();
+      const ids = db.prepare('SELECT group_id FROM product_modifier_groups WHERE product_id = ? ORDER BY sort').all(productId).map((r) => r.group_id);
+      return modifierGroups().filter((g) => g.active && ids.includes(g.id))
+        .sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
+        .map((g) => ({ ...g, options: g.options.filter((o) => o.active).map(({ ingredient_id, ingredient_qty, ingredient_name, ingredient_unit, ...o }) => o) }));
+    },
+    save(g = {}) {
+      requirePerm('products');
+      if (!str(g.name)) throw new PosError('NAME_REQUIRED');
+      const options = (g.options || []).filter((o) => str(o.name));
+      if (!options.length) throw new PosError('OPTIONS_REQUIRED');
+      return transaction(db, () => {
+        const vals = [str(g.name), Math.max(0, int(g.min_select)), Math.max(0, int(g.max_select, 1)), int(g.sort), g.active === false ? 0 : 1];
+        let id = int(g.id) || null;
+        if (id) db.prepare('UPDATE modifier_groups SET name = ?, min_select = ?, max_select = ?, sort = ?, active = ? WHERE id = ?').run(...vals, id);
+        else id = Number(db.prepare('INSERT INTO modifier_groups (name, min_select, max_select, sort, active) VALUES (?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+        const keep = [];
+        options.forEach((o, i) => {
+          const ov = [str(o.name), Math.max(0, int(o.price)), int(o.ingredient_id) || null, Math.max(0, num(o.ingredient_qty)), i, o.active === false ? 0 : 1];
+          if (o.id && db.prepare('SELECT 1 FROM modifier_options WHERE id = ? AND group_id = ?').get(o.id, id)) {
+            db.prepare('UPDATE modifier_options SET name = ?, price = ?, ingredient_id = ?, ingredient_qty = ?, sort = ?, active = ? WHERE id = ?').run(...ov, o.id);
+            keep.push(o.id);
+          } else keep.push(Number(db.prepare('INSERT INTO modifier_options (group_id, name, price, ingredient_id, ingredient_qty, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, ...ov).lastInsertRowid));
+        });
+        // Options already used on invoices are switched off rather than deleted.
+        for (const { id: oid } of db.prepare('SELECT id FROM modifier_options WHERE group_id = ?').all(id)) {
+          if (!keep.includes(oid)) db.prepare('UPDATE modifier_options SET active = 0 WHERE id = ?').run(oid);
+        }
+        audit('modifier_save', { entity: 'modifier_group', entityId: id, details: { name: vals[0] } });
+        return id;
+      });
+    },
+    remove(id) {
+      requirePerm('products');
+      db.prepare('UPDATE modifier_groups SET active = 0 WHERE id = ?').run(id);
+      db.prepare('DELETE FROM product_modifier_groups WHERE group_id = ?').run(id);
+      return true;
+    },
+  };
+
+  // ---------- delivery ----------
+  const delivery = {
+    zones() {
+      requireUser();
+      return plainAll(db.prepare('SELECT * FROM delivery_zones ORDER BY active DESC, name').all());
+    },
+    saveZone(z = {}) {
+      requirePerm('settings');
+      if (!str(z.name)) throw new PosError('NAME_REQUIRED');
+      const vals = [str(z.name), Math.max(0, int(z.fee)), z.active === false ? 0 : 1];
+      if (z.id) { db.prepare('UPDATE delivery_zones SET name = ?, fee = ?, active = ? WHERE id = ?').run(...vals, z.id); return z.id; }
+      return Number(db.prepare('INSERT INTO delivery_zones (name, fee, active) VALUES (?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    drivers() {
+      requireUser();
+      return plainAll(db.prepare('SELECT * FROM drivers ORDER BY active DESC, name').all());
+    },
+    saveDriver(d = {}) {
+      requirePerm('settings');
+      if (!str(d.name)) throw new PosError('NAME_REQUIRED');
+      const vals = [str(d.name), str(d.phone), d.active === false ? 0 : 1];
+      if (d.id) { db.prepare('UPDATE drivers SET name = ?, phone = ?, active = ? WHERE id = ?').run(...vals, d.id); return d.id; }
+      return Number(db.prepare('INSERT INTO drivers (name, phone, active) VALUES (?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    /** Open delivery orders (waiting / out with a driver) and today's delivered ones. */
+    board() {
+      requireUser();
+      const rows = plainAll(db.prepare(`
+        SELECT o.id, o.invoice_no, o.status, o.total, o.delivery_fee, o.delivery_status, o.created_at, o.out_at, o.delivered_at, o.completed_at,
+          COALESCE(c.name, o.customer_name) AS customer_name, COALESCE(c.phone, o.customer_phone) AS customer_phone, o.customer_address,
+          z.name AS zone_name, d.name AS driver_name, o.driver_id,
+          CAST((julianday('now', 'localtime') - julianday(o.created_at)) * 1440 AS INTEGER) AS minutes,
+          (SELECT COUNT(*) FROM kitchen_tickets k WHERE k.order_id = o.id AND k.status IN ('new', 'preparing')) AS cooking
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN delivery_zones z ON z.id = o.zone_id LEFT JOIN drivers d ON d.id = o.driver_id
+        WHERE o.order_type = 'delivery' AND (o.status = 'open' OR (o.status = 'completed' AND o.completed_at >= date('now', 'localtime')))
+        ORDER BY o.created_at`).all());
+      return {
+        waiting: rows.filter((r) => r.status === 'open' && r.delivery_status !== 'out'),
+        out: rows.filter((r) => r.status === 'open' && r.delivery_status === 'out'),
+        delivered: rows.filter((r) => r.status === 'completed'),
+      };
+    },
+    /** The order leaves with a driver. */
+    dispatch({ orderId, driverId } = {}) {
+      requireUser();
+      const o = db.prepare("SELECT status, order_type FROM orders WHERE id = ?").get(orderId);
+      if (!o || o.status !== 'open' || o.order_type !== 'delivery') throw new PosError('ORDER_NOT_OPEN');
+      if (!db.prepare('SELECT 1 FROM drivers WHERE id = ? AND active = 1').get(int(driverId))) throw new PosError('DRIVER_REQUIRED');
+      db.prepare("UPDATE orders SET driver_id = ?, delivery_status = 'out', out_at = datetime('now', 'localtime') WHERE id = ?").run(int(driverId), orderId);
+      audit('delivery_out', { entity: 'order', entityId: orderId, details: { driver: db.prepare('SELECT name FROM drivers WHERE id = ?').get(int(driverId)).name } });
+      return getOrder(orderId);
+    },
+    /** Per driver: orders delivered, money collected, fees — for settling with each driver. */
+    drivers_report({ from, to } = {}) {
+      requirePerm('reports');
+      const [f, t] = dateRange(from, to);
+      return plainAll(db.prepare(`
+        SELECT d.id, d.name, COUNT(o.id) AS orders, COALESCE(SUM(o.total), 0) AS total, COALESCE(SUM(o.delivery_fee), 0) AS fees,
+          COALESCE(SUM((SELECT SUM(amount) FROM payments p WHERE p.order_id = o.id AND p.method = 'cash')), 0) AS cash,
+          COALESCE(SUM(o.credit), 0) AS on_account
+        FROM drivers d JOIN orders o ON o.driver_id = d.id
+        WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')
+        GROUP BY d.id ORDER BY total DESC`).all(f, t));
+    },
+  };
+
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, requireAdmin, requirePerm, audit, can,
   };
 }
 
