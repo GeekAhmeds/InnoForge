@@ -33,7 +33,12 @@ Everything runs locally: data lives in a SQLite file on the machine, so you don'
 - **Purchasing**: suppliers, purchase invoices that receive stock and re-average cost, credit purchases, supplier statements and payments.
 - **Customers & credit sales**: customer accounts with credit limits, partly or fully on-account invoices, collections (cash goes to the drawer), A4 statements, payment receipts, and receivables in reports. Returns on credit sales reduce the balance first.
 - **Expenses** (rent, electricity, salaries…), from the cash drawer or outside it; shown in the shift and in net profit.
-- Users with PIN login and **Admin / Cashier** roles.
+- **Users & permissions**: PIN login, Admin / Supervisor / Cashier roles with per-user overrides and discount caps, supervisor PIN approval for restricted actions, a full activity log, and salesperson commissions.
+- **Trading tools**: price lists (wholesale, etc.) per customer, multiple units (carton = 12 pieces) with their own barcodes, quotations → sales orders → invoices, A4 invoices with your logo, debt aging, returns to suppliers, stock counts, expiry dates with FEFO batches, and serial numbers.
+- **Promotions & loyalty**: automatic percent / amount / buy-X-get-Y promotions with dates, weekdays and hours; loyalty points earned per purchase and redeemed at checkout.
+- **Barcode labels**: 38×25, 50×30, 58×40 mm or A4 sheets, EAN-13 / Code 128, and automatic barcodes for products without one.
+- **Excel**: import products, customers and suppliers from a template or your own sheet (Arabic or English headers, any order, row-by-row preview); export products, customers, suppliers, invoices and reports.
+- **WhatsApp & PDF**: send invoices, quotes and statements to the customer's WhatsApp or save them as A4 PDFs.
 - **Device licensing**: installed copies only run on the one computer they were activated for, for a period you choose.
 - Arabic (RTL) and English UI.
 - One-click backup & restore of the database file.
@@ -140,7 +145,10 @@ Key design decisions:
 - كل البيانات بتتحفظ على الجهاز في ملف واحد، وتقدر تاخد منه نسخة احتياطية بضغطة من الإعدادات.
 - فيه ورديات بتقفلها في آخر اليوم، وبتشوف فيها النقدية المتوقعة جنب النقدية الفعلية.
 - فيه مرتجعات، وتقارير مبيعات وأرباح، وطباعة إيصالات على طابعات حرارية مقاس 58 أو 80 مم.
-- فيه صلاحيات للمدير والكاشير، والدخول برقم سري.
+- فيه صلاحيات للمدير والمشرف والكاشير، وموافقة مشرف بالرقم السري، وسجل نشاط، وعمولات للبائعين.
+- للشركات التجارية: قوائم أسعار (جملة)، ووحدات (كرتونة/قطعة)، وعروض أسعار تتحول لفواتير، وفاتورة A4 باللوجو، وأعمار ديون، ومرتجع للمورد، وجرد، وتواريخ صلاحية، وسيريال.
+- عروض تلقائية (خصم أو اشتري 2 وخد 1) ونقاط ولاء للعملاء.
+- طباعة ملصقات باركود، ورفع وتنزيل الأصناف والعملاء والموردين بشيت إكسيل، وإرسال الفواتير واتساب أو PDF.
 
 **التشغيل:**
 

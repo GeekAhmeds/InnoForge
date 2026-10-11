@@ -120,6 +120,11 @@
       <a href="#products">الأصناف والمخزون</a>
       <a href="#purchases">المشتريات والموردين</a>
       <a href="#customers">العملاء والبيع الآجل</a>
+      <a href="#trading">أدوات الشركات التجارية</a>
+      <a href="#promos">العروض ونقاط الولاء</a>
+      <a href="#labels">ملصقات الباركود</a>
+      <a href="#excel">الإكسيل: رفع وتنزيل</a>
+      <a href="#share">واتساب و PDF</a>
       <a href="#expenses">المصروفات</a>
       <a href="#returns">الفواتير والمرتجعات</a>
       <a href="#reports">التقارير</a>
@@ -151,6 +156,11 @@
       <a href="#products">Products & stock</a>
       <a href="#purchases">Purchasing & suppliers</a>
       <a href="#customers">Customers & credit sales</a>
+      <a href="#trading">Trading tools</a>
+      <a href="#promos">Promotions & loyalty</a>
+      <a href="#labels">Barcode labels</a>
+      <a href="#excel">Excel import & export</a>
+      <a href="#share">WhatsApp & PDF</a>
       <a href="#expenses">Expenses</a>
       <a href="#returns">Invoices & returns</a>
       <a href="#reports">Reports</a>
@@ -626,31 +636,41 @@ npm run dist:win</code></pre>
     <section id="users">
       <div lang="ar">
         <h2>المستخدمين والصلاحيات</h2>
-        <p>من <b>الإعدادات ← المستخدمين</b> تضيف كاشيرية، وكل واحد بيدخل باسمه ورقمه السري.</p>
+        <p>من <b>الإعدادات ← المستخدمين</b> تضيف مستخدمين، وكل واحد بيدخل باسمه ورقمه السري. فيه 3 أدوار جاهزة، وتقدر تعدّل صلاحيات أي مستخدم لوحده (تشيل أو تزوّد).</p>
         <div class="table-wrap"><table>
-          <tr><th></th><th>المدير</th><th>الكاشير</th></tr>
-          <tr><td>البيع والوردية والفواتير</td><td>✅</td><td>✅</td></tr>
-          <tr><td>صرف مصروف من الدرج</td><td>✅</td><td>✅</td></tr>
-          <tr><td>العملاء والبيع الآجل والتحصيل</td><td>✅</td><td>✅ (من غير حد الائتمان)</td></tr>
-          <tr><td>الأصناف والمخزون</td><td>✅</td><td>❌</td></tr>
-          <tr><td>المشتريات والموردين</td><td>✅</td><td>❌</td></tr>
-          <tr><td>المرتجعات</td><td>✅</td><td>❌</td></tr>
-          <tr><td>التقارير والإعدادات والنسخ الاحتياطي</td><td>✅</td><td>❌</td></tr>
+          <tr><th></th><th>المدير</th><th>المشرف</th><th>الكاشير</th></tr>
+          <tr><td>البيع والوردية والعملاء والتحصيل</td><td>✅</td><td>✅</td><td>✅</td></tr>
+          <tr><td>أقصى نسبة خصم</td><td>100%</td><td>30%</td><td>10%</td></tr>
+          <tr><td>تغيير السعر، المرتجع، إلغاء طلب، مصروف</td><td>✅</td><td>✅</td><td>بموافقة مشرف</td></tr>
+          <tr><td>رؤية التكلفة والأرباح</td><td>✅</td><td>✅</td><td>❌</td></tr>
+          <tr><td>الأصناف والمشتريات والتقارير وسجل النشاط</td><td>✅</td><td>✅</td><td>❌</td></tr>
+          <tr><td>الإعدادات والمستخدمين والنسخ الاحتياطي</td><td>✅</td><td>❌</td><td>❌</td></tr>
         </table></div>
+        <h3>موافقة المشرف</h3>
+        <p>لو الكاشير عمل حاجة أكبر من صلاحيته (خصم أكبر من حده، تغيير سعر، مرتجع، بيع آجل فوق حد العميل…) هتظهر شاشة <b>موافقة مشرف</b>: المشرف أو المدير يختار اسمه ويكتب رقمه السري، والعملية تكمل باسم الكاشير، والموافقة تتسجل باسم المشرف.</p>
+        <h3>سجل النشاط</h3>
+        <p>من <b>الإعدادات ← سجل النشاط</b> تشوف مين عمل إيه وإمتى: الخصومات، تغيير الأسعار، المرتجعات، الموافقات، المحاولات المرفوضة، تعديل الأصناف والإعدادات والمستخدمين.</p>
+        <h3>عمولة البائعين</h3>
+        <p>حط نسبة عمولة لكل مستخدم، واختار البائع في شاشة البيع. التقرير من <b>التقارير ← العمولات</b> (بيطرح المرتجعات).</p>
       </div>
       <div lang="en">
         <h2>Users & roles</h2>
-        <p>Add cashiers under <b>Settings → Users</b>. Each one signs in with their own name and PIN.</p>
+        <p>Add users under <b>Settings → Users</b>. Each signs in with their own name and PIN. There are three roles, and you can grant or remove any single permission per user.</p>
         <div class="table-wrap"><table>
-          <tr><th></th><th>Admin</th><th>Cashier</th></tr>
-          <tr><td>Selling, shifts, invoices</td><td>✅</td><td>✅</td></tr>
-          <tr><td>Cash-out expense from drawer</td><td>✅</td><td>✅</td></tr>
-          <tr><td>Customers, credit sales, collections</td><td>✅</td><td>✅ (not credit limits)</td></tr>
-          <tr><td>Products & stock</td><td>✅</td><td>❌</td></tr>
-          <tr><td>Purchasing & suppliers</td><td>✅</td><td>❌</td></tr>
-          <tr><td>Returns</td><td>✅</td><td>❌</td></tr>
-          <tr><td>Reports, settings, backup</td><td>✅</td><td>❌</td></tr>
+          <tr><th></th><th>Admin</th><th>Supervisor</th><th>Cashier</th></tr>
+          <tr><td>Selling, shifts, customers, collections</td><td>✅</td><td>✅</td><td>✅</td></tr>
+          <tr><td>Maximum discount</td><td>100%</td><td>30%</td><td>10%</td></tr>
+          <tr><td>Price changes, returns, voids, expenses</td><td>✅</td><td>✅</td><td>with approval</td></tr>
+          <tr><td>See cost & profit</td><td>✅</td><td>✅</td><td>❌</td></tr>
+          <tr><td>Products, purchasing, reports, activity log</td><td>✅</td><td>✅</td><td>❌</td></tr>
+          <tr><td>Settings, users, backup</td><td>✅</td><td>❌</td><td>❌</td></tr>
         </table></div>
+        <h3>Supervisor approval</h3>
+        <p>When a cashier goes beyond their limits (a bigger discount, a price change, a return, credit above the customer's limit…), a <b>supervisor approval</b> box appears. A supervisor or admin picks their name and enters their PIN; the action goes through and the approval is logged under their name.</p>
+        <h3>Activity log</h3>
+        <p><b>Settings → Activity log</b> shows who did what and when: discounts, price changes, returns, approvals, refused attempts, and changes to products, settings and users.</p>
+        <h3>Sales commissions</h3>
+        <p>Give each user a commission rate and pick the salesperson on the sales screen. See <b>Reports → Commissions</b> (returns are deducted).</p>
       </div>
     </section>
 
@@ -859,6 +879,101 @@ npm run dist:win</code></pre>
         <p><b>Reports</b> show credit sales, collections, total receivables and top customers. The <b>shift report</b> shows credit sales and cash collected.</p>
       </div>
     </section>
+
+    <!-- ================= TRADING ================= -->
+    <section id="trading">
+      <div lang="ar">
+        <h2>أدوات الشركات التجارية</h2>
+        <ul>
+          <li><b>قوائم الأسعار:</b> من <b>الإعدادات ← قوائم الأسعار</b> اعمل "جملة" و"نص جملة" مثلاً، واملاها من السعر الأساسي بنسبة. اربط العميل بقائمته، وأول ما تختاره في البيع الأسعار تتغير لوحدها.</li>
+          <li><b>الوحدات المتعددة:</b> في الصنف ضيف "كرتونة = 12 قطعة" بباركود وسعر خاص. لما تبيع أو تشتري بالكرتونة المخزون بيتحسب بالقطعة.</li>
+          <li><b>عروض الأسعار وأوامر البيع:</b> من شاشة البيع اضغط "عرض سعر". تلاقيه في <b>العملاء ← عروض الأسعار</b>، تطبعه A4 أو تبعته واتساب، ولما العميل يوافق اضغط "تحويل لفاتورة".</li>
+          <li><b>فاتورة A4 باللوجو:</b> من <b>الإعدادات ← الإيصال والطباعة</b> ارفع اللوجو واختار شكل الفاتورة (حراري أو A4) وطابعة A4 والشروط اللي تظهر تحت الفاتورة.</li>
+          <li><b>أعمار الديون:</b> <b>العملاء ← أعمار الديون</b> بيقسم المديونية (0–30، 31–60، 61–90، أكتر من 90 يوم) ويعلّم المتأخرين.</li>
+          <li><b>مرتجع للمورد:</b> من فاتورة الشراء اضغط "مرتجع للمورد"؛ المخزون يقل ورصيد المورد يتخصم.</li>
+          <li><b>الجرد:</b> <b>الأصناف ← الجرد ← بدء جرد</b>، امسح الباركودات أو اكتب الكميات، وفي الآخر "اعتماد" يسوّي الفروق ويسجلها.</li>
+          <li><b>الصلاحية والتشغيلات:</b> فعّل "متابعة الصلاحية" للصنف واكتب رقم التشغيلة وتاريخ الانتهاء في الشراء. البيع بيسحب الأقرب انتهاءً الأول، و<b>الأصناف ← الصلاحية</b> بيوريك اللي قرب يخلص.</li>
+          <li><b>السيريال:</b> فعّل "سيريال" للأجهزة؛ البيع مش هيكمل غير لما تكتب سيريال لكل قطعة، وتقدر تدوّر بالسيريال في الفواتير (للضمان).</li>
+        </ul>
+      </div>
+      <div lang="en">
+        <h2>Tools for trading companies</h2>
+        <ul>
+          <li><b>Price lists:</b> under <b>Settings → Price lists</b> create "Wholesale" etc. and fill it from the base price by a percentage. Link a customer to a list and their prices apply as soon as you pick them.</li>
+          <li><b>Multiple units:</b> add "Carton = 12 pieces" to a product with its own barcode and price. Stock is always kept in pieces.</li>
+          <li><b>Quotations & sales orders:</b> press "Quote" on the sales screen. Find it under <b>Customers → Quotes</b>, print it on A4 or send it on WhatsApp, then "Convert to invoice" when the customer agrees.</li>
+          <li><b>A4 invoice with logo:</b> under <b>Settings → Receipt & printing</b> upload your logo and choose thermal or A4, the A4 printer and the terms printed at the bottom.</li>
+          <li><b>Debt aging:</b> <b>Customers → Aging</b> splits balances into 0–30, 31–60, 61–90 and 90+ days and flags overdue customers.</li>
+          <li><b>Returns to suppliers:</b> open a purchase invoice and press "Return to supplier"; stock goes down and the supplier balance is credited.</li>
+          <li><b>Stock count:</b> <b>Products → Stock count → Start</b>, scan or type the counted quantities, then "Apply" to post the differences.</li>
+          <li><b>Expiry & batches:</b> turn on expiry tracking for a product and enter the batch and expiry date when purchasing. Sales take the nearest expiry first, and <b>Products → Expiry</b> lists what is about to expire.</li>
+          <li><b>Serial numbers:</b> turn on serials for devices; a sale needs one serial per unit, and you can search invoices by serial (for warranty).</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= PROMOS ================= -->
+    <section id="promos">
+      <div lang="ar">
+        <h2>العروض ونقاط الولاء</h2>
+        <p>من <b>الإعدادات ← العروض والنقاط</b>:</p>
+        <ul>
+          <li><b>العروض التلقائية:</b> نسبة خصم، أو مبلغ ثابت للقطعة، أو "اشتري 2 وخد 1". على صنف أو تصنيف أو كل الأصناف، بتاريخ بداية ونهاية، وأيام وساعات معينة (مثلاً Happy hour)، وأقل كمية. العرض بيتطبق لوحده في الكارت ويظهر تحت الصنف وفي الإيصال، ومش محتاج صلاحية خصم.</li>
+          <li><b>نقاط الولاء:</b> فعّلها وحدد كل كام جنيه = نقطة، وقيمة النقطة، وأقل عدد للاستبدال. العميل بياخد نقاط على كل فاتورة، وفي شاشة الدفع يظهر رصيده وزرار "استبدال النقاط". المرتجع بيرجّع النقاط، وتقدر تزود أو تخصم نقاط يدوي من صفحة العميل.</li>
+        </ul>
+      </div>
+      <div lang="en">
+        <h2>Promotions & loyalty points</h2>
+        <p>Under <b>Settings → Promotions & loyalty</b>:</p>
+        <ul>
+          <li><b>Automatic promotions:</b> percent off, a fixed amount per unit, or "buy 2 get 1". For a product, a category or everything, with start/end dates, weekdays and hours (e.g. happy hour), and a minimum quantity. They apply on their own, show under the cart line and on the receipt, and need no discount permission.</li>
+          <li><b>Loyalty points:</b> turn it on and set how much spending earns a point, what a point is worth, and the minimum to redeem. Customers earn on every invoice; the payment screen shows their balance with a "Redeem points" button. Returns take points back, and you can adjust points by hand from the customer page.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= LABELS ================= -->
+    <section id="labels">
+      <div lang="ar">
+        <h2>ملصقات الباركود</h2>
+        <p>من <b>الأصناف</b> اضغط <b>🏷 ملصقات</b>. اختار المقاس (38×25 أو 50×30 أو 58×40 مم لطابعات الملصقات، أو ورقة A4 فيها 24 ملصق)، وعدد النسخ لكل صنف أو "واحد لكل صنف" أو "حسب المخزون"، واطبع. الأصناف اللي من غير باركود تقدر تولّدلها باركود EAN-13 بضغطة. طابعة الملصقات والمقاس الافتراضي من <b>الإعدادات ← الإيصال والطباعة</b>.</p>
+      </div>
+      <div lang="en">
+        <h2>Barcode labels</h2>
+        <p>On <b>Products</b> press <b>🏷 Labels</b>. Pick a size (38×25, 50×30 or 58×40 mm for label printers, or an A4 sheet of 24), set copies per product or use "One each" / "By stock", and print. Products without a barcode can get an EAN-13 generated in one click. Set the label printer and default size under <b>Settings → Receipt & printing</b>.</p>
+      </div>
+    </section>
+
+    <!-- ================= EXCEL ================= -->
+    <section id="excel">
+      <div lang="ar">
+        <h2>الإكسيل: رفع وتنزيل</h2>
+        <ul>
+          <li><b>رفع:</b> في الأصناف والعملاء والموردين فيه زرار <b>📥 استيراد Excel</b>. نزّل الشيت الجاهز واملاه، أو ارفع شيتك إنت؛ البرنامج بيتعرف على العواميد بالعربي أو الإنجليزي وبأي ترتيب، ويوريك معاينة والأخطاء برقم الصف قبل الحفظ. الصنف اللي باركوده موجود بيتحدّث بدل ما يتكرر.</li>
+          <li><b>تنزيل:</b> زرار <b>📤 تصدير Excel</b> في الأصناف والعملاء والموردين والفواتير والتقارير.</li>
+        </ul>
+      </div>
+      <div lang="en">
+        <h2>Excel import & export</h2>
+        <ul>
+          <li><b>Import:</b> Products, Customers and Suppliers have <b>📥 Import Excel</b>. Download the template and fill it, or upload your own sheet: columns are recognised in Arabic or English, in any order, and you get a preview with row-numbered errors before saving. Products with an existing barcode are updated instead of duplicated.</li>
+          <li><b>Export:</b> <b>📤 Export Excel</b> on Products, Customers, Suppliers, Invoices and Reports.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= SHARE ================= -->
+    <section id="share">
+      <div lang="ar">
+        <h2>واتساب و PDF</h2>
+        <p>الفاتورة وعرض السعر وكشف حساب العميل فيهم زرارين: <b>💬 واتساب</b> بيفتح محادثة مع رقم العميل والملخص مكتوب جاهز، و<b>📑 PDF</b> بيحفظ نسخة A4 في مجلد المستندات عشان تبعتها كملف.</p>
+      </div>
+      <div lang="en">
+        <h2>WhatsApp & PDF</h2>
+        <p>Invoices, quotes and customer statements have two buttons: <b>💬 WhatsApp</b> opens a chat with the customer's number and the summary already typed, and <b>📑 PDF</b> saves an A4 copy in your Documents folder to send as a file.</p>
+      </div>
+    </section>
+
 
     <!-- ================= EXPENSES ================= -->
     <section id="expenses">
