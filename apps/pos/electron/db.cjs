@@ -444,6 +444,43 @@ const MIGRATIONS = [
     );
     `,
   },
+  // v7: automatic promotions and customer loyalty points.
+  `
+  CREATE TABLE promotions (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('percent', 'amount', 'buy_x_get_y')),
+    scope      TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'category', 'product')),
+    target_id  INTEGER,
+    value      REAL NOT NULL DEFAULT 0,  -- percent, or amount off per unit (minor units)
+    buy_qty    REAL NOT NULL DEFAULT 0,
+    get_qty    REAL NOT NULL DEFAULT 0,
+    min_qty    REAL NOT NULL DEFAULT 0,
+    start_date TEXT,
+    end_date   TEXT,
+    days       TEXT NOT NULL DEFAULT '', -- weekdays 0-6 (Sunday = 0), empty = every day
+    time_from  TEXT NOT NULL DEFAULT '',
+    time_to    TEXT NOT NULL DEFAULT '',
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  ALTER TABLE order_items ADD COLUMN promo_discount INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE order_items ADD COLUMN promo_name TEXT NOT NULL DEFAULT '';
+
+  ALTER TABLE customers ADD COLUMN points REAL NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN points_earned REAL NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN points_redeemed REAL NOT NULL DEFAULT 0;
+  CREATE TABLE loyalty_moves (
+    id          INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    order_id    INTEGER REFERENCES orders(id),
+    points      REAL NOT NULL,
+    reason      TEXT NOT NULL, -- earn | redeem | return | adjust
+    user_id     INTEGER REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX idx_loyalty_customer ON loyalty_moves(customer_id);
+  `,
 ];
 
 function openDatabase(file) {

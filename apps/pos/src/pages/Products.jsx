@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
+import LabelsModal from '../components/Labels.jsx';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -12,6 +13,7 @@ export default function Products() {
   const [editing, setEditing] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
   const [lowOnly, setLowOnly] = useState(false);
+  const [labels, setLabels] = useState(false);
   const [categories, reloadCategories] = useLoad(() => api.categories.list(), []);
   const [list, reload] = useLoad(
     () => (lowOnly ? api.products.lowStock() : api.products.list({ search, categoryId, includeInactive: true })),
@@ -37,6 +39,7 @@ export default function Products() {
               {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <Toggle checked={lowOnly} onChange={setLowOnly} label={t('products.lowStock')} />
+            <button onClick={() => setLabels(true)}>🏷 {t('labels.button')}</button>
             <ExcelButtons kind="products" onImported={() => { reload(); reloadCategories(); }} />
             <button className="primary" onClick={() => setEditing({})}>+ {t('products.new')}</button>
           </div>
@@ -86,6 +89,7 @@ export default function Products() {
       )}
 
       {editing && <ProductModal product={editing} categories={categories || []} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {labels && list && <LabelsModal products={list} onClose={() => setLabels(false)} onChanged={reload} />}
       {adjusting && <AdjustModal product={adjusting} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); reload(); }} />}
     </div>
   );

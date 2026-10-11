@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { api } from '../lib/api.js';
+import { api, savePdf } from '../lib/api.js';
+import { openWhatsApp, quoteText, statementText } from '../lib/share.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { a4Html, collectionHtml, statementHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
@@ -60,7 +61,7 @@ function CustomerList() {
           <tbody>
             {(list || []).map((c) => (
               <tr key={c.id} className={`clickable ${c.active ? '' : 'dim'}`} onClick={() => setStatementId(c.id)}>
-                <td><b>{c.name}</b>{c.tax_number && <small className="muted"> · {c.tax_number}</small>}</td>
+                <td><b>{c.name}</b>{c.tax_number && <small className="muted"> · {c.tax_number}</small>}{settings.loyalty_enabled && c.points > 0 && <small className="badge">⭐ {formatQty(c.points)}</small>}</td>
                 <td className="mono" dir="ltr">{c.phone}</td>
                 <td className="muted">{c.last_purchase?.slice(0, 10) || '—'}</td>
                 <td className="num">{m(c.total_sales)}</td>
@@ -143,6 +144,8 @@ function Quotes() {
           footer={<>
             {['quote', 'order'].includes(view.status) && <button className="danger-ghost" onClick={() => run(async () => { await api.quotes.setStatus({ id: view.id, status: 'cancelled' }); setView(null); reload(); })}>{t('quotes.cancel')}</button>}
             <span className="spacer" />
+            <button onClick={() => openWhatsApp(view.customer_phone, quoteText(view, settings, t))}>💬 {t('share.whatsapp')}</button>
+            <button onClick={() => savePdf({ html: a4Html(view, 'quote', settings, t, lang), name: `${t('a4.quote')} ${view.quote_no}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
             <button onClick={() => printDoc(a4Html(view, 'quote', settings, t, lang), settings.a4_printer_name)}>📄 {t('a4.printA4')}</button>
             {view.status === 'quote' && <button onClick={() => run(async () => { setView(await api.quotes.setStatus({ id: view.id, status: 'order' })); reload(); })}>✅ {t('quotes.accept')}</button>}
             {['quote', 'order'].includes(view.status) && <button className="primary" onClick={() => run(async () => openInPos(await api.quotes.toCart(view.id)))}>🧾 {t('quotes.toInvoice')}</button>}
@@ -206,7 +209,7 @@ function CustomerModal({ customer, onClose, onSaved }) {
 }
 
 function Statement({ id, onClose }) {
-  const { t, tErr, notify, settings, printDoc, lang, shift } = useApp();
+  const { t, tErr, notify, settings, printDoc, lang, shift, can } = useApp();
   const [data, reload] = useLoad(() => api.customers.statement({ id }), [id]);
   const [pay, setPay] = useState(null);
   const m = (v) => formatMoney(v, settings);
@@ -246,7 +249,9 @@ function Statement({ id, onClose }) {
         <>
           <span>{t('customers.balance')}: <b className={customer.balance > 0 ? 'warn' : 'good'}>{m(customer.balance)}</b></span>
           <span className="spacer" />
-          <button onClick={() => printDoc(statementHtml(data, settings, t, lang))}>🖨 {t('customers.printStatement')}</button>
+          <button onClick={() => openWhatsApp(customer.phone, statementText(data, settings, t))}>💬 {t('share.whatsapp')}</button>
+          <button onClick={() => savePdf({ html: statementHtml(data, settings, t, lang), name: `${t('purchases.statement')} ${customer.name}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
+          <button onClick={() => printDoc(statementHtml(data, settings, t, lang), settings.a4_printer_name)}>🖨 {t('customers.printStatement')}</button>
           <button className="primary" onClick={() => setPay({ amount: customer.balance > 0 ? fromMinor(customer.balance, settings.decimals) : '', method: 'cash', notes: '', print: true })}>💵 {t('customers.collect')}</button>
         </>
       )}>
@@ -254,6 +259,11 @@ function Statement({ id, onClose }) {
         {customer.phone && <span dir="ltr">📞 {customer.phone}</span>}
         {customer.address && <span>📍 {customer.address}</span>}
         {customer.credit_limit > 0 && <span>{t('customers.limit')}: {m(customer.credit_limit)}</span>}
+        {settings.loyalty_enabled && <span>⭐ {t('loyalty.points')}: <b>{formatQty(customer.points || 0)}</b>
+          {can('customers_edit') && <button className="ghost sm" onClick={async () => {
+            const v = window.prompt(t('loyalty.adjustPrompt'));
+            if (v && Number(v)) { try { await api.customers.adjustPoints({ customerId: id, points: Number(v) }); reload(); } catch (err) { notify(tErr(err), 'error'); } }
+          }}>±</button>}</span>}
       </div>
       <table className="grid">
         <thead><tr><th>{t('orders.date')}</th><th>{t('orders.type')}</th><th className="num">{t('customers.debit')}</th><th className="num">{t('customers.credit')}</th><th className="num">{t('customers.balance')}</th></tr></thead>

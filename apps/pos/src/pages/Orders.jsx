@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { api } from '../lib/api.js';
+import { api, savePdf } from '../lib/api.js';
+import { invoiceText, openWhatsApp } from '../lib/share.js';
 import { formatMoney, formatQty } from '../lib/money.js';
 import { a4Html, receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
@@ -119,6 +120,8 @@ function OrderModal({ id, onClose, onChanged }) {
         <>
           {canRefund && <button className="danger-ghost" onClick={() => setRefunding(true)}>↩ {t('orders.refund')}</button>}
           <span className="spacer" />
+          <button onClick={() => openWhatsApp(order.customer?.phone || order.customer_phone, invoiceText(order, settings, t))}>💬 {t('share.whatsapp')}</button>
+          <button onClick={() => savePdf({ html: a4Html(order, 'invoice', settings, t, lang), name: `${t('receipt.invoice')} ${order.invoice_no}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
           <button onClick={() => printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name)}>📄 {t('a4.printA4')}</button>
           <button className="primary" onClick={() => printDoc(receiptHtml(order, settings, t, lang))}>🖨 {t('orders.reprint')}</button>
         </>

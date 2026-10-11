@@ -15,7 +15,11 @@ const cartFromOrder = (o) => ({
   discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
   customer_address: o.customer_address, note: o.note,
   salesperson_id: o.salesperson_id,
-  items: o.items.map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty, discount: i.discount, note: i.note, kitchen_sent: i.kitchen_sent })),
+  items: o.items.map((i) => ({
+    id: i.id, product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty,
+    // Stored discounts include automatic promotions, which are re-applied on their own.
+    discount: Math.max(0, i.discount - (i.promo_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent,
+  })),
 });
 
 export default function Pos() {
@@ -218,6 +222,7 @@ export default function Pos() {
                   <span className="line-name">{it.name}</span>
                   {it.note && <small className="muted">{it.note}</small>}
                   {it.kitchen_sent > 0 && <small className="sent">✓ {formatQty(it.kitchen_sent)}</small>}
+                  {ql?.promo_name && <small className="promo">🏷 {ql.promo_name} −{m(ql.promo_discount)}</small>}
                 </div>
                 <div className="qty" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x)) }))}>−</button>
@@ -313,8 +318,8 @@ export default function Pos() {
           total={quote.total}
           customer={modal.customer}
           onClose={() => { setModal(null); focusSearch(); }}
-          onPay={(payments, printReceipt) => run(async () => {
-            const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval }));
+          onPay={(payments, printReceipt, redeemPoints) => run(async () => {
+            const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval, redeem_points: redeemPoints || 0 }));
             setModal(null);
             notify(t('pay.done', { n: order.invoice_no }));
             if (printReceipt) {
@@ -588,7 +593,10 @@ function PayModal({ total, customer, onClose, onPay }) {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
 
-  const paid = METHODS.reduce((s, k) => s + toMinor(amounts[k], d), 0);
+  const loyaltyOn = settings.loyalty_enabled && customer;
+  const [redeem, setRedeem] = useState(0);
+  const pointsValue = Math.round(redeem * (settings.loyalty_point_value || 0));
+  const paid = METHODS.reduce((s, k) => s + toMinor(amounts[k], d), 0) + pointsValue;
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const m = (v) => formatMoney(v, settings);
@@ -616,7 +624,7 @@ function PayModal({ total, customer, onClose, onPay }) {
   async function submit() {
     if (!canComplete) return;
     setBusy(true);
-    await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt);
+    await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt, redeem);
     setBusy(false);
   }
 
@@ -633,6 +641,18 @@ function PayModal({ total, customer, onClose, onPay }) {
       </>}
     >
       <div className="pay-due"><span>{t('pay.due')}</span><b>{m(total)}</b></div>
+      {loyaltyOn && customer.points >= (settings.loyalty_min_redeem || 0) && customer.points > 0 && (
+        <div className="pay-customer points">
+          <span>⭐ {t('loyalty.available', { n: formatQty(customer.points), v: m(Math.round(customer.points * settings.loyalty_point_value)) })}</span>
+          {redeem
+            ? <button type="button" onClick={() => setRedeem(0)}>{t('loyalty.cancelRedeem', { n: redeem })}</button>
+            : <button type="button" onClick={() => {
+              const max = Math.min(Math.floor(customer.points), Math.floor(total / (settings.loyalty_point_value || 1)));
+              setRedeem(max);
+              setAmounts((a) => ({ ...a, cash: fromMinor(Math.max(0, total - Math.round(max * settings.loyalty_point_value)), d) }));
+            }}>{t('loyalty.redeem')}</button>}
+        </div>
+      )}
       {customer && (
         <div className="pay-customer">
           <span>👤 <b>{customer.name}</b> · {t('customers.balance')}: {m(customer.balance)}{customer.credit_limit > 0 ? ` / ${t('customers.limit')} ${m(customer.credit_limit)}` : ''}</span>

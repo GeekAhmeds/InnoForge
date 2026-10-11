@@ -6,15 +6,15 @@ import { formatMoney } from '../lib/money.js';
 import Support from '../components/Support.jsx';
 import { UpdatePanel } from '../components/Updates.jsx';
 
-const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'users', 'audit', 'tables', 'data', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'data', 'support'];
 // Which permission opens each tab.
-const TAB_PERM = { priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', data: 'backup', support: null };
+const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', data: 'backup', support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
   const tabs = TABS.filter((x) => (x !== 'tables' || settings.business_type === 'restaurant') && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -25,6 +25,7 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'audit' && <AuditLog />}
       {tab === 'priceLists' && <PriceLists />}
+      {tab === 'promos' && <><Promotions /><Loyalty /></>}
       {tab === 'tables' && <Tables />}
       {tab === 'data' && <Data />}
       {tab === 'support' && (
@@ -116,6 +117,10 @@ function SettingsForm({ tab }) {
             </select>
           </Field>
           <Field label={t('a4.printer')}>{printerSelect('a4_printer_name')}</Field>
+          <Field label={t('labels.printer')}>{printerSelect('label_printer_name')}</Field>
+          <Field label={t('labels.size')}>
+            <select value={f.label_size} onChange={set('label_size')}>{['38x25', '50x30', '58x40', 'a4'].map((k) => <option key={k} value={k}>{k === 'a4' ? t('labels.a4') : `${k.replace('x', ' × ')} mm`}</option>)}</select>
+          </Field>
           <Field label={t('a4.logo')} hint={t('a4.logoHint')}>
             <div className="row">
               {f.business_logo && <img src={f.business_logo} alt="" className="logo-preview" />}
@@ -218,6 +223,131 @@ function Users() {
 
 // Detail fields holding money (stored in minor units) and how to label every field.
 const AUDIT_MONEY = new Set(['amount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to']);
+
+const DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+function Promotions() {
+  const { t, tErr, notify, settings } = useApp();
+  const [list, reload] = useLoad(() => api.promotions.list(), []);
+  const [cats] = useLoad(() => api.categories.list(), []);
+  const [prods] = useLoad(() => api.products.list({}), []);
+  const [editing, setEditing] = useState(null);
+  const d = settings.decimals;
+  const run = async (fn) => { try { await fn(); } catch (err) { notify(tErr(err), 'error'); } };
+  const today = new Date().toLocaleDateString('en-CA');
+  const live = (p) => p.active && (!p.start_date || p.start_date <= today) && (!p.end_date || p.end_date >= today);
+  const describe = (p) => {
+    const target = p.scope === 'all' ? t('promos.scope.all') : p.scope === 'category' ? cats?.find((c) => c.id === p.target_id)?.name : prods?.find((x) => x.id === p.target_id)?.name;
+    const what = p.kind === 'percent' ? `${p.value}%` : p.kind === 'amount' ? formatMoney(p.value, settings) : t('promos.buyGet', { b: p.buy_qty, g: p.get_qty });
+    return `${what} — ${target || '?'}`;
+  };
+  const save = () => run(async () => {
+    await api.promotions.save({ ...editing, value: editing.kind === 'amount' ? toMinorLocal(editing.value, d) : Number(editing.value) });
+    setEditing(null);
+    reload();
+  });
+  const blank = { name: '', kind: 'percent', scope: 'all', target_id: '', value: 10, buy_qty: 2, get_qty: 1, min_qty: '', start_date: '', end_date: '', days: [], time_from: '', time_to: '', active: true };
+  return (
+    <div className="card wide-ish">
+      <div className="row between"><h3>🏷 {t('promos.title')}</h3><button className="primary" onClick={() => setEditing(blank)}>+ {t('promos.new')}</button></div>
+      <p className="muted small">{t('promos.hint')}</p>
+      <div className="cat-list">
+        {(list || []).map((p) => (
+          <div key={p.id} className={`cat-row ${p.active ? '' : 'dim'}`}>
+            <span className={`dot lg ${live(p) ? 'live' : ''}`} style={{ background: live(p) ? 'var(--good)' : '#cbd5e1' }} />
+            <div className="spacer"><b>{p.name}</b><div className="muted small">{describe(p)}{p.end_date ? ` · ${t('common.to')} ${p.end_date}` : ''}{p.time_from ? ` · ${p.time_from}–${p.time_to}` : ''}</div></div>
+            <button className="ghost sm" onClick={() => setEditing({ ...p, days: p.days ? p.days.split(',').map(Number) : [], value: p.kind === 'amount' ? (p.value / 10 ** d).toFixed(d) : p.value, target_id: p.target_id || '' })}>{t('common.edit')}</button>
+            <button className="danger-ghost sm" onClick={() => run(async () => { if (window.confirm(t('common.areYouSure'))) { await api.promotions.remove(p.id); reload(); } })}>{t('common.delete')}</button>
+          </div>
+        ))}
+        {list && !list.length && <p className="muted">{t('promos.none')}</p>}
+      </div>
+      {editing && (
+        <Modal title={editing.id ? editing.name : t('promos.new')} onClose={() => setEditing(null)} width={640}
+          footer={<><Toggle checked={editing.active} onChange={(v) => setEditing({ ...editing, active: v })} label={t('common.active')} /><span className="spacer" /><button className="primary" onClick={save}>{t('common.save')}</button></>}>
+          <div className="grid2">
+            <div className="span2"><Field label={t('common.name')}><input autoFocus value={editing.name} placeholder={t('promos.namePh')} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field></div>
+            <Field label={t('promos.kind')}>
+              <select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value })}>
+                {['percent', 'amount', 'buy_x_get_y'].map((k) => <option key={k} value={k}>{t(`promos.kind.${k}`)}</option>)}
+              </select>
+            </Field>
+            {editing.kind === 'buy_x_get_y' ? (
+              <div className="row">
+                <Field label={t('promos.buy')}><input type="number" min="1" value={editing.buy_qty} onChange={(e) => setEditing({ ...editing, buy_qty: e.target.value })} /></Field>
+                <Field label={t('promos.get')}><input type="number" min="1" value={editing.get_qty} onChange={(e) => setEditing({ ...editing, get_qty: e.target.value })} /></Field>
+              </div>
+            ) : (
+              <Field label={editing.kind === 'percent' ? t('pos.discountPercent') : t('promos.amountPerUnit')}><input inputMode="decimal" value={editing.value} onChange={(e) => setEditing({ ...editing, value: e.target.value })} /></Field>
+            )}
+            <Field label={t('promos.appliesTo')}>
+              <select value={editing.scope} onChange={(e) => setEditing({ ...editing, scope: e.target.value, target_id: '' })}>
+                {['all', 'category', 'product'].map((k) => <option key={k} value={k}>{t(`promos.scope.${k}`)}</option>)}
+              </select>
+            </Field>
+            {editing.scope !== 'all' ? (
+              <Field label={editing.scope === 'category' ? t('products.category') : t('receipt.item')}>
+                <select value={editing.target_id} onChange={(e) => setEditing({ ...editing, target_id: Number(e.target.value) || '' })}>
+                  <option value="">—</option>
+                  {(editing.scope === 'category' ? cats : prods || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              </Field>
+            ) : <span />}
+            {editing.kind !== 'buy_x_get_y' && <Field label={t('promos.minQty')} hint={t('promos.minQtyHint')}><input type="number" min="0" value={editing.min_qty} onChange={(e) => setEditing({ ...editing, min_qty: e.target.value })} /></Field>}
+            {editing.kind !== 'buy_x_get_y' && <span />}
+            <Field label={t('common.from')}><input type="date" value={editing.start_date || ''} onChange={(e) => setEditing({ ...editing, start_date: e.target.value })} /></Field>
+            <Field label={t('common.to')}><input type="date" value={editing.end_date || ''} onChange={(e) => setEditing({ ...editing, end_date: e.target.value })} /></Field>
+            <Field label={t('promos.timeFrom')}><input type="time" value={editing.time_from} onChange={(e) => setEditing({ ...editing, time_from: e.target.value })} /></Field>
+            <Field label={t('promos.timeTo')}><input type="time" value={editing.time_to} onChange={(e) => setEditing({ ...editing, time_to: e.target.value })} /></Field>
+            <div className="span2">
+              <span className="muted small">{t('promos.days')}</span>
+              <div className="row wrap days-row">
+                {DAYS.map((day) => (
+                  <label key={day} className={`day-chip ${editing.days.includes(day) ? 'on' : ''}`}>
+                    <input type="checkbox" checked={editing.days.includes(day)} onChange={(e) => setEditing({ ...editing, days: e.target.checked ? [...editing.days, day] : editing.days.filter((x) => x !== day) })} />
+                    {t(`day.${day}`)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const toMinorLocal = (v, d) => Math.round((Number(v) || 0) * 10 ** d);
+
+function Loyalty() {
+  const { t, tErr, notify, settings, reloadSettings } = useApp();
+  const [f, setF] = useState({
+    loyalty_enabled: settings.loyalty_enabled, loyalty_earn_per: settings.loyalty_earn_per,
+    loyalty_point_value: (settings.loyalty_point_value / 10 ** settings.decimals).toFixed(settings.decimals), loyalty_min_redeem: settings.loyalty_min_redeem,
+  });
+  const save = async () => {
+    try {
+      await api.settings.save({ ...f, loyalty_point_value: toMinorLocal(f.loyalty_point_value, settings.decimals) });
+      await reloadSettings();
+      notify(t('common.saved'));
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  };
+  return (
+    <div className="card wide-ish">
+      <h3>⭐ {t('loyalty.title')}</h3>
+      <Toggle checked={f.loyalty_enabled} onChange={(v) => setF({ ...f, loyalty_enabled: v })} label={t('loyalty.enable')} />
+      <div className="grid3 top-gap">
+        <Field label={t('loyalty.earnPer')}><input type="number" min="1" value={f.loyalty_earn_per} onChange={(e) => setF({ ...f, loyalty_earn_per: e.target.value })} /></Field>
+        <Field label={t('loyalty.pointValue')}><input inputMode="decimal" value={f.loyalty_point_value} onChange={(e) => setF({ ...f, loyalty_point_value: e.target.value })} /></Field>
+        <Field label={t('loyalty.minRedeem')}><input type="number" min="0" value={f.loyalty_min_redeem} onChange={(e) => setF({ ...f, loyalty_min_redeem: e.target.value })} /></Field>
+      </div>
+      <p className="muted small">{t('loyalty.example', { per: f.loyalty_earn_per, value: f.loyalty_point_value, back: ((Number(f.loyalty_point_value) / Number(f.loyalty_earn_per || 1)) * 100).toFixed(1) })}</p>
+      <div className="form-foot"><button className="primary" onClick={save}>{t('common.save')}</button></div>
+    </div>
+  );
+}
 
 function PriceLists() {
   const { t, tErr, notify } = useApp();

@@ -38,7 +38,8 @@ export function receiptHtml(order, settings, t, lang) {
   const rows = order.items.map((i) => `
     <tr><td>${esc(i.name)}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>
     ${i.qty !== 1 ? `<tr><td class="note" colspan="3">${formatQty(i.qty)} × ${m(i.unit_price)}${i.discount ? ` − ${m(i.discount)}` : ''}</td></tr>` : ''}
-    ${i.note ? `<tr><td class="note" colspan="3">${esc(i.note)}</td></tr>` : ''}`).join('');
+    ${i.note ? `<tr><td class="note" colspan="3">${esc(i.note)}</td></tr>` : ''}
+    ${i.promo_name ? `<tr><td class="note" colspan="3">🏷 ${esc(i.promo_name)} −${m(i.promo_discount)}</td></tr>` : ''}`).join('');
   const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
   const changeRow = order.change_due ? line(t('pay.change'), m(order.change_due)) : '';
   const pays = order.payments.map((p) => line(t(`pay.${p.method}`), m(p.amount + (p.method === 'cash' ? order.change_due : 0)))).join('');
@@ -69,7 +70,9 @@ export function receiptHtml(order, settings, t, lang) {
     ${changeRow}
     ${order.credit ? line(t('pay.onAccount'), m(order.credit), 'big') : ''}
     ${order.refunded ? line(t('receipt.refunded'), m(order.refunded)) : ''}
-    ${order.customer_balance != null ? line(t('customers.currentBalance'), m(order.customer_balance)) : ''}
+    ${order.customer_balance != null && (order.credit || order.customer_balance) ? line(t('customers.currentBalance'), m(order.customer_balance)) : ''}
+    ${order.points_earned ? line(`⭐ ${t('loyalty.earned')}`, `+${formatQty(order.points_earned)}`) : ''}
+    ${order.customer?.points != null && (order.points_earned || order.points_redeemed) ? line(`⭐ ${t('loyalty.balance')}`, formatQty(order.customer.points)) : ''}
   </table>
   ${order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
   <hr>

@@ -9,7 +9,7 @@ const { createUpdater } = require('./updater.cjs');
 const excel = require('./excel.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
@@ -337,6 +337,28 @@ ipcMain.handle('pos:excelExport', async (_e, { kind, ...params } = {}) => {
     return ok(filePath);
   } catch (err) {
     return fail(err);
+  }
+});
+
+// Renders a document to PDF (A4) and lets the user save it, e.g. to attach on WhatsApp.
+ipcMain.handle('pos:savePdf', async (_e, { html, name = 'document' } = {}) => {
+  const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    const pdf = await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
+    const safe = String(name).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: path.join(app.getPath('documents'), `${safe}.pdf`),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return ok(null);
+    fs.writeFileSync(filePath, pdf);
+    shell.showItemInFolder(filePath);
+    return ok(filePath);
+  } catch (err) {
+    return fail(err);
+  } finally {
+    win.destroy();
   }
 });
 

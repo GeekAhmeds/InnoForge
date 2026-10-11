@@ -406,3 +406,46 @@ test('quotes become invoices; aging buckets; serials required and searchable; st
   assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(cable).stock, 2);
   assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(phone).stock, 3);
 });
+
+test('promotions: buy 2 get 1, category percent with time window, best promo wins, exempt from discount permission', () => {
+  const { s, db } = setup();
+  const cat = s.categories.save({ name: 'Snacks' });
+  const chips = s.products.save({ name: 'Chips', price: 1000, category_id: cat, track_stock: false });
+  const soda = s.products.save({ name: 'Soda', price: 2000, track_stock: false });
+  s.promotions.save({ name: '2+1', kind: 'buy_x_get_y', scope: 'product', target_id: chips, buy_qty: 2, get_qty: 1 });
+  s.promotions.save({ name: 'Snacks 10%', kind: 'percent', scope: 'category', target_id: cat, value: 10 });
+  s.promotions.save({ name: 'Night', kind: 'percent', scope: 'all', value: 50, time_from: '03:00', time_to: '03:01' });
+  const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
+  s.promotions.save({ name: 'Expired', kind: 'percent', scope: 'all', value: 90, end_date: yesterday });
+  const q = s.orders.quote({ items: [{ product_id: chips, qty: 6 }, { product_id: soda, qty: 1 }] });
+  assert.equal(q.lines[0].promo_discount, 2000); // 2 free beats 10% (600)
+  assert.equal(q.lines[0].promo_name, '2+1');
+  assert.equal(q.lines[1].promo_discount || 0, new Date().toTimeString().slice(0, 5) === '03:00' ? 1000 : 0);
+  s.users.save({ name: 'C', username: 'c9', pin: '9999', role: 'cashier', overrides: { discount: false } });
+  s.shifts.open({});
+  s.auth.logout();
+  s.auth.login({ username: 'c9', pin: '9999' });
+  const o = s.orders.checkout({ items: [{ product_id: chips, qty: 3 }], payments: [{ method: 'cash', amount: 2000 }] });
+  assert.equal(o.total, 2000);
+  assert.equal(o.items[0].promo_name, '2+1');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_log WHERE action = ?').get('discount').n, 0);
+});
+
+test('loyalty: earn on paid amount, redeem as payment, minimums, reversal on return', () => {
+  const { s } = setup({ loyalty_enabled: true, loyalty_earn_per: 10, loyalty_point_value: 10, loyalty_min_redeem: 50 });
+  const p = s.products.save({ name: 'Bag', price: 25000, stock: 10 });
+  const cust = s.customers.save({ name: 'Mona', phone: '0123' });
+  s.shifts.open({});
+  const o1 = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 2 }], payments: [{ method: 'cash', amount: 50000 }] });
+  assert.equal(o1.points_earned, 50); // 500 EGP / 10
+  assert.equal(s.customers.get(cust).points, 50);
+  assert.equal(tryCode(() => s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 1 }], redeem_points: 60, payments: [{ method: 'cash', amount: 25000 }] })), 'NOT_ENOUGH_POINTS');
+  assert.equal(tryCode(() => s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 1 }], redeem_points: 40, payments: [{ method: 'cash', amount: 25000 }] })), 'BELOW_MIN_REDEEM');
+  const o2 = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 1 }], redeem_points: 50, payments: [{ method: 'cash', amount: 24500 }] });
+  assert.deepEqual(o2.payments.map((x) => [x.method, x.amount]), [['cash', 24500], ['points', 500]]);
+  assert.equal(o2.points_earned, 24); // 245 EGP actually paid
+  assert.equal(s.customers.get(cust).points, 24);
+  s.orders.refund({ orderId: o1.id, items: [{ order_item_id: o1.items[0].id, qty: 1 }] });
+  assert.equal(s.customers.get(cust).points, 0); // 25 points taken back, floored at 0
+  assert.equal(tryCode(() => s.orders.checkout({ items: [{ product_id: p, qty: 1 }], redeem_points: 50, payments: [] })), 'LOYALTY_UNAVAILABLE');
+});

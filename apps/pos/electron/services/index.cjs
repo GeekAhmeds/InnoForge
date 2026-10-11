@@ -30,6 +30,12 @@ const DEFAULT_SETTINGS = {
   a4_printer_name: '',
   a4_terms: '',
   overdue_days: 30,
+  loyalty_enabled: false,
+  loyalty_earn_per: 10, // spend this much (major units) to earn 1 point
+  loyalty_point_value: 10, // value of 1 point in minor units (10 = 0.10)
+  loyalty_min_redeem: 100,
+  label_printer_name: '',
+  label_size: '38x25',
 };
 
 class PosError extends Error {
@@ -377,6 +383,29 @@ function createServices(db) {
       const p = db.prepare(`${PRODUCT_SELECT} WHERE p.id = ? AND p.active = 1`).get(unit.product_id);
       return p ? { ...withUnitsAndPrices([plain(p)])[0], unit: plain(unit) } : null;
     },
+    /**
+     * Gives products without a barcode an internal EAN-13 ("20" + id + check digit),
+     * so their labels can be scanned. Returns how many were assigned.
+     */
+    generateBarcodes({ ids = null } = {}) {
+      requirePerm('products');
+      const rows = ids?.length
+        ? db.prepare(`SELECT id FROM products WHERE (barcode IS NULL OR barcode = '') AND id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+        : db.prepare("SELECT id FROM products WHERE barcode IS NULL OR barcode = ''").all();
+      const check = (d12) => String((10 - ([...d12].reduce((sum, c, i) => sum + Number(c) * (i % 2 ? 3 : 1), 0) % 10)) % 10);
+      let n = 0;
+      transaction(db, () => {
+        for (const { id } of rows) {
+          const d12 = `20${String(id).padStart(10, '0')}`;
+          const code = d12 + check(d12);
+          if (db.prepare('SELECT 1 FROM products WHERE barcode = ?').get(code) || db.prepare('SELECT 1 FROM product_units WHERE barcode = ?').get(code)) continue;
+          db.prepare('UPDATE products SET barcode = ? WHERE id = ?').run(code, id);
+          n++;
+        }
+      });
+      if (n) audit('barcodes_generated', { details: { count: n } });
+      return n;
+    },
     /** Products with stock in batches that expire within `days` (or already expired). */
     expiring({ days = 30 } = {}) {
       requireUser();
@@ -581,7 +610,7 @@ function createServices(db) {
     order.payments = plainAll(db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id').all(id));
     order.returns = plainAll(db.prepare('SELECT r.*, u.name AS user_name FROM returns r JOIN users u ON u.id = r.user_id WHERE r.order_id = ? ORDER BY r.id').all(id));
     order.customer_balance = order.customer_id ? customerBalance(order.customer_id) : null;
-    order.customer = order.customer_id ? plain(db.prepare('SELECT id, name, phone, address, tax_number FROM customers WHERE id = ?').get(order.customer_id)) : null;
+    order.customer = order.customer_id ? plain(db.prepare('SELECT id, name, phone, address, tax_number, points FROM customers WHERE id = ?').get(order.customer_id)) : null;
     return order;
   }
 
@@ -589,6 +618,84 @@ function createServices(db) {
    * Re-prices a cart from the database so the renderer can never dictate
    * prices, then computes totals with the current tax/service settings.
    */
+  // ---------- promotions ----------
+  /** Promotions running right now (date range, weekday and time window). */
+  function activePromotions(at = new Date()) {
+    const date = at.toLocaleDateString('en-CA');
+    const day = String(at.getDay());
+    const time = at.toTimeString().slice(0, 5);
+    return db.prepare('SELECT * FROM promotions WHERE active = 1').all().filter((p) =>
+      (!p.start_date || p.start_date <= date) && (!p.end_date || p.end_date >= date)
+      && (!p.days || p.days.split(',').includes(day))
+      && (!p.time_from || !p.time_to || (p.time_from <= p.time_to ? time >= p.time_from && time <= p.time_to : time >= p.time_from || time <= p.time_to)));
+  }
+
+  /** Gives each line the single best promotion that applies to it (added to its discount). */
+  function applyPromotions(items) {
+    const promos = activePromotions();
+    if (!promos.length) return;
+    for (const it of items) {
+      const gross = Math.round(it.unit_price * it.qty);
+      let best = { amount: 0, name: '' };
+      for (const p of promos) {
+        if (p.scope === 'product' && p.target_id !== it.product_id) continue;
+        if (p.scope === 'category' && p.target_id !== it.category_id) continue;
+        if (p.min_qty && it.qty < p.min_qty) continue;
+        let amount = 0;
+        if (p.kind === 'percent') amount = Math.round((gross * p.value) / 100);
+        else if (p.kind === 'amount') amount = Math.round(p.value * it.qty);
+        else if (p.kind === 'buy_x_get_y' && p.buy_qty > 0 && p.get_qty > 0) {
+          const free = Math.floor(it.qty / (p.buy_qty + p.get_qty)) * p.get_qty;
+          amount = Math.round(free * it.unit_price);
+        }
+        amount = Math.min(amount, Math.max(0, gross - it.manual_discount));
+        if (amount > best.amount) best = { amount, name: p.name };
+      }
+      it.promo_discount = best.amount;
+      it.promo_name = best.name;
+      it.discount = it.manual_discount + best.amount;
+    }
+  }
+
+  const promotions = {
+    list() {
+      requireUser();
+      return plainAll(db.prepare('SELECT * FROM promotions ORDER BY active DESC, id DESC').all());
+    },
+    active() {
+      requireUser();
+      return activePromotions().map(plain);
+    },
+    save(p = {}) {
+      requirePerm('settings');
+      if (!str(p.name)) throw new PosError('NAME_REQUIRED');
+      if (!['percent', 'amount', 'buy_x_get_y'].includes(p.kind)) throw new PosError('INVALID_PROMO');
+      const scope = ['all', 'category', 'product'].includes(p.scope) ? p.scope : 'all';
+      if (scope !== 'all' && !int(p.target_id)) throw new PosError('INVALID_PROMO');
+      if (p.kind === 'buy_x_get_y' && !(num(p.buy_qty) > 0 && num(p.get_qty) > 0)) throw new PosError('INVALID_PROMO');
+      if (p.kind === 'percent' && !(num(p.value) > 0 && num(p.value) <= 100)) throw new PosError('INVALID_PROMO');
+      const f = {
+        name: str(p.name), kind: p.kind, scope, target_id: scope === 'all' ? null : int(p.target_id),
+        value: p.kind === 'amount' ? Math.max(0, int(p.value)) : num(p.value), buy_qty: num(p.buy_qty), get_qty: num(p.get_qty), min_qty: num(p.min_qty),
+        start_date: str(p.start_date) || null, end_date: str(p.end_date) || null,
+        days: Array.isArray(p.days) ? p.days.join(',') : str(p.days), time_from: str(p.time_from), time_to: str(p.time_to), active: p.active === false ? 0 : 1,
+      };
+      const keys = Object.keys(f);
+      audit('promo_save', { entity: 'promotion', entityId: p.id ?? null, details: { name: f.name, kind: f.kind } });
+      if (p.id) {
+        db.prepare(`UPDATE promotions SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => f[k]), p.id);
+        return p.id;
+      }
+      return Number(db.prepare(`INSERT INTO promotions (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => f[k])).lastInsertRowid);
+    },
+    remove(id) {
+      requirePerm('settings');
+      db.prepare('DELETE FROM promotions WHERE id = ?').run(id);
+      audit('promo_remove', { entity: 'promotion', entityId: id });
+      return true;
+    },
+  };
+
   /** The price list a cart sells at: explicit choice, else the customer's list. */
   function cartPriceList(cart) {
     let id = int(cart.price_list_id) || null;
@@ -625,12 +732,15 @@ function createServices(db) {
         unit_price: overridePrice ?? standard,
         unit_cost: Math.round(p.cost * factor),
         qty,
+        manual_discount: Math.max(0, int(it.discount)),
         discount: Math.max(0, int(it.discount)),
+        category_id: p.category_id,
         note: str(it.note),
         track_stock: p.track_stock,
         stock: p.stock,
       };
     });
+    applyPromotions(items);
     const orderType = ['sale', 'dine_in', 'takeaway', 'delivery'].includes(cart.order_type) ? cart.order_type : 'sale';
     const totals = computeTotals(items, {
       discount: int(cart.discount),
@@ -647,7 +757,8 @@ function createServices(db) {
    */
   function authorizeCart(priced, approval, { credit = 0 } = {}) {
     const gross = priced.lines.reduce((sum, l) => sum + Math.round(l.unit_price * l.qty), 0);
-    const discount = priced.lines.reduce((sum, l) => sum + Math.min(l.discount, Math.round(l.unit_price * l.qty)), 0) + priced.discount;
+    // Automatic promotions are not the cashier's discount, so only manual ones count here.
+    const discount = priced.lines.reduce((sum, l) => sum + Math.min(l.manual_discount, Math.round(l.unit_price * l.qty)), 0) + priced.discount;
     const pct = gross > 0 ? (discount / gross) * 100 : 0;
     const granted = [];
     if (discount > 0) {
@@ -708,13 +819,13 @@ function createServices(db) {
     for (const l of priced.lines) {
       const owned = l.id && db.prepare('SELECT id FROM order_items WHERE id = ? AND order_id = ?').get(l.id, orderId);
       if (owned) {
-        db.prepare('UPDATE order_items SET product_id = ?, name = ?, unit_price = ?, unit_cost = ?, qty = ?, discount = ?, line_total = ?, note = ?, unit_id = ?, unit_name = ?, unit_factor = ?, serials = ? WHERE id = ?')
-          .run(l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.id);
+        db.prepare('UPDATE order_items SET product_id = ?, name = ?, unit_price = ?, unit_cost = ?, qty = ?, discount = ?, line_total = ?, note = ?, unit_id = ?, unit_name = ?, unit_factor = ?, serials = ?, promo_discount = ?, promo_name = ? WHERE id = ?')
+          .run(l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '', l.id);
         keep.push(l.id);
       } else {
         keep.push(Number(
-          db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, serials) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(orderId, l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials).lastInsertRowid,
+          db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, serials, promo_discount, promo_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(orderId, l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '').lastInsertRowid,
         ));
       }
     }
@@ -796,14 +907,26 @@ function createServices(db) {
           .map((p) => ({ method: p.method, amount: int(p.amount) }))
           .filter((p) => p.amount > 0);
         if (payments.some((p) => !PAYMENT_METHODS.includes(p.method))) throw new PosError('INVALID_PAYMENT');
+        const customer = cart.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ? AND active = 1').get(cart.customer_id) : null;
+        if (cart.customer_id && !customer) throw new PosError('CUSTOMER_NOT_FOUND');
+
+        // Loyalty points redeemed count as a payment worth points × point value.
+        const loyalty = priced.settings.loyalty_enabled && customer;
+        const redeem = loyalty ? Math.max(0, Math.floor(num(cart.redeem_points))) : 0;
+        if (num(cart.redeem_points) > 0 && !loyalty) throw new PosError('LOYALTY_UNAVAILABLE');
+        if (redeem) {
+          if (redeem > customer.points + 1e-9) throw new PosError('NOT_ENOUGH_POINTS');
+          if (redeem < priced.settings.loyalty_min_redeem) throw new PosError('BELOW_MIN_REDEEM');
+          const value = Math.round(redeem * priced.settings.loyalty_point_value);
+          if (value > priced.total) throw new PosError('POINTS_EXCEED_TOTAL');
+          payments.push({ method: 'points', amount: value });
+        }
         const tendered = payments.reduce((s, p) => s + p.amount, 0);
         const nonCash = payments.filter((p) => p.method !== 'cash').reduce((s, p) => s + p.amount, 0);
         if (nonCash > priced.total) throw new PosError('NON_CASH_OVERPAY');
 
         // Anything not paid now goes on the customer's account (credit sale).
         let credit = 0;
-        const customer = cart.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ? AND active = 1').get(cart.customer_id) : null;
-        if (cart.customer_id && !customer) throw new PosError('CUSTOMER_NOT_FOUND');
         if (tendered < priced.total) {
           if (!customer) throw new PosError(payments.length ? 'INSUFFICIENT_PAYMENT' : 'PAYMENT_REQUIRED');
           credit = priced.total - tendered;
@@ -833,6 +956,16 @@ function createServices(db) {
         }
 
         for (const l of priced.lines) if (l.track_stock) moveStock(l.product_id, -l.qty * l.unit_factor, 'sale', orderId, u.id);
+        if (loyalty) {
+          // Points are earned on what the customer actually pays for (not on points spent).
+          const pointsValue = payments.find((p) => p.method === 'points')?.amount || 0;
+          const unit = (priced.settings.loyalty_earn_per || 0) * 10 ** (priced.settings.decimals ?? 2);
+          const earned = unit > 0 ? Math.floor((priced.total - pointsValue) / unit) : 0;
+          if (redeem) db.prepare("INSERT INTO loyalty_moves (customer_id, order_id, points, reason, user_id) VALUES (?, ?, ?, 'redeem', ?)").run(customer.id, orderId, -redeem, u.id);
+          if (earned) db.prepare("INSERT INTO loyalty_moves (customer_id, order_id, points, reason, user_id) VALUES (?, ?, ?, 'earn', ?)").run(customer.id, orderId, earned, u.id);
+          db.prepare('UPDATE customers SET points = points + ? WHERE id = ?').run(earned - redeem, customer.id);
+          db.prepare('UPDATE orders SET points_earned = ?, points_redeemed = ? WHERE id = ?').run(earned, redeem, orderId);
+        }
         if (cart.quote_id) db.prepare("UPDATE quotes SET status = 'invoiced', order_id = ? WHERE id = ? AND status IN ('quote', 'order')").run(orderId, cart.quote_id);
         for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
         return getOrder(orderId);
@@ -902,6 +1035,13 @@ function createServices(db) {
           if (p && p.track_stock) moveStock(l.line.product_id, l.qty * (l.line.unit_factor || 1), 'return', returnId, u.id);
         }
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
+        if (order.customer_id && order.points_earned > 0 && order.total > 0) {
+          const back = Math.min(order.points_earned, Math.round((order.points_earned * amount) / order.total));
+          if (back) {
+            db.prepare("INSERT INTO loyalty_moves (customer_id, order_id, points, reason, user_id) VALUES (?, ?, ?, 'return', ?)").run(order.customer_id, orderId, -back, u.id);
+            db.prepare('UPDATE customers SET points = MAX(0, points - ?) WHERE id = ?').run(back, order.customer_id);
+          }
+        }
         audit('refund', { entity: 'order', entityId: orderId, approvedBy, details: { invoice: order.invoice_no, amount, cash: cashOut, reason: str(reason), items: lines.map((l) => ({ name: l.line.name, qty: l.qty })) } });
         return getOrder(orderId);
       });
@@ -1163,6 +1303,16 @@ function createServices(db) {
       const inRange = rows.filter((r) => (!from || r.created_at >= from) && (!to || r.created_at < `${to} 99`));
       const opening = inRange.length ? inRange[0].balance - inRange[0].debit + inRange[0].credit : balance;
       return { customer, opening, rows: inRange, balance };
+    },
+    /** Manual points correction (e.g. a welcome bonus); needs customers_edit. */
+    adjustPoints({ customerId, points, reason = '' } = {}) {
+      const u = requirePerm('customers_edit').user;
+      const value = Math.round(num(points));
+      if (!value) throw new PosError('INVALID_AMOUNT');
+      db.prepare("INSERT INTO loyalty_moves (customer_id, points, reason, user_id) VALUES (?, ?, 'adjust', ?)").run(customerId, value, u.id);
+      db.prepare('UPDATE customers SET points = MAX(0, points + ?) WHERE id = ?').run(value, customerId);
+      audit('points_adjust', { entity: 'customer', entityId: customerId, details: { points: value, reason: str(reason) } });
+      return customers.get(customerId);
     },
     /** Receives money from a customer. Cash goes into the open shift's drawer. */
     collect({ customerId, amount, method = 'cash', notes = '' } = {}) {
@@ -1641,7 +1791,7 @@ function createServices(db) {
 
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, requireAdmin, requirePerm, audit, can,
   };
 }
 
