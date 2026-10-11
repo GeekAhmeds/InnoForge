@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty } from '../lib/money.js';
-import { receiptHtml } from '../lib/receipt.js';
+import { a4Html, receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 
@@ -13,6 +13,7 @@ export default function Orders() {
   const [to, setTo] = useState(today());
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState(null);
+  const [serialHits, setSerialHits] = useState(null);
   const [list, reload] = useLoad(() => api.orders.list({ from, to, search }), [from, to, search]);
   const m = (v) => formatMoney(v, settings);
   const sum = (list || []).reduce((s, o) => s + o.total - o.refunded, 0);
@@ -25,6 +26,10 @@ export default function Orders() {
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           <input placeholder={t('orders.searchHint')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="w-amount" placeholder={`🔎 ${t('orders.serial')}`} onKeyDown={async (e) => {
+            if (e.key !== 'Enter' || !e.target.value.trim()) return;
+            setSerialHits(await api.orders.findSerial(e.target.value.trim()));
+          }} />
           {can('reports') && <ExcelButtons kind="invoices" exportKind="invoices" params={{ from, to }} importable={false} />}
         </div>
       </div>
@@ -55,6 +60,19 @@ export default function Orders() {
         </table>
         {list && !list.length && <Empty>{t('common.none')}</Empty>}
       </div>
+      {serialHits && (
+        <Modal title={`🔎 ${t('orders.serial')}`} onClose={() => setSerialHits(null)} width={640}>
+          {!serialHits.length ? <Empty>{t('orders.serialNone')}</Empty> : (
+            <table className="grid"><tbody>
+              {serialHits.map((h) => (
+                <tr key={`${h.id}${h.name}`} className="clickable" onClick={() => { setSerialHits(null); setOpenId(h.id); }}>
+                  <td><b>#{h.invoice_no}</b></td><td>{h.completed_at}</td><td>{h.name}</td><td>{h.customer}</td><td className="mono small">{h.serials}</td>
+                </tr>
+              ))}
+            </tbody></table>
+          )}
+        </Modal>
+      )}
       {openId && <OrderModal id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
     </div>
   );
@@ -101,6 +119,7 @@ function OrderModal({ id, onClose, onChanged }) {
         <>
           {canRefund && <button className="danger-ghost" onClick={() => setRefunding(true)}>↩ {t('orders.refund')}</button>}
           <span className="spacer" />
+          <button onClick={() => printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name)}>📄 {t('a4.printA4')}</button>
           <button className="primary" onClick={() => printDoc(receiptHtml(order, settings, t, lang))}>🖨 {t('orders.reprint')}</button>
         </>
       )}

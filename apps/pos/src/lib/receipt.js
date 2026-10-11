@@ -160,3 +160,96 @@ export function statementHtml(data, settings, t, lang) {
   <p class="muted" style="margin-top:24px">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></p>
   </body></html>`;
 }
+
+/**
+ * Formal A4 document (tax invoice or quotation) with the business logo and the
+ * customer's tax details. `doc` is an order (kind 'invoice') or a quote (kind 'quote').
+ */
+export function a4Html(doc, kind, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  const rtl = lang === 'ar';
+  const isQuote = kind === 'quote';
+  const cust = isQuote
+    ? { name: doc.customer_display || doc.customer_name, phone: doc.customer_phone, address: doc.customer_address, tax: doc.customer_tax }
+    : { name: doc.customer?.name || doc.customer_name, phone: doc.customer?.phone || doc.customer_phone, address: doc.customer?.address || doc.customer_address, tax: doc.customer?.tax_number };
+  const title = isQuote ? t('a4.quote') : settings.tax_number ? t('a4.taxInvoice') : t('a4.invoice');
+  const row = (label, value, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${value}</td></tr>`;
+  const items = doc.items.map((i, n) => `<tr>
+      <td class="c">${n + 1}</td><td>${esc(i.name)}${i.serials ? `<div class="muted">S/N: ${esc(i.serials)}</div>` : ''}${i.note ? `<div class="muted">${esc(i.note)}</div>` : ''}</td>
+      <td class="c">${formatQty(i.qty)}</td><td class="n">${m(i.unit_price)}</td><td class="n">${i.discount ? m(i.discount) : '—'}</td><td class="n">${m(i.line_total)}</td></tr>`).join('');
+  const paid = (doc.payments || []).reduce((s, p) => s + p.amount, 0);
+  return `<!doctype html><html lang="${lang}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 12.5px/1.5 Tahoma, "Segoe UI", Arial, sans-serif; color: #111; }
+    .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 12px; border-bottom: 3px solid #0a43c9; }
+    .biz { display: flex; gap: 12px; align-items: center; }
+    .biz img { max-height: 70px; max-width: 160px; object-fit: contain; }
+    .biz h1 { margin: 0; font-size: 20px; }
+    .muted { color: #555; font-size: 11.5px; }
+    .doc { text-align: end; }
+    .doc h2 { margin: 0 0 4px; font-size: 22px; color: #0a43c9; }
+    .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+    .box { border: 1px solid #ccd; border-radius: 8px; padding: 8px 12px; }
+    .box h4 { margin: 0 0 4px; font-size: 12px; color: #0a43c9; }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th { background: #0a43c9; color: #fff; padding: 7px 8px; font-weight: 600; text-align: start; }
+    table.items td { padding: 7px 8px; border-bottom: 1px solid #e3e5ee; vertical-align: top; }
+    table.items tr:nth-child(even) td { background: #f6f8fd; }
+    .c { text-align: center; } .n { text-align: end; white-space: nowrap; }
+    .bottom { display: flex; justify-content: space-between; gap: 20px; margin-top: 14px; }
+    .totals { width: 300px; border-collapse: collapse; }
+    .totals td { padding: 5px 8px; border-bottom: 1px solid #e3e5ee; }
+    .totals .grand td { font-size: 16px; font-weight: bold; background: #0a43c9; color: #fff; }
+    .notes { flex: 1; font-size: 11.5px; }
+    .sign { display: flex; justify-content: space-between; margin-top: 40px; font-size: 12px; }
+    .sign div { width: 40%; border-top: 1px solid #999; padding-top: 4px; text-align: center; }
+    .foot { margin-top: 24px; text-align: center; color: #777; font-size: 10.5px; }
+  </style></head><body>
+  <div class="top">
+    <div class="biz">
+      ${settings.business_logo ? `<img src="${settings.business_logo}" alt="">` : ''}
+      <div><h1>${esc(settings.business_name)}</h1>
+        <div class="muted">${esc(settings.address)}</div>
+        <div class="muted">${settings.phone ? ltr(settings.phone) : ''}</div>
+        ${settings.tax_number ? `<div class="muted">${t('receipt.taxNumber')}: ${ltr(settings.tax_number)}</div>` : ''}</div>
+    </div>
+    <div class="doc"><h2>${title}</h2>
+      <div><b>${isQuote ? t('a4.quoteNo') : t('receipt.invoice')}</b> ${ltr(isQuote ? doc.quote_no : doc.invoice_no ?? doc.id)}</div>
+      <div>${t('receipt.date')}: ${ltr((isQuote ? doc.created_at : doc.completed_at || doc.created_at || '').slice(0, 10))}</div>
+      ${isQuote && doc.valid_until ? `<div>${t('a4.validUntil')}: ${ltr(doc.valid_until)}</div>` : ''}
+    </div>
+  </div>
+  <div class="parties">
+    <div class="box"><h4>${isQuote ? t('a4.to') : t('a4.billTo')}</h4>
+      <b>${esc(cust.name || t('a4.cashCustomer'))}</b>
+      ${cust.phone ? `<div>${ltr(cust.phone)}</div>` : ''}${cust.address ? `<div>${esc(cust.address)}</div>` : ''}
+      ${cust.tax ? `<div>${t('receipt.taxNumber')}: ${ltr(cust.tax)}</div>` : ''}</div>
+    <div class="box"><h4>${t('a4.details')}</h4>
+      <div>${t('receipt.cashier')}: ${esc(doc.user_name || '')}</div>
+      ${!isQuote && doc.order_type && doc.order_type !== 'sale' ? `<div>${t(`order.${doc.order_type}`)}${doc.table_name ? ` — ${t('pos.table')} ${esc(doc.table_name)}` : ''}</div>` : ''}
+      ${!isQuote ? `<div>${(doc.payments || []).map((p) => `${t(`pay.${p.method}`)}: ${m(p.amount)}`).join(' · ') || '—'}</div>` : ''}</div>
+  </div>
+  <table class="items"><thead><tr><th class="c">#</th><th>${t('receipt.item')}</th><th class="c">${t('pos.qty')}</th><th class="n">${t('pos.price')}</th><th class="n">${t('pos.discount')}</th><th class="n">${t('common.total')}</th></tr></thead>
+  <tbody>${items}</tbody></table>
+  <div class="bottom">
+    <div class="notes">
+      ${doc.note ? `<p><b>${t('pos.note')}:</b> ${esc(doc.note)}</p>` : ''}
+      ${settings.a4_terms ? `<p style="white-space:pre-wrap">${esc(settings.a4_terms)}</p>` : ''}
+      ${!isQuote && doc.customer_balance != null ? `<p><b>${t('customers.currentBalance')}:</b> ${m(doc.customer_balance)}</p>` : ''}
+    </div>
+    <table class="totals">
+      ${row(t('pos.subtotal'), m(doc.subtotal))}
+      ${doc.discount ? row(t('pos.discount'), '− ' + m(doc.discount)) : ''}
+      ${doc.service ? row(t('pos.service'), m(doc.service)) : ''}
+      ${doc.tax ? row(settings.prices_include_tax ? `${t('pos.tax')} (${t('receipt.taxIncluded')})` : `${t('pos.tax')} ${settings.tax_rate}%`, m(doc.tax)) : ''}
+      ${row(t('pos.total'), m(doc.total), 'grand')}
+      ${!isQuote && paid ? row(t('pay.paid'), m(paid)) : ''}
+      ${!isQuote && doc.credit ? row(t('pay.onAccount'), m(doc.credit)) : ''}
+      ${!isQuote && doc.refunded ? row(t('receipt.refunded'), m(doc.refunded)) : ''}
+    </table>
+  </div>
+  <div class="sign"><div>${t('a4.receivedBy')}</div><div>${t('a4.signature')}</div></div>
+  <div class="foot">${settings.receipt_footer ? esc(settings.receipt_footer) + ' — ' : ''}InnoForge POS · <span dir="ltr">${VENDOR.websiteLabel}</span></div>
+  </body></html>`;
+}

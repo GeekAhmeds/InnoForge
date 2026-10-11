@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
-import { kitchenHtml, receiptHtml } from '../lib/receipt.js';
+import { a4Html, kitchenHtml, receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -20,11 +20,13 @@ const cartFromOrder = (o) => ({
 
 export default function Pos() {
   const app = useApp();
-  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval } = app;
+  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval, pendingCart, setPendingCart } = app;
   const [salespeople, setSalespeople] = useState([]);
   useEffect(() => { api.auth.salespeople().then(setSalespeople).catch(() => {}); }, []);
   // Only offer the salesperson picker when someone besides the cashier earns commission.
   const reps = salespeople.filter((p) => p.commission_rate > 0);
+  const [priceLists, setPriceLists] = useState([]);
+  useEffect(() => { api.priceLists.list().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => {}); }, []);
   const restaurant = settings.business_type === 'restaurant';
   const defaultType = restaurant ? 'takeaway' : 'sale';
 
@@ -32,7 +34,9 @@ export default function Pos() {
   const [products, setProducts] = useState([]);
   const [categoryId, setCategoryId] = useState(null);
   const [search, setSearch] = useState('');
-  const [cart, setCart] = useState(() => emptyCart(defaultType));
+  // A quotation opened from the Customers page arrives as a pending cart.
+  const [cart, setCart] = useState(() => (pendingCart ? { ...emptyCart(defaultType), ...pendingCart } : emptyCart(defaultType)));
+  useEffect(() => { if (pendingCart) setPendingCart(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [quote, setQuote] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...}
   const searchRef = useRef(null);
@@ -54,12 +58,15 @@ export default function Pos() {
     return () => { live = false; };
   }, [cart, notify, tErr]);
 
-  const addProduct = useCallback((p, qty = 1) => {
+  // A scanned unit barcode (e.g. a carton) adds that unit; the server prices it.
+  const addProduct = useCallback((p, qty = 1, unit = null) => {
     setCart((c) => {
-      const idx = c.items.findIndex((i) => i.product_id === p.id && !i.note && !i.discount);
+      const unitId = unit?.id ?? null;
+      const idx = c.items.findIndex((i) => i.product_id === p.id && (i.unit_id ?? null) === unitId && !i.note && !i.discount && !i.price_override);
       const items = [...c.items];
+      const price = unit ? unit.price ?? Math.round(p.price * unit.factor) : p.price;
       if (idx >= 0) items[idx] = { ...items[idx], qty: items[idx].qty + qty };
-      else items.push({ product_id: p.id, name: p.name, unit_price: p.price, list_price: p.price, qty, discount: 0, note: '', kitchen_sent: 0 });
+      else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: price, list_price: price, qty, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial });
       return { ...c, items };
     });
   }, []);
@@ -71,7 +78,7 @@ export default function Pos() {
     const [, qtyStr, code] = q.match(/^(\d+(?:\.\d+)?)\*(.+)$/) || [null, null, q];
     const byCode = await api.products.byBarcode(code);
     if (byCode) {
-      addProduct(byCode, qtyStr ? Number(qtyStr) : 1);
+      addProduct(byCode, qtyStr ? Number(qtyStr) : 1, byCode.unit || null);
       setSearch('');
     } else if (products.length === 1) {
       addProduct(products[0]);
@@ -186,6 +193,13 @@ export default function Pos() {
             </button>
           )}
           <button className={cart.customer_id ? 'customer-chip' : 'ghost'} onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
+          {priceLists.length > 0 && (
+            <select className="rep-select" title={t('priceLists.title')} value={cart.price_list_id || ''} onChange={(e) => setCart((c) => ({ ...c, price_list_id: Number(e.target.value) || null }))}>
+              <option value="">💲 {t('priceLists.retail')}</option>
+              {priceLists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          {cart.quote_no && <span className="badge credit">{t('quotes.quote')} #{cart.quote_no}</span>}
           {reps.length > 0 && (
             <select className="rep-select" title={t('pos.salesperson')} value={cart.salesperson_id || ''} onChange={(e) => setCart((c) => ({ ...c, salesperson_id: Number(e.target.value) || null }))}>
               <option value="">🧑‍💼 {t('pos.salesperson')}</option>
@@ -224,9 +238,10 @@ export default function Pos() {
           <Row label={t('pos.total')} value={m(quote?.total)} big />
         </div>
 
-        <div className={`cart-actions ${restaurant ? 'three' : ''}`}>
+        <div className="cart-actions three">
           {restaurant && <button onClick={sendKitchen} disabled={!cart.items.length}>🔔 {t('pos.kitchen')}</button>}
           <button onClick={holdOrSave} disabled={!cart.items.length}>{restaurant ? t('pos.saveOrder') : `⏸ ${t('pos.hold')}`}</button>
+          {!restaurant && <button onClick={() => setModal({ kind: 'quote' })} disabled={!cart.items.length || !!cart.id}>📝 {t('quotes.save')}</button>}
           <button
             className="danger-ghost"
             onClick={() => run(async () => {
@@ -275,6 +290,18 @@ export default function Pos() {
           })}
         />
       )}
+      {modal?.kind === 'quote' && (
+        <QuoteModal
+          onClose={() => setModal(null)}
+          onSave={(extra, printIt) => run(async () => {
+            const q = await api.quotes.create({ ...cart, ...extra });
+            notify(t('quotes.saved', { n: q.quote_no }));
+            if (printIt) await printDoc(a4Html(q, 'quote', settings, t, lang), settings.a4_printer_name);
+            setModal(null);
+            reset();
+          })}
+        />
+      )}
       {modal?.kind === 'held' && (
         <HeldModal
           onClose={() => setModal(null)}
@@ -290,12 +317,30 @@ export default function Pos() {
             const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval }));
             setModal(null);
             notify(t('pay.done', { n: order.invoice_no }));
-            if (printReceipt) await printDoc(receiptHtml(order, settings, t, lang));
+            if (printReceipt) {
+              if (settings.invoice_format === 'a4') await printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name);
+              else await printDoc(receiptHtml(order, settings, t, lang));
+            }
             reset();
           })}
         />
       )}
     </div>
+  );
+}
+
+function QuoteModal({ onClose, onSave }) {
+  const { t } = useApp();
+  const d = new Date();
+  d.setDate(d.getDate() + 14);
+  const [validUntil, setValidUntil] = useState(d.toLocaleDateString('en-CA'));
+  const [printIt, setPrintIt] = useState(true);
+  return (
+    <Modal title={`📝 ${t('quotes.save')}`} onClose={onClose} width={420}
+      footer={<><Toggle checked={printIt} onChange={setPrintIt} label={t('a4.printA4')} /><span className="spacer" /><button className="primary" onClick={() => onSave({ valid_until: validUntil }, printIt)}>{t('common.save')}</button></>}>
+      <p className="muted">{t('quotes.hint')}</p>
+      <Field label={t('a4.validUntil')}><input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
+    </Modal>
   );
 }
 
@@ -330,6 +375,10 @@ function NoShift() {
 
 function LineModal({ item, onClose, onSave, onRemove }) {
   const { t, settings } = useApp();
+  const [product, setProduct] = useState(null);
+  useEffect(() => { api.products.get(item.product_id).then(setProduct).catch(() => {}); }, [item.product_id]);
+  const [unitId, setUnitId] = useState(item.unit_id ?? '');
+  const [serials, setSerials] = useState(item.serials || '');
   const [qty, setQty] = useState(String(item.qty));
   const [discount, setDiscount] = useState(item.discount ? fromMinor(item.discount, settings.decimals) : '');
   const [note, setNote] = useState(item.note);
@@ -338,7 +387,16 @@ function LineModal({ item, onClose, onSave, onRemove }) {
   const save = () => {
     const newPrice = toMinor(price, settings.decimals);
     const changed = newPrice !== item.unit_price || item.price_override;
-    onSave({ qty: Math.max(0.001, Number(qty) || 1), discount: toMinor(discount, settings.decimals), note, unit_price: newPrice, price_override: changed && newPrice !== item.list_price });
+    const unit = product?.units.find((u) => u.id === Number(unitId)) || null;
+    const unitChanged = (unit?.id ?? null) !== (item.unit_id ?? null);
+    // Switching unit resets the price to that unit's standard price (the server re-prices it).
+    const std = unit ? unit.price ?? Math.round(product.price * unit.factor) : product?.price ?? item.list_price;
+    onSave({
+      qty: Math.max(0.001, Number(qty) || 1), discount: toMinor(discount, settings.decimals), note, serials,
+      unit_id: unit?.id ?? null, name: product ? (unit ? `${product.name} (${unit.name})` : product.name) : item.name,
+      unit_price: unitChanged ? std : newPrice, list_price: unitChanged ? std : item.list_price,
+      price_override: !unitChanged && changed && newPrice !== item.list_price,
+    });
   };
   return (
     <Modal
@@ -357,7 +415,19 @@ function LineModal({ item, onClose, onSave, onRemove }) {
         <Field label={t('pos.price')} hint={item.list_price != null && toMinor(price, settings.decimals) !== item.list_price ? t('pos.priceChanged') : ''}>
           <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
         </Field>
-        <span />
+        {product?.units?.length ? (
+          <Field label={t('units.unit')}>
+            <select value={unitId} onChange={(e) => setUnitId(e.target.value)}>
+              <option value="">{product.unit || t('units.base')}</option>
+              {product.units.map((u) => <option key={u.id} value={u.id}>{u.name} × {formatQty(u.factor)}</option>)}
+            </select>
+          </Field>
+        ) : <span />}
+        {(product?.track_serial || item.serials) && (
+          <div className="span2"><Field label={t('pos.serials')} hint={t('pos.serialsHint', { n: Math.round(Number(qty || 1) * (product?.units.find((u) => u.id === Number(unitId))?.factor || 1)) })}>
+            <textarea dir="ltr" className="mono" rows={2} value={serials} onChange={(e) => setSerials(e.target.value)} />
+          </Field></div>
+        )}
         <div className="span2"><Field label={t('pos.note')}><input value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
         <button hidden />
       </form>
@@ -409,7 +479,7 @@ function CustomerModal({ cart, onClose, onSave }) {
     return () => clearTimeout(h);
   }, [search]);
 
-  const pick = (c) => setF((x) => ({ ...x, customer_id: c.id, customer_name: c.name, customer_phone: c.phone, customer_address: c.address }));
+  const pick = (c) => setF((x) => ({ ...x, customer_id: c.id, customer_name: c.name, customer_phone: c.phone, customer_address: c.address, price_list_id: c.price_list_id || null }));
 
   // Saves the typed details as a new customer account so the sale can go on credit.
   async function createAccount() {

@@ -6,15 +6,15 @@ import { formatMoney } from '../lib/money.js';
 import Support from '../components/Support.jsx';
 import { UpdatePanel } from '../components/Updates.jsx';
 
-const TABS = ['general', 'taxes', 'receipt', 'users', 'audit', 'tables', 'data', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'users', 'audit', 'tables', 'data', 'support'];
 // Which permission opens each tab.
-const TAB_PERM = { general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', data: 'backup', support: null };
+const TAB_PERM = { priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', data: 'backup', support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
   const tabs = TABS.filter((x) => (x !== 'tables' || settings.business_type === 'restaurant') && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -24,6 +24,7 @@ export default function Settings() {
       {['general', 'taxes', 'receipt'].includes(tab) && <SettingsForm tab={tab} key={tab} />}
       {tab === 'users' && <Users />}
       {tab === 'audit' && <AuditLog />}
+      {tab === 'priceLists' && <PriceLists />}
       {tab === 'tables' && <Tables />}
       {tab === 'data' && <Data />}
       {tab === 'support' && (
@@ -106,6 +107,31 @@ function SettingsForm({ tab }) {
           <div className="span2"><Field label={t('settings.receiptHeader')}><input value={f.receipt_header} onChange={set('receipt_header')} /></Field></div>
           <div className="span2"><Field label={t('settings.receiptFooter')}><input value={f.receipt_footer} onChange={set('receipt_footer')} /></Field></div>
           <div><button type="button" onClick={testPrint}>🖨 {t('settings.testPrint')}</button></div>
+          <span />
+          <h4 className="span2">{t('a4.settingsTitle')}</h4>
+          <Field label={t('a4.format')}>
+            <select value={f.invoice_format} onChange={set('invoice_format')}>
+              <option value="thermal">{t('a4.formatThermal')}</option>
+              <option value="a4">{t('a4.formatA4')}</option>
+            </select>
+          </Field>
+          <Field label={t('a4.printer')}>{printerSelect('a4_printer_name')}</Field>
+          <Field label={t('a4.logo')} hint={t('a4.logoHint')}>
+            <div className="row">
+              {f.business_logo && <img src={f.business_logo} alt="" className="logo-preview" />}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 400 * 1024) { notify(t('a4.logoTooBig'), 'error'); return; }
+                const r = new FileReader();
+                r.onload = () => setF((x) => ({ ...x, business_logo: r.result }));
+                r.readAsDataURL(file);
+              }} />
+              {f.business_logo && <button type="button" className="danger-ghost sm" onClick={() => setF((x) => ({ ...x, business_logo: '' }))}>{t('common.delete')}</button>}
+            </div>
+          </Field>
+          <Field label={t('a4.overdueDays')}><input type="number" min="1" value={f.overdue_days} onChange={set('overdue_days')} /></Field>
+          <div className="span2"><Field label={t('a4.terms')}><textarea rows={3} value={f.a4_terms} onChange={set('a4_terms')} /></Field></div>
         </div>
       )}
       <div className="form-foot"><button className="primary">{t('common.save')}</button></div>
@@ -192,6 +218,44 @@ function Users() {
 
 // Detail fields holding money (stored in minor units) and how to label every field.
 const AUDIT_MONEY = new Set(['amount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to']);
+
+function PriceLists() {
+  const { t, tErr, notify } = useApp();
+  const [list, reload] = useLoad(() => api.priceLists.list(), []);
+  const [editing, setEditing] = useState(null);
+  const [fill, setFill] = useState(null);
+  const run = async (fn) => { try { await fn(); } catch (err) { notify(tErr(err), 'error'); } };
+  return (
+    <div className="card narrow wide-ish">
+      <div className="row between"><h3>{t('priceLists.title')}</h3><button className="primary" onClick={() => setEditing({ name: '', active: true })}>+ {t('priceLists.new')}</button></div>
+      <p className="muted small">{t('priceLists.hint')}</p>
+      <div className="cat-list">
+        {(list || []).map((pl) => (
+          <div key={pl.id} className={`cat-row ${pl.active ? '' : 'dim'}`}>
+            <b>{pl.name}</b>
+            <span className="spacer" />
+            <button className="ghost sm" onClick={() => setFill({ id: pl.id, name: pl.name, percent: -10, overwrite: false })}>％ {t('priceLists.fill')}</button>
+            <button className="ghost sm" onClick={() => setEditing(pl)}>{t('common.edit')}</button>
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <Modal title={editing.id ? editing.name : t('priceLists.new')} onClose={() => setEditing(null)} width={420}
+          footer={<><span className="spacer" /><button className="primary" onClick={() => run(async () => { await api.priceLists.save(editing); setEditing(null); reload(); })}>{t('common.save')}</button></>}>
+          <Field label={t('common.name')}><input autoFocus value={editing.name} placeholder={t('priceLists.example')} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
+          {editing.id && <Toggle checked={editing.active} onChange={(v) => setEditing({ ...editing, active: v })} label={t('common.active')} />}
+        </Modal>
+      )}
+      {fill && (
+        <Modal title={`${t('priceLists.fill')} — ${fill.name}`} onClose={() => setFill(null)} width={460}
+          footer={<><span className="spacer" /><button className="primary" onClick={() => run(async () => { const n = await api.priceLists.fillFromBase(fill); notify(t('priceLists.filled', { n })); setFill(null); })}>{t('common.confirm')}</button></>}>
+          <Field label={t('priceLists.percent')} hint={t('priceLists.percentHint')}><input type="number" value={fill.percent} onChange={(e) => setFill({ ...fill, percent: e.target.value })} /></Field>
+          <Toggle checked={fill.overwrite} onChange={(v) => setFill({ ...fill, overwrite: v })} label={t('priceLists.overwrite')} />
+        </Modal>
+      )}
+    </div>
+  );
+}
 
 function AuditLog() {
   const { t, settings } = useApp();

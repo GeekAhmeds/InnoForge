@@ -94,7 +94,8 @@ function PurchaseEditor({ onClose, onSaved }) {
 
   const add = (p) => {
     setLines((ls) => (ls.some((l) => l.product_id === p.id) ? ls : [...ls, {
-      product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(p.cost, d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
+      product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(p.cost ?? 0, d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
+      units: p.units || [], unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '',
     }]));
     setSearch('');
   };
@@ -121,7 +122,7 @@ function PurchaseEditor({ onClose, onSaved }) {
         paid: toMinor(form.paid, d),
         method: form.method,
         fromDrawer: form.fromDrawer,
-        items: lines.map((l) => ({ product_id: l.product_id, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d) })),
+        items: lines.map((l) => ({ product_id: l.product_id, unit_id: Number(l.unit_id) || null, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d), batch_no: l.batch_no, expiry_date: l.expiry_date || null })),
         updatePrices: lines.filter((l) => toMinor(l.price, d) !== l.oldPrice).map((l) => ({ product_id: l.product_id, price: toMinor(l.price, d) })),
       });
       notify(t('common.saved'));
@@ -166,12 +167,28 @@ function PurchaseEditor({ onClose, onSaved }) {
       </div>
 
       <table className="grid compact-inputs">
-        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('products.stock')}</th><th>{t('pos.qty')}</th><th>{t('purchases.unitCost')}</th><th>{t('products.price')}</th><th className="num">{t('common.total')}</th><th /></tr></thead>
+        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('products.stock')}</th><th>{t('units.unit')}</th><th>{t('pos.qty')}</th><th>{t('purchases.unitCost')}</th><th>{t('products.price')}</th><th className="num">{t('common.total')}</th><th /></tr></thead>
         <tbody>
           {lines.map((l, i) => (
             <tr key={l.product_id}>
-              <td><b>{l.name}</b></td>
+              <td><b>{l.name}</b>
+                {l.track_expiry && (
+                  <div className="row expiry-inputs">
+                    <input placeholder={t('expiry.batch')} value={l.batch_no} onChange={(e) => setLine(i, 'batch_no', e.target.value)} />
+                    <input type="date" title={t('expiry.date')} value={l.expiry_date} onChange={(e) => setLine(i, 'expiry_date', e.target.value)} />
+                  </div>
+                )}
+              </td>
               <td className="num muted">{l.track ? formatQty(l.stock) : '∞'}</td>
+              <td>{l.units.length ? (
+                <select value={l.unit_id} onChange={(e) => {
+                  const u = l.units.find((x) => x.id === Number(e.target.value));
+                  setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unit_id: e.target.value, unit_cost: fromMinor(Math.round(l.baseCost * (u?.factor || 1)), d) } : x)));
+                }}>
+                  <option value="">{t('units.base')}</option>
+                  {l.units.map((u) => <option key={u.id} value={u.id}>{u.name} × {formatQty(u.factor)}</option>)}
+                </select>
+              ) : <span className="muted">—</span>}</td>
               <td><input inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, 'qty', e.target.value)} /></td>
               <td><input inputMode="decimal" value={l.unit_cost} onChange={(e) => setLine(i, 'unit_cost', e.target.value)} /></td>
               <td><input inputMode="decimal" value={l.price} onChange={(e) => setLine(i, 'price', e.target.value)} title={t('purchases.priceHint')} /></td>
@@ -205,26 +222,55 @@ function PurchaseEditor({ onClose, onSaved }) {
 }
 
 function PurchaseView({ id, onClose }) {
-  const { t, settings } = useApp();
-  const [p] = useLoad(() => api.purchases.get(id), [id]);
+  const { t, tErr, notify, settings } = useApp();
+  const [p, , setP] = useLoad(() => api.purchases.get(id), [id]);
+  const [returning, setReturning] = useState(false);
+  const [qtys, setQtys] = useState({});
+  const [reason, setReason] = useState('');
+  async function doReturn() {
+    try {
+      const items = Object.entries(qtys).map(([k, v]) => ({ purchase_item_id: Number(k), qty: Number(v) })).filter((x) => x.qty > 0);
+      setP(await api.purchases.returnItems({ purchaseId: id, items, reason }));
+      setReturning(false);
+      setQtys({});
+      notify(t('purchases.returned'));
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  }
   const m = (v) => formatMoney(v, settings);
   if (!p) return null;
-  const paid = p.payments.reduce((s, x) => s + x.amount, 0);
+  const paid = p.payments.filter((x) => x.method !== 'return').reduce((s, x) => s + x.amount, 0);
   return (
-    <Modal title={`${t('purchases.invoice')} #${p.id}`} onClose={onClose} width={720}>
+    <Modal title={`${t('purchases.invoice')} #${p.id}`} onClose={onClose} width={760}
+      footer={returning ? (
+        <><input placeholder={t('orders.reason')} value={reason} onChange={(e) => setReason(e.target.value)} /><span className="spacer" />
+          <button onClick={() => setReturning(false)}>{t('common.cancel')}</button><button className="danger" onClick={doReturn}>{t('common.confirm')}</button></>
+      ) : (
+        <><span className="spacer" /><button className="danger-ghost" onClick={() => setReturning(true)}>↩ {t('purchases.returnToSupplier')}</button></>
+      )}>
       <div className="meta">
         <span>{p.created_at}</span><span>{p.supplier_name || '—'}</span>{p.ref_no && <span className="mono">{p.ref_no}</span>}<span>{p.user_name}</span>
       </div>
       <table className="grid">
-        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('pos.qty')}</th><th className="num">{t('purchases.unitCost')}</th><th className="num">{t('common.total')}</th></tr></thead>
-        <tbody>{p.items.map((i) => <tr key={i.id}><td>{i.name}</td><td className="num">{formatQty(i.qty)}</td><td className="num">{m(i.unit_cost)}</td><td className="num">{m(i.line_total)}</td></tr>)}</tbody>
+        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('pos.qty')}</th><th className="num">{t('purchases.unitCost')}</th><th className="num">{t('common.total')}</th><th className="num">{returning ? t('orders.returnQty') : t('orders.alreadyReturned')}</th></tr></thead>
+        <tbody>{p.items.map((i) => (
+          <tr key={i.id}>
+            <td>{i.name}{(i.batch_no || i.expiry_date) && <small className="muted"> · {i.batch_no} {i.expiry_date}</small>}</td>
+            <td className="num">{formatQty(i.qty)}</td><td className="num">{m(i.unit_cost)}</td><td className="num">{m(i.line_total)}</td>
+            <td className="num">{returning
+              ? <input className="qty-input" type="number" min="0" max={i.qty - i.returned_qty} step="any" disabled={i.qty - i.returned_qty <= 0} value={qtys[i.id] ?? ''} onChange={(e) => setQtys((q) => ({ ...q, [i.id]: e.target.value }))} />
+              : i.returned_qty ? formatQty(i.returned_qty) : ''}</td>
+          </tr>
+        ))}</tbody>
       </table>
       <div className="totals compact">
         <div className="trow"><span>{t('pos.subtotal')}</span><span>{m(p.subtotal)}</span></div>
         {!!p.discount && <div className="trow"><span>{t('pos.discount')}</span><span>− {m(p.discount)}</span></div>}
         <div className="trow big"><span>{t('pos.total')}</span><span>{m(p.total)}</span></div>
         <div className="trow"><span>{t('pay.paid')}</span><span>{m(paid)}</span></div>
-        {p.total - paid > 0 && <div className="trow warn"><span>{t('purchases.due')}</span><span>{m(p.total - paid)}</span></div>}
+        {!!p.returned && <div className="trow"><span>{t('purchases.returnedValue')}</span><span>− {m(p.returned)}</span></div>}
+        {p.total - paid - p.returned > 0 && <div className="trow warn"><span>{t('purchases.due')}</span><span>{m(p.total - paid - p.returned)}</span></div>}
       </div>
       {p.notes && <p className="muted">{p.notes}</p>}
     </Modal>

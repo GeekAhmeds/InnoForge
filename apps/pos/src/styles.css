@@ -342,3 +342,16 @@ tr.dim td { opacity: .5; }
 .excel-intro ol { padding-inline-start: 22px; line-height: 2; }
 .excel-preview { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
 .excel-result .stats { margin-bottom: 12px; }
+
+/* ---------- trading ---------- */
+.sub-section { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+.sub-section h4 { margin: 0 0 8px; color: var(--text); }
+.unit-row { display: grid; grid-template-columns: 1.4fr 0.8fr 1.4fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+.expiry-inputs { margin-top: 4px; gap: 4px; }
+.expiry-inputs input { padding: 4px 6px; font-size: 12px; min-width: 0 !important; }
+.logo-preview { height: 40px; max-width: 120px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; padding: 2px; background: #fff; }
+.count-badge { background: var(--danger); color: #fff; border-radius: 99px; font-size: 11px; padding: 0 6px; margin-inline-start: 6px; }
+.badge.status-order { background: #e8f0fd; color: var(--brand); }
+.badge.status-invoiced { background: #ecfdf5; color: var(--good); }
+.badge.status-cancelled { background: #f3f4f6; color: var(--muted); text-decoration: line-through; }
+.wide-ish { max-width: 640px; }

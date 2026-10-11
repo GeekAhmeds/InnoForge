@@ -50,6 +50,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   const [user, setUser] = useState(null);
   const [shift, setShift] = useState(undefined);
   const [page, setPage] = useState('pos');
+  const [pendingCart, setPendingCart] = useState(null);
 
   const reloadShift = useCallback(async () => setShift(await api.shifts.current()), []);
   const [approvalReq, setApprovalReq] = useState(null);
@@ -96,8 +97,9 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
 
   const ctx = useMemo(() => ({
     settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
-    isAdmin: user?.role === 'admin', can, withApproval,
-  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval]);
+    isAdmin: user?.role === 'admin', can, withApproval, pendingCart, setPendingCart,
+    openInPos: (cart) => { setPendingCart(cart); setPage('pos'); },
+  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval, pendingCart]);
 
   let content;
   if (!settings.setup_done) {

@@ -323,3 +323,86 @@ test('excel import: products upsert by barcode with stock adjustment, customers 
   assert.equal(sup.created, 1);
   assert.equal(s.suppliers.list({})[0].balance, 20000);
 });
+
+test('units and price lists: carton barcode, wholesale price for the customer, stock in base units', () => {
+  const { s, db } = setup();
+  const id = s.products.save({ name: 'Juice', barcode: 'J1', price: 1000, cost: 700, stock: 100,
+    units: [{ name: 'Carton', factor: 12, barcode: 'J12', price: 11000 }, { name: 'Pack', factor: 6, barcode: 'J6' }] });
+  const wholesale = s.priceLists.save({ name: 'جملة' });
+  s.products.save({ id, name: 'Juice', barcode: 'J1', price: 1000, cost: 700, prices: { [wholesale]: 900 } });
+  const prod = s.products.list({})[0];
+  assert.equal(prod.units.length, 2); // kept when the editor did not send units
+  assert.equal(prod.prices[wholesale], 900);
+  const carton = s.products.byBarcode('J12');
+  assert.equal(carton.unit.factor, 12);
+  const cust = s.customers.save({ name: 'Shop', price_list_id: wholesale });
+  s.shifts.open({});
+  const pack = prod.units.find((u) => u.name === 'Pack');
+  const o = s.orders.checkout({ customer_id: cust, items: [{ product_id: id, unit_id: carton.unit.id, qty: 2 }, { product_id: id, unit_id: pack.id, qty: 1 }, { product_id: id, qty: 3 }], payments: [{ method: 'cash', amount: 100000 }] });
+  // carton has its own price; pack = wholesale 900 × 6; single = wholesale 900
+  assert.deepEqual(o.items.map((i) => i.unit_price), [11000, 5400, 900]);
+  assert.equal(o.items[0].name, 'Juice (Carton)');
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 100 - 24 - 6 - 3);
+  s.orders.refund({ orderId: o.id, items: [{ order_item_id: o.items[0].id, qty: 1 }] });
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 67 + 12);
+  assert.equal(s.priceLists.fillFromBase({ id: wholesale, percent: -10 }), 0); // existing kept
+});
+
+test('purchases by carton set per-piece cost; batches expire FEFO; purchase returns credit the supplier', () => {
+  const { s, db } = setup();
+  const id = s.products.save({ name: 'Milk', price: 3000, cost: 0, track_expiry: true, units: [{ name: 'Box', factor: 10 }] });
+  const box = s.products.list({})[0].units[0];
+  const sup = s.suppliers.save({ name: 'Dairy' });
+  const pur = s.purchases.create({ supplierId: sup, items: [
+    { product_id: id, unit_id: box.id, qty: 2, unit_cost: 20000, expiry_date: '2026-11-01', batch_no: 'A' },
+    { product_id: id, qty: 5, unit_cost: 2000, expiry_date: '2026-10-20', batch_no: 'B' },
+  ] });
+  const p = db.prepare('SELECT stock, cost FROM products WHERE id = ?').get(id);
+  assert.equal(p.stock, 25);
+  assert.equal(p.cost, 2000);
+  s.shifts.open({});
+  s.orders.checkout({ items: [{ product_id: id, qty: 7 }], payments: [{ method: 'cash', amount: 21000 }] });
+  const batches = db.prepare('SELECT batch_no, qty FROM batches ORDER BY batch_no').all().map((b) => [b.batch_no, b.qty]);
+  assert.deepEqual(batches, [['A', 18], ['B', 0]]); // earliest expiry (B) consumed first
+  assert.ok(s.products.expiring({ days: 400 }).some((b) => b.batch_no === 'A'));
+  assert.equal(s.suppliers.list({})[0].balance, 50000);
+  const after = s.purchases.returnItems({ purchaseId: pur.id, items: [{ purchase_item_id: pur.items[0].id, qty: 1 }], reason: 'تالف' });
+  assert.equal(after.returned, 20000);
+  assert.equal(s.suppliers.list({})[0].balance, 30000);
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 25 - 7 - 10);
+  assert.equal(tryCode(() => s.purchases.returnItems({ purchaseId: pur.id, items: [{ purchase_item_id: pur.items[0].id, qty: 2 }] })), 'RETURN_EXCEEDS_SOLD');
+});
+
+test('quotes become invoices; aging buckets; serials required and searchable; stock count applies differences', () => {
+  const { s, db } = setup();
+  const phone = s.products.save({ name: 'Phone', price: 500000, stock: 5, track_serial: true });
+  const cable = s.products.save({ name: 'Cable', barcode: 'C1', price: 5000, stock: 50 });
+  const cust = s.customers.save({ name: 'Tech Co' });
+  const q = s.quotes.create({ customer_id: cust, items: [{ product_id: phone, qty: 2 }, { product_id: cable, qty: 3 }], valid_until: '2026-12-31' });
+  assert.equal(q.quote_no, 1);
+  assert.equal(q.total, 1015000);
+  s.quotes.setStatus({ id: q.id, status: 'order' });
+  const cart = s.quotes.toCart(q.id);
+  s.shifts.open({});
+  assert.equal(tryCode(() => s.orders.checkout({ ...cart, payments: [] })), 'SERIALS_REQUIRED');
+  cart.items[0].serials = 'IMEI-111, IMEI-222';
+  const o = s.orders.checkout({ ...cart, payments: [{ method: 'cash', amount: 15000 }] });
+  assert.equal(s.quotes.get(q.id).status, 'invoiced');
+  assert.equal(o.credit, 1000000);
+  assert.equal(s.orders.findSerial('IMEI-222')[0].invoice_no, o.invoice_no);
+  assert.equal(s.orders.findSerial('IMEI-22').length, 0);
+  // age the invoice by 45 days
+  db.prepare("UPDATE orders SET completed_at = datetime('now', 'localtime', '-45 days') WHERE id = ?").run(o.id);
+  s.customers.collect({ customerId: cust, amount: 200000, method: 'cash' });
+  const ag = s.customers.aging({ overdueDays: 30 })[0];
+  assert.deepEqual([ag.total, ag.b60, ag.overdue], [800000, 800000, 800000]);
+  // stock count
+  const count = s.stockCounts.start({});
+  s.stockCounts.set({ id: count.id, barcode: 'C1', add: 1 });
+  s.stockCounts.set({ id: count.id, barcode: 'C1', add: 1 });
+  s.stockCounts.set({ id: count.id, productId: phone, counted: 3 });
+  assert.equal(tryCode(() => s.stockCounts.start({})), 'COUNT_OPEN');
+  s.stockCounts.apply(count.id);
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(cable).stock, 2);
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(phone).stock, 3);
+});

@@ -307,6 +307,143 @@ const MIGRATIONS = [
   ALTER TABLE customers ADD COLUMN opening_balance INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE suppliers ADD COLUMN opening_balance INTEGER NOT NULL DEFAULT 0;
   `,
+  // v6: trading features — price lists, units, quotations, purchase returns, stock counts,
+  // batches/expiry and serial numbers. stock_moves is rebuilt to allow new reasons.
+  {
+    fkOff: true,
+    sql: `
+    CREATE TABLE stock_moves_new (
+      id         INTEGER PRIMARY KEY,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      qty        REAL NOT NULL,
+      reason     TEXT NOT NULL, -- sale | return | adjust | purchase | purchase_return | count
+      ref_id     INTEGER,
+      user_id    INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    INSERT INTO stock_moves_new SELECT * FROM stock_moves;
+    DROP TABLE stock_moves;
+    ALTER TABLE stock_moves_new RENAME TO stock_moves;
+    CREATE INDEX idx_stock_moves_product ON stock_moves(product_id);
+
+    CREATE TABLE price_lists (
+      id     INTEGER PRIMARY KEY,
+      name   TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE product_prices (
+      product_id    INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      price_list_id INTEGER NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+      price         INTEGER NOT NULL CHECK (price >= 0),
+      PRIMARY KEY (product_id, price_list_id)
+    );
+    ALTER TABLE customers ADD COLUMN price_list_id INTEGER REFERENCES price_lists(id);
+
+    -- Extra selling units, e.g. a carton of 12. price NULL = base price × factor.
+    CREATE TABLE product_units (
+      id         INTEGER PRIMARY KEY,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      name       TEXT NOT NULL,
+      factor     REAL NOT NULL CHECK (factor > 0),
+      barcode    TEXT UNIQUE,
+      price      INTEGER CHECK (price >= 0)
+    );
+    CREATE INDEX idx_product_units_product ON product_units(product_id);
+
+    ALTER TABLE products ADD COLUMN track_expiry INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE products ADD COLUMN track_serial INTEGER NOT NULL DEFAULT 0;
+
+    ALTER TABLE order_items ADD COLUMN unit_id INTEGER REFERENCES product_units(id) ON DELETE SET NULL;
+    ALTER TABLE order_items ADD COLUMN unit_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE order_items ADD COLUMN unit_factor REAL NOT NULL DEFAULT 1;
+    ALTER TABLE order_items ADD COLUMN serials TEXT NOT NULL DEFAULT '';
+    ALTER TABLE orders ADD COLUMN price_list_id INTEGER REFERENCES price_lists(id);
+    ALTER TABLE orders ADD COLUMN quote_id INTEGER;
+
+    ALTER TABLE purchase_items ADD COLUMN unit_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE purchase_items ADD COLUMN unit_factor REAL NOT NULL DEFAULT 1;
+    ALTER TABLE purchase_items ADD COLUMN batch_no TEXT NOT NULL DEFAULT '';
+    ALTER TABLE purchase_items ADD COLUMN expiry_date TEXT;
+    ALTER TABLE purchase_items ADD COLUMN returned_qty REAL NOT NULL DEFAULT 0;
+    ALTER TABLE purchases ADD COLUMN returned INTEGER NOT NULL DEFAULT 0;
+
+    -- Quantities on hand per expiry date (base units), consumed first-expiry-first-out.
+    CREATE TABLE batches (
+      id          INTEGER PRIMARY KEY,
+      product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      batch_no    TEXT NOT NULL DEFAULT '',
+      expiry_date TEXT,
+      qty         REAL NOT NULL DEFAULT 0,
+      purchase_id INTEGER REFERENCES purchases(id),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    CREATE INDEX idx_batches_product ON batches(product_id, expiry_date);
+
+    CREATE TABLE quotes (
+      id             INTEGER PRIMARY KEY,
+      quote_no       INTEGER NOT NULL UNIQUE,
+      status         TEXT NOT NULL DEFAULT 'quote' CHECK (status IN ('quote', 'order', 'invoiced', 'cancelled')),
+      customer_id    INTEGER REFERENCES customers(id),
+      customer_name  TEXT NOT NULL DEFAULT '',
+      customer_phone TEXT NOT NULL DEFAULT '',
+      price_list_id  INTEGER REFERENCES price_lists(id),
+      valid_until    TEXT,
+      note           TEXT NOT NULL DEFAULT '',
+      subtotal       INTEGER NOT NULL DEFAULT 0,
+      discount       INTEGER NOT NULL DEFAULT 0,
+      tax            INTEGER NOT NULL DEFAULT 0,
+      total          INTEGER NOT NULL DEFAULT 0,
+      user_id        INTEGER NOT NULL REFERENCES users(id),
+      order_id       INTEGER REFERENCES orders(id),
+      created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    CREATE TABLE quote_items (
+      id          INTEGER PRIMARY KEY,
+      quote_id    INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+      product_id  INTEGER REFERENCES products(id) ON DELETE SET NULL,
+      unit_id     INTEGER,
+      name        TEXT NOT NULL,
+      unit_name   TEXT NOT NULL DEFAULT '',
+      unit_price  INTEGER NOT NULL,
+      qty         REAL NOT NULL,
+      discount    INTEGER NOT NULL DEFAULT 0,
+      line_total  INTEGER NOT NULL
+    );
+
+    CREATE TABLE purchase_returns (
+      id          INTEGER PRIMARY KEY,
+      purchase_id INTEGER NOT NULL REFERENCES purchases(id),
+      supplier_id INTEGER REFERENCES suppliers(id),
+      user_id     INTEGER NOT NULL REFERENCES users(id),
+      amount      INTEGER NOT NULL,
+      reason      TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    CREATE TABLE purchase_return_items (
+      id               INTEGER PRIMARY KEY,
+      return_id        INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+      purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id),
+      qty              REAL NOT NULL,
+      amount           INTEGER NOT NULL
+    );
+
+    CREATE TABLE stock_counts (
+      id         INTEGER PRIMARY KEY,
+      status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'applied', 'cancelled')),
+      notes      TEXT NOT NULL DEFAULT '',
+      user_id    INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      applied_at TEXT
+    );
+    CREATE TABLE stock_count_items (
+      count_id   INTEGER NOT NULL REFERENCES stock_counts(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      expected   REAL NOT NULL,
+      counted    REAL,
+      PRIMARY KEY (count_id, product_id)
+    );
+    `,
+  },
 ];
 
 function openDatabase(file) {
