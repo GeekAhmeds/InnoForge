@@ -18,6 +18,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Delivery from './pages/Delivery.jsx';
 import Treasury from './pages/Treasury.jsx';
 import Employees from './pages/Employees.jsx';
+import Help from './pages/Help.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { has, setFeatures } from './lib/features.js';
@@ -54,6 +55,7 @@ const NAV = [
   { id: 'employees', icon: '🧑‍💼', feature: 'employees' },
   { id: 'shift', icon: '⏱' },
   { id: 'settings', icon: '⚙', perm: ['settings', 'users', 'audit', 'backup'] },
+  { id: 'help', icon: '❓' },
 ];
 
 function Shell({ settings, reloadSettings, license, setLicense }) {
@@ -99,6 +101,12 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   // ask(label, { type, initial, required }) → Promise<string | null>
   const ask = useCallback((label, opts = {}) => new Promise((resolve) => setAskReq({ label, ...opts, resolve })), []);
   useEffect(() => { if (user) reloadShift(); }, [user, reloadShift]);
+  // F1 opens the user guide from anywhere.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'F1' && user) { e.preventDefault(); setPage('help'); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [user]);
 
   const printDoc = useCallback(async (html, printer = settings.printer_name) => {
     try {
@@ -128,7 +136,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     // Restaurants also get the delivery board right after the floor.
     if (screens.includes('restaurant') && has('delivery')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
     const nav = [...sellNav, ...NAV.filter((n) => has(n.feature) && (!n.perm || [].concat(n.perm).some((p) => user.perms?.[p])))];
-    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, help: Help, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

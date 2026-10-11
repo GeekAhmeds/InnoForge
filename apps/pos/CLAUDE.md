@@ -47,6 +47,8 @@ electron/
   services/permissions.cjs   permission list + role defaults
   services/totals.cjs        tax / discount / service math
   license.cjs, license-public.cjs   Ed25519 device licensing
+  editions.json, editions.cjs   license editions / add-ons / limits (shared with tools/license-generator.html)
+  services/report-catalog.cjs  every report (one shape → viewer, Excel, PDF)
   updater.cjs         signed updates (generic provider)
   excel.cjs           sheet templates / parsing / export
   kds-server.cjs, kds.html, customer.html   kitchen display + customer display (local HTTP server + standalone pages)
@@ -57,8 +59,9 @@ src/
   components/         shared UI (ui.jsx primitives, Collect, Installments, Warehouses, Coupons, Kitchen, Modifiers, Devices, Labels, ExcelImport, Approval…)
   lib/                api.js (IPC proxy), receipt.js (printable HTML), share.js (WhatsApp), money.js, barcode.js, scale*.js, screens.js
   i18n/ar.js, en.js   flat key → text dictionaries; `{name}` placeholders
+  help/topics.js      in-app user guide (Arabic + English), shown by pages/Help.jsx (F1)
 test/                 node:test suites (services, license, updater, excel, scale parser, i18n)
-tools/                vendor tools: license.cjs, license-generator.html, sign-update.cjs
+tools/                vendor tools: license.cjs, license-generator.html, sign-update.cjs, videos/ (record tutorials + promo)
 scripts/package.cjs   obfuscate → stage/ → electron-builder → release/update (signed)
 docs/                 guide.html + developer docs
 ```
@@ -77,6 +80,9 @@ docs/                 guide.html + developer docs
 10. **No `window.prompt`** (Electron does not support it) — use `ask(label, { type, initial, required })` from the app context. `window.confirm` is fine.
 11. Printing is HTML → hidden window → `webContents.print` (`pos:print`). Build documents in `src/lib/receipt.js` (thermal: `page()`; A4: `a4Html`, `statementHtml`).
 12. Keep the renderer free of Node: everything privileged goes through `posBridge` in `preload.cjs`.
+13. **Licensed features**: a new module that is sold separately gets a key in `electron/editions.json` (and in the generator copy), a `LOCKED` entry or `requireFeature()` in the services, and `has()` around its menu/tab/buttons. Try editions from source with `INNOFORGE_POS_EDITION=basic npm start`.
+14. **New report** = one entry in `services/report-catalog.cjs` + `rep.<id>` / `rep.col.*` texts; the viewer, Excel and PDF need nothing else.
+15. **New screen or feature** → add/adjust its topic in `src/help/topics.js` (both languages) so the in-app guide stays complete.
 
 ## Testing
 

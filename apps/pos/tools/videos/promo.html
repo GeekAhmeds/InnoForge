@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>InnoForge POS — promo</title>
+<!-- Marketing video: a timed sequence of slides recorded by tools/videos/promo.cjs.
+     Screenshots are read from ./assets (copied there by the recorder). -->
+<style>
+  :root { --brand: #0a43c9; --brand2: #0890c4; --accent: #f7a531; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; background: #0b1530; font-family: Tahoma, "Segoe UI", Arial, sans-serif; color: #fff; }
+  .slide { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .6s ease; }
+  .slide.on { opacity: 1; }
+  .bg { position: absolute; inset: 0; background: radial-gradient(1200px 600px at 80% -10%, #1d4ed8 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, #0890c4 0%, transparent 55%), #0b1530; }
+  .center { position: relative; text-align: center; }
+  .logo { width: 128px; height: 128px; border-radius: 30px; background: linear-gradient(160deg, var(--brand), var(--brand2)); padding: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.45), 0 0 0 2px rgba(255,255,255,.25); }
+  h1 { font-size: 74px; margin: 18px 0 6px; letter-spacing: 1px; }
+  h2 { font-size: 40px; margin: 0; font-weight: 700; }
+  p.sub { font-size: 28px; opacity: .9; margin: 12px 0 0; }
+  .band { width: 160px; height: 7px; border-radius: 4px; margin: 18px auto; background: linear-gradient(90deg, #fff, var(--accent)); }
+  .on .pop { animation: pop .7s cubic-bezier(.2,.9,.3,1.2) both; }
+  .on .rise { animation: rise .8s ease both; }
+  .on .d1 { animation-delay: .25s; } .on .d2 { animation-delay: .5s; } .on .d3 { animation-delay: .75s; } .on .d4 { animation-delay: 1s; } .on .d5 { animation-delay: 1.25s; }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes rise { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes zoom { from { transform: scale(1.0); } to { transform: scale(1.06); } }
+
+  .feature { position: relative; display: grid; grid-template-columns: 430px 1fr; gap: 40px; align-items: center; width: 1180px; }
+  .feature .text h2 { font-size: 44px; margin-bottom: 10px; }
+  .feature .text .tag { display: inline-block; font-size: 18px; padding: 4px 14px; border-radius: 99px; background: rgba(247,165,49,.18); color: var(--accent); margin-bottom: 14px; font-weight: 700; }
+  .feature ul { list-style: none; padding: 0; margin: 14px 0 0; font-size: 24px; line-height: 1.9; }
+  .feature li::before { content: "✓"; color: var(--accent); font-weight: 900; margin-inline-end: 10px; }
+  .shot { border-radius: 16px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.12); background: #fff; }
+  .shot img { display: block; width: 100%; }
+  .on .shot img { animation: zoom 5s ease-out both; transform-origin: 70% 30%; }
+  .chips { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 26px; }
+  .chip { font-size: 26px; padding: 12px 24px; border-radius: 14px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.25); }
+  .chip b { color: var(--accent); }
+  .cta { font-size: 30px; margin-top: 22px; }
+  .phones { font-size: 34px; font-weight: 800; direction: ltr; margin-top: 10px; }
+  .site { font-size: 26px; opacity: .9; direction: ltr; }
+  .progress { position: fixed; bottom: 0; left: 0; height: 5px; background: linear-gradient(90deg, var(--accent), #fff); width: 0; transition: width .3s linear; z-index: 9; }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<section class="slide" data-ms="4200">
+  <div class="center">
+    <img class="logo pop" src="assets/logo.png" alt="">
+    <h1 class="rise d1">InnoForge POS</h1>
+    <div class="band rise d2"></div>
+    <p class="sub rise d3">برنامج البيع والمخزون والحسابات — اللي بيكبر مع شغلك</p>
+  </div>
+</section>
+
+<section class="slide" data-ms="3600">
+  <div class="center">
+    <h2 class="pop">بيع أسرع • حسابات أدق • من غير نت</h2>
+    <div class="chips">
+      <div class="chip rise d1">🛒 محلات وسوبر ماركت</div>
+      <div class="chip rise d2">🍽 مطاعم وكافيهات</div>
+      <div class="chip rise d3">🏢 شركات وتوزيع</div>
+      <div class="chip rise d4">📚 مكتبات</div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-ms="5000"><div class="feature">
+  <div class="text"><span class="tag rise">الكاشير</span><h2 class="rise d1">بيعة في ثواني</h2>
+    <ul><li class="rise d2">باركود وميزان وأصناف بالصور</li><li class="rise d3">كاش وفيزا ومحفظة وآجل</li><li class="rise d4">عروض وكوبونات وكروت هدايا</li></ul></div>
+  <div class="shot pop d1"><img src="assets/cashier.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="5000"><div class="feature">
+  <div class="text"><span class="tag rise">المطاعم</span><h2 class="rise d1">من الطاولة للمطبخ</h2>
+    <ul><li class="rise d2">صالة وطاولات ونقل ودمج وتقسيم</li><li class="rise d3">شاشة مطبخ على تابلت</li><li class="rise d4">أحجام وإضافات وريسيبي ودليفري</li></ul></div>
+  <div class="shot pop d1"><img src="assets/floor.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4400"><div class="feature">
+  <div class="text"><span class="tag rise">شاشة المطبخ</span><h2 class="rise d1">الشيف شايف كل طلب</h2>
+    <ul><li class="rise d2">جديد ← بيتحضّر ← جاهز</li><li class="rise d3">مؤقت وتنبيه بالصوت</li></ul></div>
+  <div class="shot pop d1"><img src="assets/kds.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="5000"><div class="feature">
+  <div class="text"><span class="tag rise">الشركات التجارية</span><h2 class="rise d1">فاتورة جملة احترافية</h2>
+    <ul><li class="rise d2">قوائم أسعار ووحدات (كرتونة/قطعة)</li><li class="rise d3">عروض أسعار ومندوبين وعمولات</li><li class="rise d4">آجل بحد ائتمان ومدة سماح</li></ul></div>
+  <div class="shot pop d1"><img src="assets/invoice.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4600"><div class="feature">
+  <div class="text"><span class="tag rise">التقسيط</span><h2 class="rise d1">أقساط من غير ورق</h2>
+    <ul><li class="rise d2">مقدم وأقساط شهرية بجدول</li><li class="rise d3">المتأخر وتذكير واتساب</li></ul></div>
+  <div class="shot pop d1"><img src="assets/installments.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4600"><div class="feature">
+  <div class="text"><span class="tag rise">المخزون</span><h2 class="rise d1">كل مخزن ورصيده</h2>
+    <ul><li class="rise d2">تحويل بين المخازن وجرد بالباركود</li><li class="rise d3">صلاحية وسيريال وأوامر شراء</li></ul></div>
+  <div class="shot pop d1"><img src="assets/warehouses.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="5000"><div class="feature">
+  <div class="text"><span class="tag rise">التقارير</span><h2 class="rise d1">أكتر من 30 تقرير</h2>
+    <ul><li class="rise d2">مبيعات وأرباح ومخزون وعملاء</li><li class="rise d3">إكسيل منسّق و PDF بضغطة</li><li class="rise d4">لوحة تحكم لصاحب الشغل</li></ul></div>
+  <div class="shot pop d1"><img src="assets/reports.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4400"><div class="feature">
+  <div class="text"><span class="tag rise">الموظفين</span><h2 class="rise d1">حضور وسلف ومرتبات</h2>
+    <ul><li class="rise d2">حضور وانصراف من البرنامج</li><li class="rise d3">كشف مرتبات جاهز للطباعة</li></ul></div>
+  <div class="shot pop d1"><img src="assets/payroll.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4400"><div class="feature">
+  <div class="text"><span class="tag rise">شاشة العميل</span><h2 class="rise d1">ثقة العميل</h2>
+    <ul><li class="rise d2">الأصناف والإجمالي قدامه</li><li class="rise d3">عروضك وقت الانتظار</li></ul></div>
+  <div class="shot pop d1"><img src="assets/display.png" alt=""></div>
+</div></section>
+
+<section class="slide" data-ms="4600">
+  <div class="center">
+    <h2 class="pop">باقة تناسب شغلك — وترقّي وقت ما تحب</h2>
+    <div class="chips">
+      <div class="chip rise d1"><b>أساسي</b></div>
+      <div class="chip rise d2"><b>سوبر ماركت</b></div>
+      <div class="chip rise d3"><b>مطاعم</b></div>
+      <div class="chip rise d4"><b>تجاري</b></div>
+      <div class="chip rise d5"><b>شامل</b></div>
+    </div>
+    <p class="sub rise d5">عربي وإنجليزي • ويندوز ولينكس • تحديثات تلقائية • نسخ احتياطي يومي</p>
+  </div>
+</section>
+
+<section class="slide" data-ms="5200">
+  <div class="center">
+    <img class="logo pop" src="assets/logo.png" alt="">
+    <h2 class="rise d1" style="margin-top:18px">جرّب مجاناً 14 يوم</h2>
+    <div class="cta rise d2">Inno Source</div>
+    <div class="phones rise d3">01011600023 • 01117330111</div>
+    <div class="site rise d4">innovationsrc.com</div>
+  </div>
+</section>
+
+<div class="progress" id="progress"></div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const total = slides.reduce((s, x) => s + Number(x.dataset.ms), 0);
+  let elapsed = 0;
+  window.PROMO_MS = total;
+  (async () => {
+    for (const s of slides) {
+      s.classList.add('on');
+      const ms = Number(s.dataset.ms);
+      const start = elapsed;
+      const tick = setInterval(() => { elapsed = Math.min(start + ms, elapsed + 100); document.getElementById('progress').style.width = `${(elapsed / total) * 100}%`; }, 100);
+      await new Promise((r) => setTimeout(r, ms));
+      clearInterval(tick);
+      elapsed = start + ms;
+      s.classList.remove('on');
+    }
+    window.PROMO_DONE = true;
+  })();
+</script>
+</body>
+</html>

@@ -74,6 +74,17 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | Coupon codes (percent / amount, minimum, uses, dates) | ✅ | `coupons.*`, `findCoupon()` in `priceCart` |
 | Gift cards (sell, top up, pay with, balance history) | ✅ | `giftCards.*`, checkout `gift_card`, Customers → Gift cards |
 
+## Licensing, reports, help (after the 14)
+
+| Feature | Status | Code |
+|---|---|---|
+| Editions (basic / supermarket / restaurant / trading / full), paid add-ons and limits inside the signed key | ✅ | `electron/editions.json`, `editions.cjs`, `LOCKED` + `requireFeature` + `checkLimit` in services, `src/lib/features.js`, Settings → License |
+| Reseller permits (vendor-signed; resellers issue keys within limits) | ✅ | `license.cjs` (4-part keys), `tools/license.cjs reseller-*`, generator «أنا موزّع» |
+| Pricing and partner programme proposal | 📄 | `docs/PRICING-AR.md` |
+| 33 reports with sortable viewer, formatted Excel, PDF and A4 print | ✅ | `services/report-catalog.cjs`, `reports.catalog/run`, `pos:reportExcel` + `excel.writeReport`, `reportHtml`, `pages/Reports.jsx` |
+| In-app user guide (search, F1, printable manual / PDF) | ✅ | `src/help/topics.js`, `pages/Help.jsx` |
+| Tutorial videos recorded from the real app + promo video | ✅ | `tools/videos/record.cjs`, `tools/videos/promo.cjs` + `promo.html` |
+
 Known limits (by design, for now):
 - **Warehouses:** expiry batches stay per product, not per warehouse. Returns go back to the selling warehouse of the computer that takes them.
 - **Installments:** no interest/markup field — price the goods for installment sale (or use a price list).

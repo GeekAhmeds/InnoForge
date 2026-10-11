@@ -108,6 +108,7 @@
       <a href="#activate">تفعيل جهاز عميل</a>
       <a href="#generator">مولّد المفاتيح</a>
       <a href="#renew">التجديد ونقل الجهاز</a>
+      <a href="#editions">الباقات والإضافات والوكلاء</a>
       <a href="#protect">الحماية وحدودها</a>
       <a href="#build">عمل نسخة تسطيب جديدة</a>
       <a href="#updates">التحديثات التلقائية</a>
@@ -139,10 +140,12 @@
       <a href="#employees">الموظفين والمرتبات</a>
       <a href="#returns">الفواتير والمرتجعات</a>
       <a href="#reports">التقارير</a>
+      <a href="#reports2">التقارير بالتفصيل (إكسيل و PDF)</a>
       <a href="#dashboard">لوحة التحكم</a>
       <a href="#printing">الطباعة</a>
       <a href="#backup">النسخ الاحتياطي</a>
       <a href="#shortcuts">اختصارات الكيبورد</a>
+      <a href="#helpcenter">دليل الاستخدام جوه البرنامج والفيديوهات</a>
       <div class="grp">مساعدة</div>
       <a href="#faq">أسئلة شائعة</a>
       <a href="#support">الدعم الفني</a>
@@ -156,6 +159,7 @@
       <a href="#activate">Activating a customer</a>
       <a href="#generator">License generator</a>
       <a href="#renew">Renewals & new PCs</a>
+      <a href="#editions">Editions, add-ons and resellers</a>
       <a href="#protect">Protection & its limits</a>
       <a href="#build">Building a new installer</a>
       <a href="#updates">Automatic updates</a>
@@ -187,10 +191,12 @@
       <a href="#employees">Employees and payroll</a>
       <a href="#returns">Invoices & returns</a>
       <a href="#reports">Reports</a>
+      <a href="#reports2">Reports in detail (Excel and PDF)</a>
       <a href="#dashboard">Dashboard</a>
       <a href="#printing">Printing</a>
       <a href="#backup">Backup</a>
       <a href="#shortcuts">Keyboard shortcuts</a>
+      <a href="#helpcenter">In-app guide and videos</a>
       <div class="grp">Help</div>
       <a href="#faq">FAQ</a>
       <a href="#support">Support</a>
@@ -441,6 +447,30 @@ npm run license -- issue --key path/to/pos-license-private.pem --machine 4091-4F
         <div class="note"><b>💡</b>Your policy is up to you: replacement keys for free or for a small fee. If one customer asks often, they may be copying the program to several PCs.</div>
       </div>
     </section>
+
+    <section id="editions">
+      <div lang="ar">
+        <h2>الباقات والإضافات والوكلاء</h2>
+        <p>المفتاح نفسه بيحدد <b>الباقة</b> (أساسي، سوبر ماركت، مطاعم، تجاري، شامل)، و<b>الإضافات</b> المدفوعة، و<b>الحدود</b> (عدد المستخدمين والمخازن). العميل بيشوف ده كله في «الإعدادات ← الترخيص»: كل ميزة عليها ✓ لو موجودة، أو 🔒 لو مش في باقته.</p>
+        <ul>
+          <li><b>من مولّد المفاتيح:</b> اختار الباقة، وعلّم الإضافات، واكتب الحدود لو عايز تغيّر الافتراضي. والمفاتيح القديمة اللي من غير باقة بتشتغل «شامل».</li>
+          <li><b>الترقية:</b> مفتاح جديد لنفس رقم الجهاز. الميزة بتتفتح على طول من غير تسطيب، والبيانات زي ما هي.</li>
+          <li><b>الوكلاء والموزعين:</b> الوكيل بيعمل مفتاح خاص بيه وبيبعتلك الجزء العام بس. وإنت بتعمله <b>تصريح</b> بالباقات والمدة المسموح بيها، وصلاحية التصريح نفسه (مثلاً 90 يوم). الوكيل بيطلّع المفاتيح لعملائه من نفس المولّد («أنا موزّع»)، والبرنامج بيرفض أي حاجة برا التصريح، وبيعرض اسم الوكيل اللي باع.</li>
+        </ul>
+        <div class="note"><b>الأسعار المقترحة ومستويات الوكلاء</b> موجودة في <code>docs/PRICING-AR.md</code>.</div>
+      </div>
+      <div lang="en">
+        <h2>Editions, add-ons and resellers</h2>
+        <p>The key itself sets the <b>edition</b> (basic, supermarket, restaurant, trading, full), paid <b>add-ons</b> and <b>limits</b> (users, warehouses). Customers see it under Settings → License: ✓ for every included feature, 🔒 for the rest.</p>
+        <ul>
+          <li><b>Generator:</b> pick the edition, tick add-ons, and set limits if you want other than the default. Old keys without an edition stay full.</li>
+          <li><b>Upgrades:</b> a new key for the same Machine ID; features unlock at once, no reinstall, data unchanged.</li>
+          <li><b>Resellers:</b> they make their own key and send you only the public part; you sign a <b>permit</b> with the editions and durations they may sell and the permit's own validity (e.g. 90 days). They issue keys from the same generator ("I am a reseller"); the app rejects anything outside the permit and shows who sold it.</li>
+        </ul>
+        <div class="note"><b>Suggested prices and partner tiers</b> are in <code>docs/PRICING-AR.md</code>.</div>
+      </div>
+    </section>
+
 
     <!-- ================= PROTECT ================= -->
     <section id="protect">
@@ -1333,6 +1363,29 @@ npm run dist:win</code></pre>
       </div>
     </section>
 
+    <section id="reports2">
+      <div lang="ar">
+        <h2>التقارير بالتفصيل (إكسيل و PDF)</h2>
+        <p>شاشة التقارير فيها <b>أكتر من 30 تقرير</b> متقسمين: المبيعات، والفلوس والأرباح، والمخزون، والمشتريات، والعملاء، والموظفين. كل تقرير:</p>
+        <ul>
+          <li>بتختار فترته (النهارده، أو إمبارح، أو الأسبوع، أو الشهر، أو الشهر اللي فات، أو السنة، أو تواريخ).</li>
+          <li>بترتّبه بأي عمود، وتدوّر فيه.</li>
+          <li><b>Excel</b>: ملف منسّق باسم النشاط والفترة، والعناوين ملوّنة، والأرقام بصيغتها، وسطر إجمالي، وفلاتر.</li>
+          <li><b>PDF</b> و<b>طباعة</b> A4 باللوجو، وبيتلف بالعرض لو أعمدته كتير.</li>
+        </ul>
+        <p>أهمهم: الأرباح والخسائر، ومبيعات وأرباح الأصناف، وقيمة المخزون، والنواقص، والراكد، وأعمار الديون، وأرصدة العملاء والموردين، والورديات، وحركة الخزن.</p>
+      </div>
+      <div lang="en">
+        <h2>Reports in detail (Excel and PDF)</h2>
+        <p>The Reports page has <b>more than 30 reports</b> grouped as sales, money & profit, stock, purchases, customers and staff. Each one:</p>
+        <ul><li>takes a period (today, yesterday, week, month, last month, year or dates);</li><li>sorts by any column and can be searched;</li>
+          <li><b>Excel</b>: a formatted file with business name, period, coloured header, number formats, totals row and filters;</li>
+          <li><b>PDF</b> and A4 <b>print</b> with the logo, landscape when wide.</li></ul>
+        <p>Key ones: profit & loss, sales and profit by product, stock valuation, low stock, slow movers, debt aging, customer and supplier balances, shifts, treasury.</p>
+      </div>
+    </section>
+
+
     <section id="dashboard">
       <div lang="ar">
         <h2>لوحة التحكم</h2>
@@ -1416,6 +1469,20 @@ npm run dist:win</code></pre>
         </table></div>
       </div>
     </section>
+
+    <section id="helpcenter">
+      <div lang="ar">
+        <h2>دليل الاستخدام جوه البرنامج والفيديوهات</h2>
+        <p>زرار <b>❓ المساعدة</b> في القائمة (أو <kbd>F1</kbd> من أي مكان) بيفتح دليل الاستخدام بالعربي والإنجليزي: خطوات كل ميزة ونصايح، وبحث. وزرار «طباعة الدليل كله» أو «PDF» بيطلّع <b>كتيّب استخدام كامل</b> تديه للعميل.</p>
+        <p>فيديوهات الشرح بتتعمل من البرنامج نفسه بالأمر <code>xvfb-run -a node tools/videos/record.cjs</code>، والفيديو الدعائي بـ <code>node tools/videos/promo.cjs</code>. ارفعهم في فولدر <code>videos</code> جنب التحديثات على السيرفر، فالدليل جوه البرنامج يفتحهم.</p>
+      </div>
+      <div lang="en">
+        <h2>In-app guide and videos</h2>
+        <p>The <b>❓ Help</b> item (or <kbd>F1</kbd> anywhere) opens the user guide in Arabic and English: steps and tips for every feature, with search. "Print the whole guide" or "PDF" produces a <b>complete user manual</b> to give customers.</p>
+        <p>Tutorial videos are recorded from the app itself with <code>xvfb-run -a node tools/videos/record.cjs</code>, the promo with <code>node tools/videos/promo.cjs</code>. Upload them to a <code>videos</code> folder next to the updates so the in-app guide can open them.</p>
+      </div>
+    </section>
+
 
     <!-- ================= FAQ ================= -->
     <section id="faq">

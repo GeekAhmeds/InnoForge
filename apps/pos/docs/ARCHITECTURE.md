@@ -96,6 +96,13 @@ Key relationships: an **order** is a cart that is `open` (held cart / table) the
 ### Staff money
 Advances and salaries go out through `expenses.create` (category "سلف موظفين" / "مرتبات"), so the drawer, treasury and profit reports stay right. Paying a month (`payrolls` row) locks its advances/bonuses/deductions; `unpay` removes the salary expense.
 
+### Licensing editions
+`electron/editions.json` lists features, editions (feature bundles + default limits) and revoked resellers. The license payload carries `edition`, `addons`, `limits` (and `reseller` for reseller keys); `editions.cjs#entitlements()` turns it into `{ features:Set, limits }` (no edition = full). `createServices(db, { entitlements })` enforces it: whole namespaces in `LOCKED`, inline `requireFeature()` (coupons, gift cards, delivery, dine-in/modifiers, settings toggles), `checkLimit()` for users and warehouses. The renderer hides what is not licensed with `has()` (`src/lib/features.js`, set from `pos:license`).
+Reseller keys: `body.sig.permitBody.permitSig`; the permit is signed by the vendor and holds the reseller's public key and what they may sell (`resellerAllows`).
+
+### Reports
+`services/report-catalog.cjs` defines every report as `{ group, feature?, perm?, noRange?, run({f,t}) → { columns:[{key,label,type,total}], rows, summary? } }`. `reports.catalog()` lists what the user may run; `reports.run({id,from,to})` adds totals. One viewer (`pages/Reports.jsx`), one Excel writer (`excel.writeReport`, numbers re-read in main, only labels come from the window) and one A4 layout (`reportHtml`).
+
 ### Coupons and gift cards
 A coupon is an extra invoice discount computed in `priceCart` (`coupon_discount`) — it does not count as the cashier's discount. A gift card is a payment (`payments.method = 'gift_card'`) taken from the card balance; selling/topping up a card is money in during the shift (`shiftSummary.giftCash`), not a sale.
 
