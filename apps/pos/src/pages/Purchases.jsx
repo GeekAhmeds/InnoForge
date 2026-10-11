@@ -13,13 +13,14 @@ export default function Purchases() {
       <div className="page-head">
         <h2>🚚 {t('nav.purchases')}</h2>
         <div className="seg">
-          {['purchases', 'suppliers', 'expenses'].map((x) => (
+          {['purchases', 'suppliers', 'rebates', 'expenses'].map((x) => (
             <button key={x} className={tab === x ? 'on' : ''} onClick={() => setTab(x)}>{t(`purchases.tab.${x}`)}</button>
           ))}
         </div>
       </div>
       {tab === 'purchases' && <PurchaseList />}
       {tab === 'suppliers' && <SupplierList />}
+      {tab === 'rebates' && <Rebates />}
       {tab === 'expenses' && <ExpenseList />}
     </div>
   );
@@ -95,12 +96,13 @@ function PurchaseEditor({ onClose, onSaved }) {
   const add = (p) => {
     setLines((ls) => (ls.some((l) => l.product_id === p.id) ? ls : [...ls, {
       product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(p.cost ?? 0, d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
-      units: p.units || [], unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '',
+      units: p.units || [], unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
     }]));
     setSearch('');
   };
   const setLine = (i, k, v) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
-  const subtotal = lines.reduce((s, l) => s + Math.round((Number(l.qty) || 0) * toMinor(l.unit_cost, d)), 0);
+  const lineTotal = (l) => Math.round((Number(l.qty) || 0) * toMinor(l.unit_cost, d) * (1 - Math.min(100, Number(l.discount_percent) || 0) / 100));
+  const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
   const total = Math.max(0, subtotal - toMinor(form.discount, d));
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e?.target ? e.target.value : e }));
 
@@ -122,7 +124,7 @@ function PurchaseEditor({ onClose, onSaved }) {
         paid: toMinor(form.paid, d),
         method: form.method,
         fromDrawer: form.fromDrawer,
-        items: lines.map((l) => ({ product_id: l.product_id, unit_id: Number(l.unit_id) || null, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d), batch_no: l.batch_no, expiry_date: l.expiry_date || null })),
+        items: lines.map((l) => ({ product_id: l.product_id, unit_id: Number(l.unit_id) || null, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d), discount_percent: Number(l.discount_percent) || 0, bonus_qty: Number(l.bonus_qty) || 0, batch_no: l.batch_no, expiry_date: l.expiry_date || null })),
         updatePrices: lines.filter((l) => toMinor(l.price, d) !== l.oldPrice).map((l) => ({ product_id: l.product_id, price: toMinor(l.price, d) })),
       });
       notify(t('common.saved'));
@@ -167,7 +169,7 @@ function PurchaseEditor({ onClose, onSaved }) {
       </div>
 
       <table className="grid compact-inputs">
-        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('products.stock')}</th><th>{t('units.unit')}</th><th>{t('pos.qty')}</th><th>{t('purchases.unitCost')}</th><th>{t('products.price')}</th><th className="num">{t('common.total')}</th><th /></tr></thead>
+        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('products.stock')}</th><th>{t('units.unit')}</th><th>{t('pos.qty')}</th><th>{t('purchases.unitCost')}</th><th title={t('purchases.lineDiscountHint')}>{t('purchases.lineDiscount')}</th><th title={t('purchases.bonusHint')}>{t('purchases.bonus')}</th><th>{t('products.price')}</th><th className="num">{t('common.total')}</th><th /></tr></thead>
         <tbody>
           {lines.map((l, i) => (
             <tr key={l.product_id}>
@@ -191,8 +193,10 @@ function PurchaseEditor({ onClose, onSaved }) {
               ) : <span className="muted">—</span>}</td>
               <td><input inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, 'qty', e.target.value)} /></td>
               <td><input inputMode="decimal" value={l.unit_cost} onChange={(e) => setLine(i, 'unit_cost', e.target.value)} /></td>
+              <td><input className="w-pct" inputMode="decimal" placeholder="0" value={l.discount_percent} onChange={(e) => setLine(i, 'discount_percent', e.target.value)} /></td>
+              <td><input className="w-pct" inputMode="decimal" placeholder="0" value={l.bonus_qty} onChange={(e) => setLine(i, 'bonus_qty', e.target.value)} /></td>
               <td><input inputMode="decimal" value={l.price} onChange={(e) => setLine(i, 'price', e.target.value)} title={t('purchases.priceHint')} /></td>
-              <td className="num">{m(Math.round((Number(l.qty) || 0) * toMinor(l.unit_cost, d)))}</td>
+              <td className="num">{m(lineTotal(l))}{Number(l.bonus_qty) > 0 && Number(l.qty) > 0 && <div className="muted small">{t('purchases.netUnit')} {m(Math.round(lineTotal(l) / (Number(l.qty) + Number(l.bonus_qty))))}</div>}</td>
               <td><button className="danger-ghost sm" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>✕</button></td>
             </tr>
           ))}
@@ -210,7 +214,7 @@ function PurchaseEditor({ onClose, onSaved }) {
         </Field>
         <Field label={t('purchases.method')}>
           <select value={form.method} onChange={set('method')} disabled={!form.supplierId}>
-            {['cash', 'card', 'wallet', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
+            {['cash', 'card', 'wallet', 'bank', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
           </select>
         </Field>
       </div>
@@ -257,9 +261,9 @@ function PurchaseView({ id, onClose }) {
         <tbody>{p.items.map((i) => (
           <tr key={i.id}>
             <td>{i.name}{(i.batch_no || i.expiry_date) && <small className="muted"> · {i.batch_no} {i.expiry_date}</small>}</td>
-            <td className="num">{formatQty(i.qty)}</td><td className="num">{m(i.unit_cost)}</td><td className="num">{m(i.line_total)}</td>
+            <td className="num">{formatQty(i.qty)}{i.bonus_qty > 0 && <small className="badge">+{formatQty(i.bonus_qty)} {t('purchases.bonus')}</small>}</td><td className="num">{m(i.unit_cost)}{i.discount_percent > 0 && <small className="muted"> −{i.discount_percent}%</small>}</td><td className="num">{m(i.line_total)}</td>
             <td className="num">{returning
-              ? <input className="qty-input" type="number" min="0" max={i.qty - i.returned_qty} step="any" disabled={i.qty - i.returned_qty <= 0} value={qtys[i.id] ?? ''} onChange={(e) => setQtys((q) => ({ ...q, [i.id]: e.target.value }))} />
+              ? <input className="qty-input" type="number" min="0" max={i.qty + (i.bonus_qty || 0) - i.returned_qty} step="any" disabled={i.qty + (i.bonus_qty || 0) - i.returned_qty <= 0} value={qtys[i.id] ?? ''} onChange={(e) => setQtys((q) => ({ ...q, [i.id]: e.target.value }))} />
               : i.returned_qty ? formatQty(i.returned_qty) : ''}</td>
           </tr>
         ))}</tbody>
@@ -361,7 +365,7 @@ function Statement({ id, onClose }) {
         <form className="row grow" onSubmit={submitPay}>
           <input className="w-amount" autoFocus inputMode="decimal" placeholder={t('reports.amount')} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
           <select className="w-auto" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}>
-            {['cash', 'card', 'wallet', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
+            {['cash', 'card', 'wallet', 'bank', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
           </select>
           {pay.method === 'cash' && shift && <Toggle checked={pay.fromDrawer} onChange={(v) => setPay({ ...pay, fromDrawer: v })} label={t('purchases.fromDrawer')} />}
           <span className="spacer" />
@@ -381,7 +385,7 @@ function Statement({ id, onClose }) {
           {data.rows.map((r) => (
             <tr key={`${r.kind}${r.id}`}>
               <td>{r.created_at}</td>
-              <td>{r.kind === 'purchase' ? `${t('purchases.invoice')} #${r.id}${r.ref ? ` (${r.ref})` : ''}` : `${t('purchases.payment')} — ${t(`pay.${r.ref}`)}`}{r.notes && <small className="muted"> — {r.notes}</small>}</td>
+              <td>{r.kind === 'purchase' ? `${t('purchases.invoice')} #${r.id}${r.ref ? ` (${r.ref})` : ''}` : r.ref === 'rebate' ? `🎁 ${t('rebates.received')}` : r.ref === 'return' ? `↩ ${t('purchases.returnToSupplier')}` : `${t('purchases.payment')} — ${t(`pay.${r.ref}`)}`}{r.notes && <small className="muted"> — {r.notes}</small>}</td>
               <td className="num">{r.debit ? m(r.debit) : ''}</td>
               <td className="num">{r.credit ? m(r.credit) : ''}</td>
               <td className="num"><b>{m(r.balance)}</b></td>
@@ -390,6 +394,90 @@ function Statement({ id, onClose }) {
         </tbody>
       </table>
       {!data.rows.length && <Empty>{t('common.none')}</Empty>}
+    </Modal>
+  );
+}
+
+// ---------- supplier rebates ----------
+function Rebates() {
+  const { t, tErr, notify, settings, ask } = useApp();
+  const [status, setStatus] = useState('open');
+  const [list, reload] = useLoad(() => api.rebates.list({ status }), [status]);
+  const [editing, setEditing] = useState(null);
+  const m = (v) => formatMoney(v, settings);
+  const run = async (fn) => { try { await fn(); reload(); } catch (err) { notify(tErr(err), 'error'); } };
+  const y = new Date().getFullYear();
+  const blank = { supplier_id: '', name: '', basis: 'purchases', start_date: `${y}-01-01`, end_date: `${y}-12-31`, target: '', percent: '', fixed_amount: '', notes: '' };
+  return (
+    <>
+      <div className="filters toolbar">
+        <div className="seg">{['open', 'settled', 'cancelled', ''].map((x) => <button key={x} className={status === x ? 'on' : ''} onClick={() => setStatus(x)}>{x ? t(`rebates.status.${x}`) : t('common.all')}</button>)}</div>
+        <span className="muted small">{t('rebates.hint')}</span>
+        <span className="spacer" />
+        <button className="primary" onClick={() => setEditing(blank)}>+ {t('rebates.new')}</button>
+      </div>
+      <div className="rebate-grid">
+        {(list || []).map((r) => (
+          <div key={r.id} className={`card rebate ${r.reached ? 'reached' : ''}`}>
+            <div className="row between"><b>{r.name}</b><span className={`badge ${r.status === 'open' ? '' : 'dim'}`}>{t(`rebates.status.${r.status}`)}</span></div>
+            <div className="muted small">{r.supplier_name} · {t(`rebates.basis.${r.basis}`)} · <span dir="ltr" className="nowrap">{r.start_date} → {r.end_date}</span></div>
+            <div className="muted small">{r.percent ? `${r.percent}%` : ''}{r.percent && r.fixed_amount ? ' + ' : ''}{r.fixed_amount ? m(r.fixed_amount) : ''}{r.target ? ` ${t('rebates.whenReach', { v: m(r.target) })}` : ''}</div>
+            <div className="progress"><span style={{ width: `${r.progress}%` }} /></div>
+            <div className="row between small"><span>{t('rebates.achieved')}: <b>{m(r.achieved)}</b></span>{r.target > 0 && <span>{r.reached ? `✅ ${t('rebates.reached')}` : t('rebates.remaining', { v: m(r.remaining) })}</span>}</div>
+            {r.status === 'open' ? (
+              <div className="row between top-gap">
+                <span>{t('rebates.earned')}: <b className={r.earned ? 'good' : ''}>{m(r.earned)}</b></span>
+                <span className="row">
+                  <button className="ghost sm" onClick={() => setEditing({ ...r, target: fromMinor(r.target, settings.decimals), fixed_amount: r.fixed_amount ? fromMinor(r.fixed_amount, settings.decimals) : '' })}>{t('common.edit')}</button>
+                  <button className="danger-ghost sm" onClick={() => run(async () => { if (window.confirm(t('common.areYouSure'))) await api.rebates.cancel(r.id); })}>{t('common.cancel')}</button>
+                  <button className="primary sm" onClick={async () => {
+                    const v = await ask(t('rebates.settlePrompt'), { type: 'number', initial: fromMinor(r.earned, settings.decimals), required: true });
+                    if (v != null) run(async () => { await api.rebates.settle({ id: r.id, amount: toMinor(v, settings.decimals) }); notify(t('rebates.settled')); });
+                  }}>🎁 {t('rebates.settle')}</button>
+                </span>
+              </div>
+            ) : r.status === 'settled' && <div className="top-gap">{t('rebates.received')}: <b className="good">{m(r.settled_amount)}</b> <small className="muted">{r.settled_at?.slice(0, 10)}</small></div>}
+          </div>
+        ))}
+      </div>
+      {list && !list.length && <Empty>{t('rebates.none')}</Empty>}
+      {editing && <RebateModal rebate={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+    </>
+  );
+}
+
+function RebateModal({ rebate, onClose, onSaved }) {
+  const { t, tErr, notify, settings } = useApp();
+  const [f, setF] = useState(rebate);
+  const [suppliers] = useLoad(() => api.suppliers.list({}), []);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
+  async function save() {
+    try {
+      await api.rebates.save({ ...f, target: toMinor(f.target, settings.decimals), fixed_amount: toMinor(f.fixed_amount, settings.decimals), percent: Number(f.percent) || 0 });
+      onSaved();
+    } catch (err) { notify(tErr(err), 'error'); }
+  }
+  return (
+    <Modal title={f.id ? f.name : t('rebates.new')} onClose={onClose} width={620}
+      footer={<><span className="spacer" /><button onClick={onClose}>{t('common.cancel')}</button><button className="primary" onClick={save}>{t('common.save')}</button></>}>
+      <div className="grid2">
+        <Field label={t('purchases.supplier')}>
+          <select value={f.supplier_id} onChange={set('supplier_id')}>
+            <option value="">—</option>
+            {(suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </Field>
+        <Field label={t('common.name')}><input value={f.name} placeholder={t('rebates.namePh')} onChange={set('name')} /></Field>
+        <div className="span2"><Field label={t('rebates.basisLabel')}>
+          <div className="seg full">{['purchases', 'sales'].map((b) => <button key={b} type="button" className={f.basis === b ? 'on' : ''} onClick={() => setF({ ...f, basis: b })}>{t(`rebates.basis.${b}`)}</button>)}</div>
+        </Field><small className="muted">{t(`rebates.basisHint.${f.basis}`)}</small></div>
+        <Field label={t('common.from')}><input type="date" value={f.start_date} onChange={set('start_date')} /></Field>
+        <Field label={t('common.to')}><input type="date" value={f.end_date} onChange={set('end_date')} /></Field>
+        <Field label={t('rebates.target')} hint={t('rebates.targetHint')}><input inputMode="decimal" value={f.target} onChange={set('target')} placeholder="0" /></Field>
+        <Field label={t('rebates.percent')}><input inputMode="decimal" value={f.percent} onChange={set('percent')} placeholder="0" /></Field>
+        <Field label={t('rebates.fixed')}><input inputMode="decimal" value={f.fixed_amount} onChange={set('fixed_amount')} placeholder="0" /></Field>
+        <Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field>
+      </div>
     </Modal>
   );
 }

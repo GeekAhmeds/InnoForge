@@ -54,6 +54,8 @@ export default function Reports() {
             <Stat label={t('reports.creditSales')} value={m(r.totals.creditSales)} />
             <Stat label={t('reports.collections')} value={m(r.totals.collections)} />
             <Stat label={t('customers.receivables')} value={m(r.totals.receivables)} />
+            {!!r.totals.settlementDiscounts && <Stat label={t('collect.discounts')} value={`− ${m(r.totals.settlementDiscounts)}`} />}
+            {!!r.totals.rebates && <Stat label={t('rebates.title')} value={`+ ${m(r.totals.rebates)}`} />}
             {r.totals.netProfit != null && <Stat label={t('reports.netProfit')} value={m(r.totals.netProfit)} strong />}
           </div>
           <div className="report-grid">

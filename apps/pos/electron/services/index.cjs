@@ -435,6 +435,7 @@ function createServices(db) {
         author: str(p.author) || null,
         publisher: str(p.publisher) || null,
         kitchen: p.kitchen ? 1 : 0,
+        supplier_id: 'supplier_id' in p ? int(p.supplier_id) || null : p.id ? db.prepare('SELECT supplier_id FROM products WHERE id = ?').get(p.id)?.supplier_id ?? null : null,
         track_expiry: p.track_expiry ? 1 : 0,
         track_serial: p.track_serial ? 1 : 0,
         active: p.active === false ? 0 : 1,
@@ -653,12 +654,12 @@ function createServices(db) {
           const free = Math.floor(it.qty / (p.buy_qty + p.get_qty)) * p.get_qty;
           amount = Math.round(free * it.unit_price);
         }
-        amount = Math.min(amount, Math.max(0, gross - it.manual_discount));
+        amount = Math.min(amount, Math.max(0, gross - it.manual_discount - (it.customer_discount || 0)));
         if (amount > best.amount) best = { amount, name: p.name };
       }
       it.promo_discount = best.amount;
       it.promo_name = best.name;
-      it.discount = it.manual_discount + best.amount;
+      it.discount = it.manual_discount + (it.customer_discount || 0) + best.amount;
     }
   }
 
@@ -711,6 +712,8 @@ function createServices(db) {
   function priceCart(cart) {
     const s = getSettings();
     const priceListId = cartPriceList(cart);
+    // A customer's standing discount applies to every line on its own (not the cashier's discount).
+    const customerPct = cart.customer_id ? Math.min(100, Math.max(0, db.prepare('SELECT discount_percent FROM customers WHERE id = ?').get(cart.customer_id)?.discount_percent || 0)) : 0;
     const items = (cart.items || []).map((it) => {
       const qty = num(it.qty);
       if (!(qty > 0)) throw new PosError('INVALID_QTY');
@@ -738,6 +741,7 @@ function createServices(db) {
         unit_cost: Math.round(p.cost * factor),
         qty,
         manual_discount: Math.max(0, int(it.discount)),
+        customer_discount: 0,
         discount: Math.max(0, int(it.discount)),
         category_id: p.category_id,
         note: str(it.note),
@@ -745,6 +749,13 @@ function createServices(db) {
         stock: p.stock,
       };
     });
+    if (customerPct > 0) {
+      for (const it of items) {
+        const gross = Math.round(it.unit_price * it.qty);
+        it.customer_discount = Math.round((Math.max(0, gross - it.manual_discount) * customerPct) / 100);
+        it.discount = it.manual_discount + it.customer_discount;
+      }
+    }
     applyPromotions(items);
     const orderType = ['sale', 'dine_in', 'takeaway', 'delivery'].includes(cart.order_type) ? cart.order_type : 'sale';
     const totals = computeTotals(items, {
@@ -753,7 +764,7 @@ function createServices(db) {
       pricesIncludeTax: s.prices_include_tax,
       serviceRate: orderType === 'dine_in' ? s.service_rate : 0,
     });
-    return { settings: s, orderType, priceListId, ...totals };
+    return { settings: s, orderType, priceListId, customerPct, ...totals };
   }
 
   /**
@@ -824,13 +835,13 @@ function createServices(db) {
     for (const l of priced.lines) {
       const owned = l.id && db.prepare('SELECT id FROM order_items WHERE id = ? AND order_id = ?').get(l.id, orderId);
       if (owned) {
-        db.prepare('UPDATE order_items SET product_id = ?, name = ?, unit_price = ?, unit_cost = ?, qty = ?, discount = ?, line_total = ?, note = ?, unit_id = ?, unit_name = ?, unit_factor = ?, serials = ?, promo_discount = ?, promo_name = ? WHERE id = ?')
-          .run(l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '', l.id);
+        db.prepare('UPDATE order_items SET product_id = ?, name = ?, unit_price = ?, unit_cost = ?, qty = ?, discount = ?, line_total = ?, note = ?, unit_id = ?, unit_name = ?, unit_factor = ?, serials = ?, promo_discount = ?, promo_name = ?, customer_discount = ? WHERE id = ?')
+          .run(l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '', l.customer_discount || 0, l.id);
         keep.push(l.id);
       } else {
         keep.push(Number(
-          db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, serials, promo_discount, promo_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(orderId, l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '').lastInsertRowid,
+          db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, serials, promo_discount, promo_name, customer_discount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(orderId, l.product_id, l.name, l.unit_price, l.unit_cost, l.qty, l.discount, l.line_total, l.note, l.unit_id, l.unit_name, l.unit_factor, l.serials, l.promo_discount || 0, l.promo_name || '', l.customer_discount || 0).lastInsertRowid,
         ));
       }
     }
@@ -1169,8 +1180,11 @@ function createServices(db) {
           if (!product) throw new PosError('PRODUCT_NOT_FOUND');
           const unit = it.unit_id ? db.prepare('SELECT * FROM product_units WHERE id = ? AND product_id = ?').get(it.unit_id, product.id) : null;
           if (it.unit_id && !unit) throw new PosError('INVALID_UNIT');
+          // Supplier terms per line: a trade discount % and free bonus units (same unit as qty).
+          const pct = Math.min(100, Math.max(0, num(it.discount_percent)));
+          const bonus = Math.max(0, num(it.bonus_qty));
           return {
-            product, unit, qty, unitCost, lineTotal: Math.round(qty * unitCost),
+            product, unit, qty, unitCost, pct, bonus, lineTotal: Math.round(qty * unitCost * (1 - pct / 100)),
             factor: unit?.factor ?? 1, batchNo: str(it.batch_no), expiry: str(it.expiry_date) || null,
           };
         });
@@ -1185,16 +1199,19 @@ function createServices(db) {
         // Spread the invoice discount over the lines so product cost reflects what was really paid.
         const factor = subtotal > 0 ? total / subtotal : 1;
         for (const l of lines) {
-          db.prepare('INSERT INTO purchase_items (purchase_id, product_id, name, qty, unit_cost, line_total, unit_name, unit_factor, batch_no, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(purchaseId, l.product.id, l.unit ? `${l.product.name} (${l.unit.name})` : l.product.name, l.qty, l.unitCost, l.lineTotal, l.unit?.name ?? '', l.factor, l.batchNo, l.expiry);
+          db.prepare('INSERT INTO purchase_items (purchase_id, product_id, name, qty, unit_cost, line_total, unit_name, unit_factor, batch_no, expiry_date, bonus_qty, discount_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(purchaseId, l.product.id, l.unit ? `${l.product.name} (${l.unit.name})` : l.product.name, l.qty, l.unitCost, l.lineTotal, l.unit?.name ?? '', l.factor, l.batchNo, l.expiry, l.bonus, l.pct);
           const current = db.prepare('SELECT stock, cost, track_stock FROM products WHERE id = ?').get(l.product.id);
           // Cost is kept per base unit: a carton of 12 bought at 120 costs 10 per piece.
-          const baseQty = l.qty * l.factor;
-          const effective = Math.round((l.unitCost * factor) / l.factor);
+          // Bonus units come in free, so they lower the cost of every unit received.
+          const baseQty = (l.qty + l.bonus) * l.factor;
+          const effective = Math.round((l.lineTotal * factor) / baseQty);
           const onHand = current.track_stock ? Math.max(0, current.stock) : 0;
           const newCost = onHand > 0 ? Math.round((onHand * current.cost + baseQty * effective) / (onHand + baseQty)) : effective;
           db.prepare('UPDATE products SET cost = ? WHERE id = ?').run(newCost, l.product.id);
           if (current.track_stock) moveStock(l.product.id, baseQty, 'purchase', purchaseId, u.id, { batchNo: l.batchNo, expiry: l.expiry, purchaseId });
+          // Remember who supplies the product (used for sales-based rebates).
+          if (supplierId) db.prepare('UPDATE products SET supplier_id = ? WHERE id = ? AND supplier_id IS NULL').run(supplierId, l.product.id);
         }
         for (const up of updatePrices) {
           const price = int(up.price, -1);
@@ -1567,6 +1584,9 @@ function createServices(db) {
       const purchasesTotal = db.prepare("SELECT COALESCE(SUM(total), 0) AS t FROM purchases WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
       const expensesTotal = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
       const profit = Math.round(cost.revenue - cost.cost);
+      // Settlement discounts given when collecting reduce profit; supplier rebates received add to it.
+      const settlementDiscounts = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method = 'discount' AND status = 'posted' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
+      const rebatesTotal = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE method = 'rebate' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
       return {
         from: f,
         to: t,
@@ -1578,7 +1598,9 @@ function createServices(db) {
           profit: can('view_cost') ? profit : null,
           purchases: purchasesTotal,
           expenses: expensesTotal,
-          netProfit: can('view_cost') ? profit - expensesTotal : null,
+          settlementDiscounts,
+          rebates: rebatesTotal,
+          netProfit: can('view_cost') ? profit - expensesTotal - settlementDiscounts + rebatesTotal : null,
           creditSales: db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders o WHERE " + range).get(f, t).t,
           collections: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method NOT IN ('return', 'discount') AND status = 'posted' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t,
           receivables: db.prepare(`SELECT COALESCE(SUM(b), 0) AS t FROM (SELECT ${CUSTOMER_BALANCE} AS b FROM customers c) WHERE b > 0`).get().t,
@@ -1661,8 +1683,8 @@ function createServices(db) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(no, customer?.id ?? null, str(cart.customer_name) || customer?.name || '', str(cart.customer_phone) || customer?.phone || '',
           priced.priceListId, str(cart.valid_until) || null, str(cart.note), priced.subtotal, priced.discount, priced.tax, priced.total, u.id).lastInsertRowid);
         for (const l of priced.lines) {
-          db.prepare('INSERT INTO quote_items (quote_id, product_id, unit_id, name, unit_name, unit_price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(id, l.product_id, l.unit_id, l.name, l.unit_name, l.unit_price, l.qty, l.discount, l.line_total);
+          db.prepare('INSERT INTO quote_items (quote_id, product_id, unit_id, name, unit_name, unit_price, qty, discount, line_total, manual_discount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(id, l.product_id, l.unit_id, l.name, l.unit_name, l.unit_price, l.qty, l.discount, l.line_total, l.manual_discount);
         }
         audit('quote_create', { entity: 'quote', entityId: id, details: { quote: no, total: priced.total } });
         return getQuote(id);
@@ -1699,7 +1721,7 @@ function createServices(db) {
       return {
         quote_id: q.id, quote_no: q.quote_no, customer_id: q.customer_id, customer_name: q.customer_name, customer_phone: q.customer_phone,
         price_list_id: q.price_list_id, discount: q.discount, note: q.note,
-        items: q.items.filter((i) => i.product_id).map((i) => ({ product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty, discount: i.discount, note: '', kitchen_sent: 0 })),
+        items: q.items.filter((i) => i.product_id).map((i) => ({ product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty, discount: i.manual_discount ?? i.discount, note: '', kitchen_sent: 0 })),
       };
     },
   };
@@ -1747,8 +1769,10 @@ function createServices(db) {
         if (!(qty > 0)) continue;
         const line = pur.items.find((i) => i.id === r.purchase_item_id);
         if (!line) throw new PosError('NOT_FOUND');
-        if (qty > line.qty - line.returned_qty + 1e-9) throw new PosError('RETURN_EXCEEDS_SOLD', line.name);
-        lines.push({ line, qty, amount: Math.round(line.unit_cost * qty * factor) });
+        const received = line.qty + (line.bonus_qty || 0);
+        if (qty > received - line.returned_qty + 1e-9) throw new PosError('RETURN_EXCEEDS_SOLD', line.name);
+        // Credited at what each received unit really cost (after line discount, bonus and invoice discount).
+        lines.push({ line, qty, amount: Math.round((line.line_total / received) * qty * factor) });
       }
       if (!lines.length) throw new PosError('NOTHING_TO_RETURN');
       const amount = lines.reduce((sum, l) => sum + l.amount, 0);
@@ -2006,9 +2030,88 @@ function createServices(db) {
     },
   };
 
+  // ---------- supplier rebates (volume bonuses) ----------
+  /** How far an agreement has got: the amount reached, the target and what has been earned. */
+  function rebateProgress(r) {
+    const range = [r.start_date, r.end_date];
+    const achieved = r.basis === 'purchases'
+      ? db.prepare("SELECT COALESCE(SUM(total - returned), 0) AS t FROM purchases WHERE supplier_id = ? AND created_at >= ? AND created_at < date(?, '+1 day')").get(r.supplier_id, ...range).t
+      : Math.round(db.prepare(`
+          SELECT COALESCE(SUM(i.line_total * (i.qty - i.returned_qty) / i.qty), 0) AS t
+          FROM order_items i JOIN orders o ON o.id = i.order_id JOIN products p ON p.id = i.product_id
+          WHERE p.supplier_id = ? AND o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')`).get(r.supplier_id, ...range).t);
+    const reached = achieved >= r.target;
+    const earned = reached ? Math.round((achieved * r.percent) / 100) + r.fixed_amount : 0;
+    const today = new Date().toLocaleDateString('en-CA');
+    return {
+      ...plain(r), achieved, reached, earned,
+      progress: r.target > 0 ? Math.min(100, Math.round((achieved / r.target) * 100)) : 100,
+      remaining: Math.max(0, r.target - achieved),
+      ended: r.end_date < today,
+    };
+  }
+
+  const rebates = {
+    list({ supplierId = null, status = '' } = {}) {
+      requirePerm('purchases');
+      const where = []; const params = [];
+      if (supplierId) { where.push('r.supplier_id = ?'); params.push(int(supplierId)); }
+      if (status) { where.push('r.status = ?'); params.push(status); }
+      return db.prepare(`SELECT r.*, s.name AS supplier_name FROM supplier_rebates r JOIN suppliers s ON s.id = r.supplier_id
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY r.status = 'open' DESC, r.end_date DESC, r.id DESC`).all(...params).map(rebateProgress);
+    },
+    save(r = {}) {
+      requirePerm('purchases');
+      if (!str(r.name)) throw new PosError('NAME_REQUIRED');
+      if (!db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(int(r.supplier_id))) throw new PosError('SUPPLIER_REQUIRED');
+      const basis = r.basis === 'sales' ? 'sales' : 'purchases';
+      const start = str(r.start_date); const end = str(r.end_date);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) throw new PosError('INVALID_DATES');
+      const pct = Math.min(100, Math.max(0, num(r.percent)));
+      const fixed = Math.max(0, int(r.fixed_amount));
+      if (!pct && !fixed) throw new PosError('INVALID_AMOUNT');
+      const vals = [int(r.supplier_id), str(r.name), basis, start, end, Math.max(0, int(r.target)), pct, fixed, str(r.notes)];
+      if (r.id) {
+        const cur = db.prepare('SELECT status FROM supplier_rebates WHERE id = ?').get(r.id);
+        if (!cur) throw new PosError('NOT_FOUND');
+        if (cur.status !== 'open') throw new PosError('INVALID_STATUS');
+        db.prepare('UPDATE supplier_rebates SET supplier_id = ?, name = ?, basis = ?, start_date = ?, end_date = ?, target = ?, percent = ?, fixed_amount = ?, notes = ? WHERE id = ?').run(...vals, r.id);
+        audit('rebate_save', { entity: 'supplier', entityId: vals[0], details: { name: vals[1] } });
+        return r.id;
+      }
+      const id = Number(db.prepare('INSERT INTO supplier_rebates (supplier_id, name, basis, start_date, end_date, target, percent, fixed_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      audit('rebate_save', { entity: 'supplier', entityId: vals[0], details: { name: vals[1] } });
+      return id;
+    },
+    /** Books the bonus: the supplier's balance goes down by the amount (we owe them less). */
+    settle({ id, amount = null, notes = '' } = {}) {
+      const u = requirePerm('purchases').user;
+      return transaction(db, () => {
+        const r = db.prepare('SELECT * FROM supplier_rebates WHERE id = ?').get(id);
+        if (!r) throw new PosError('NOT_FOUND');
+        if (r.status !== 'open') throw new PosError('INVALID_STATUS');
+        const value = amount == null || amount === '' ? rebateProgress(r).earned : Math.max(0, int(amount));
+        if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+        db.prepare("INSERT INTO supplier_payments (supplier_id, amount, method, user_id, notes, rebate_id) VALUES (?, ?, 'rebate', ?, ?, ?)")
+          .run(r.supplier_id, value, u.id, str(notes) || r.name, r.id);
+        db.prepare("UPDATE supplier_rebates SET status = 'settled', settled_amount = ?, settled_at = datetime('now', 'localtime') WHERE id = ?").run(value, id);
+        audit('rebate_settle', { entity: 'supplier', entityId: r.supplier_id, details: { name: r.name, amount: value } });
+        return rebateProgress(db.prepare('SELECT * FROM supplier_rebates WHERE id = ?').get(id));
+      });
+    },
+    cancel(id) {
+      requirePerm('purchases');
+      const r = db.prepare('SELECT * FROM supplier_rebates WHERE id = ?').get(id);
+      if (!r || r.status !== 'open') throw new PosError('INVALID_STATUS');
+      db.prepare("UPDATE supplier_rebates SET status = 'cancelled' WHERE id = ?").run(id);
+      audit('rebate_cancel', { entity: 'supplier', entityId: r.supplier_id, details: { name: r.name } });
+      return true;
+    },
+  };
+
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, requireAdmin, requirePerm, audit, can,
   };
 }
 

@@ -376,3 +376,12 @@ input.strong-input { font-size: 20px; font-weight: 700; }
 .banner.danger { background: #fde8e8; color: var(--danger); border: 1px solid #f5c2c2; }
 .row.end { justify-content: flex-end; gap: 6px; }
 table.grid.compact td, table.grid.compact th { padding: 6px 8px; }
+
+/* Supplier rebates */
+.rebate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.card.rebate { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.card.rebate.reached { border-color: var(--good); }
+.progress { height: 8px; background: #eef1f5; border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
+.progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand-2)); border-radius: 99px; }
+.card.rebate.reached .progress span { background: var(--good); }
+input.w-pct { width: 64px; }

@@ -18,7 +18,7 @@ const cartFromOrder = (o) => ({
   items: o.items.map((i) => ({
     id: i.id, product_id: i.product_id, unit_id: i.unit_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty,
     // Stored discounts include automatic promotions, which are re-applied on their own.
-    discount: Math.max(0, i.discount - (i.promo_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent,
+    discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)), note: i.note, serials: i.serials || '', kitchen_sent: i.kitchen_sent,
   })),
 });
 
@@ -222,6 +222,7 @@ export default function Pos() {
                   <span className="line-name">{it.name}</span>
                   {it.note && <small className="muted">{it.note}</small>}
                   {it.kitchen_sent > 0 && <small className="sent">✓ {formatQty(it.kitchen_sent)}</small>}
+                  {ql?.customer_discount > 0 && <small className="promo">👤 {t('pos.customerDiscount', { p: quote.customerPct })} −{m(ql.customer_discount)}</small>}
                   {ql?.promo_name && <small className="promo">🏷 {ql.promo_name} −{m(ql.promo_discount)}</small>}
                 </div>
                 <div className="qty" onClick={(e) => e.stopPropagation()}>

@@ -515,3 +515,43 @@ test('collections: numbered receipts, invoice allocation, settlement discount, c
   assert.equal(list.totals.amount, 20000); // posted only: receipt 1 (cheque bounced, receipt 3 void)
   assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'receipt_void'").get());
 });
+
+test('trading terms: customer discount, purchase bonus and line discount, supplier rebates', () => {
+  const { s, db } = setup({ tax_rate: 0 });
+  const sup = s.suppliers.save({ name: 'Delta Foods' });
+  const p = s.products.save({ name: 'Oil', price: 10000, cost: 0, stock: 0 });
+  // 10 cartons-worth bought at 60 with 10% off, plus 2 free: 540 for 12 units → 45 each
+  const pur = s.purchases.create({ supplierId: sup, items: [{ product_id: p, qty: 10, unit_cost: 6000, discount_percent: 10, bonus_qty: 2 }] });
+  assert.equal(pur.total, 54000);
+  const prod = db.prepare('SELECT stock, cost, supplier_id FROM products WHERE id = ?').get(p);
+  assert.deepEqual([prod.stock, prod.cost, prod.supplier_id], [12, 4500, sup]);
+  // returning 2 units credits 2 × 45
+  s.purchases.returnItems({ purchaseId: pur.id, items: [{ purchase_item_id: pur.items[0].id, qty: 2 }] });
+  assert.equal(db.prepare('SELECT returned FROM purchases WHERE id = ?').get(pur.id).returned, 9000);
+
+  // Standing 10% customer discount: automatic, not the cashier's discount, kept apart on the line.
+  const cust = s.customers.save({ name: 'Wholesaler', discount_percent: 10 });
+  s.users.save({ name: 'Cash', username: 'cash', pin: '1111', role: 'cashier' });
+  s.auth.logout(); s.auth.login({ username: 'cash', pin: '1111' });
+  s.shifts.open({});
+  const q = s.orders.quote({ customer_id: cust, items: [{ product_id: p, qty: 5 }] });
+  assert.equal(q.lines[0].customer_discount, 5000);
+  assert.equal(q.total, 45000);
+  const o = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 5 }], payments: [{ method: 'cash', amount: 45000 }] });
+  assert.equal(o.items[0].customer_discount, 5000);
+  s.auth.logout(); s.auth.login({ username: 'admin', pin: '1234' });
+
+  // Rebates: 5% of purchases once 500 is reached; sales-based on the supplier's products.
+  const today = new Date().toLocaleDateString('en-CA');
+  const r1 = s.rebates.save({ supplier_id: sup, name: 'Q4 purchases', basis: 'purchases', start_date: today, end_date: today, target: 40000, percent: 5 });
+  const r2 = s.rebates.save({ supplier_id: sup, name: 'Q4 sales', basis: 'sales', start_date: today, end_date: today, target: 100000, percent: 3 });
+  const [a, b] = [s.rebates.list({}).find((x) => x.id === r1), s.rebates.list({}).find((x) => x.id === r2)];
+  assert.deepEqual([a.achieved, a.reached, a.earned], [45000, true, 2250]);
+  assert.deepEqual([b.achieved, b.reached, b.earned, b.progress], [45000, false, 0, 45]);
+  const balanceBefore = s.suppliers.list({}).find((x) => x.id === sup).balance;
+  s.rebates.settle({ id: r1 });
+  assert.equal(s.suppliers.list({}).find((x) => x.id === sup).balance, balanceBefore - 2250);
+  assert.equal(tryCode(() => s.rebates.settle({ id: r1 })), 'INVALID_STATUS');
+  const rep = s.reports.summary({});
+  assert.equal(rep.totals.rebates, 2250);
+});

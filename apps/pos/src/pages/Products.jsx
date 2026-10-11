@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
@@ -96,7 +96,7 @@ export default function Products() {
 }
 
 function ProductModal({ product, categories, onClose, onSaved }) {
-  const { t, tErr, notify, settings } = useApp();
+  const { t, tErr, notify, settings, can } = useApp();
   const d = settings.decimals;
   const isNew = !product.id;
   const restaurant = settings.business_type === 'restaurant';
@@ -117,20 +117,26 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     active: product.id ? !!product.active : true,
     track_expiry: !!product.track_expiry,
     track_serial: !!product.track_serial,
+    supplier_id: product.supplier_id || '',
     units: (product.units || []).map((u) => ({ ...u, price: u.price == null ? '' : fromMinor(u.price, d) })),
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
   });
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
+  const [suppliers, setSuppliers] = useState(null);
+  useEffect(() => { if (can('purchases')) api.suppliers.list({}).then(setSuppliers).catch(() => {}); }, [can]);
   const setUnit = (i, k, v) => setF((x) => ({ ...x, units: x.units.map((u, j) => (j === i ? { ...u, [k]: v } : u)) }));
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e }));
 
   async function save(e) {
     e?.preventDefault();
     try {
+      // Users who cannot see suppliers leave the product's supplier as it is.
+      const { supplier_id: supplierId, ...rest } = f;
       await api.products.save({
-        ...f,
+        ...rest,
         id: product.id,
         category_id: Number(f.category_id) || null,
+        ...(suppliers ? { supplier_id: Number(supplierId) || null } : {}),
         price: toMinor(f.price, d),
         cost: toMinor(f.cost, d),
         stock: Number(f.stock) || 0,
@@ -173,6 +179,14 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         </Field>
         <Field label={t('products.price')}><input required inputMode="decimal" value={f.price} onChange={set('price')} /></Field>
         <Field label={t('products.cost')}><input inputMode="decimal" value={f.cost} onChange={set('cost')} /></Field>
+        {suppliers && (
+          <Field label={t('products.supplier')} hint={t('products.supplierHint')}>
+            <select value={f.supplier_id} onChange={set('supplier_id')}>
+              <option value="">—</option>
+              {suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </Field>
+        )}
         {bookstore && <>
           <Field label={t('products.author')}><input value={f.author} onChange={set('author')} /></Field>
           <Field label={t('products.publisher')}><input value={f.publisher} onChange={set('publisher')} /></Field>

@@ -541,6 +541,11 @@ const MIGRATIONS = [
   );
   ALTER TABLE supplier_payments ADD COLUMN rebate_id INTEGER REFERENCES supplier_rebates(id);
   `,
+  // v9: quotations keep the hand-given discount apart from automatic ones.
+  `
+  ALTER TABLE quote_items ADD COLUMN manual_discount INTEGER NOT NULL DEFAULT 0;
+  UPDATE quote_items SET manual_discount = discount;
+  `,
 ];
 
 function openDatabase(file) {
