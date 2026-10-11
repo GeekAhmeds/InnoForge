@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { formatMoney, fromMinor, toMinor } from '../lib/money.js';
 import { collectionHtml, statementHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
+import { ExcelButtons } from '../components/ExcelImport.jsx';
 
 export default function Customers() {
   const { t, settings } = useApp();
@@ -21,6 +22,7 @@ export default function Customers() {
         <div className="filters">
           <input placeholder={t('customers.searchHint')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <Toggle checked={owingOnly} onChange={setOwingOnly} label={t('customers.owingOnly')} />
+          <ExcelButtons kind="customers" onImported={reload} />
           <button className="primary" onClick={() => setEditing({ name: '', phone: '', address: '', tax_number: '', notes: '', credit_limit: 0, active: true })}>+ {t('customers.new')}</button>
         </div>
       </div>
@@ -144,6 +146,9 @@ function Statement({ id, onClose }) {
       <table className="grid">
         <thead><tr><th>{t('orders.date')}</th><th>{t('orders.type')}</th><th className="num">{t('customers.debit')}</th><th className="num">{t('customers.credit')}</th><th className="num">{t('customers.balance')}</th></tr></thead>
         <tbody>
+          {!!customer.opening_balance && (
+            <tr><td>—</td><td>{t('customers.opening')}</td><td className="num">{m(customer.opening_balance)}</td><td /><td className="num"><b>{m(customer.opening_balance)}</b></td></tr>
+          )}
           {data.rows.map((r) => (
             <tr key={`${r.kind}${r.id}`}>
               <td>{r.created_at}</td>

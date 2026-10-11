@@ -302,6 +302,11 @@ const MIGRATIONS = [
     CREATE INDEX idx_audit_action ON audit_log(action);
     `,
   },
+  // v5: opening balances, so existing debts can be brought in (e.g. from Excel).
+  `
+  ALTER TABLE customers ADD COLUMN opening_balance INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE suppliers ADD COLUMN opening_balance INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function openDatabase(file) {

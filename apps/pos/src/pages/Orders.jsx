@@ -3,11 +3,12 @@ import { api } from '../lib/api.js';
 import { formatMoney, formatQty } from '../lib/money.js';
 import { receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
+import { ExcelButtons } from '../components/ExcelImport.jsx';
 
 export const today = () => new Date().toLocaleDateString('en-CA');
 
 export default function Orders() {
-  const { t, settings } = useApp();
+  const { t, settings, can } = useApp();
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
   const [search, setSearch] = useState('');
@@ -24,6 +25,7 @@ export default function Orders() {
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           <input placeholder={t('orders.searchHint')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          {can('reports') && <ExcelButtons kind="invoices" exportKind="invoices" params={{ from, to }} importable={false} />}
         </div>
       </div>
       <div className="card flush">

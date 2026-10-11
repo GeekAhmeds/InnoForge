@@ -295,3 +295,31 @@ test('permissions: role defaults, overrides, supervisor approval for discounts a
   s.auth.login({ username: 'cash', pin: '3333' });
   assert.equal(s.auth.status().user.perms.max_discount, 30);
 });
+
+test('excel import: products upsert by barcode with stock adjustment, customers with opening balance, row errors', () => {
+  const { s, db } = setup();
+  const r1 = s.importer.products({ rows: [
+    { name: 'قلم', barcode: '111', category: 'أدوات', price: '5.5', cost: '3', stock: '100' },
+    { name: 'كشكول', barcode: '', category: 'أدوات', price: '٢٥', stock: '' },
+    { name: '', price: '1' },
+    { name: 'غلط', price: 'abc' },
+  ] });
+  assert.deepEqual([r1.created, r1.updated, r1.errors.map((e) => e.code)], [2, 0, ['NAME_REQUIRED', 'INVALID_PRICE']]);
+  const pen = db.prepare("SELECT * FROM products WHERE barcode = '111'").get();
+  assert.equal(pen.price, 550);
+  assert.equal(pen.stock, 100);
+  assert.equal(db.prepare("SELECT price FROM products WHERE name = 'كشكول'").get().price, 2500);
+  const r2 = s.importer.products({ rows: [{ name: 'قلم جاف', barcode: '111', price: '6', stock: '90' }] });
+  assert.equal(r2.updated, 1);
+  const pen2 = db.prepare("SELECT * FROM products WHERE barcode = '111'").get();
+  assert.deepEqual([pen2.name, pen2.price, pen2.stock, pen2.cost], ['قلم جاف', 600, 90, 300]);
+  const c = s.importer.customers({ rows: [{ name: 'شركة الأمل', phone: '0100', opening_balance: '1500', credit_limit: '5000' }] });
+  assert.equal(c.created, 1);
+  const cust = s.customers.list({})[0];
+  assert.equal(cust.balance, 150000);
+  assert.equal(cust.credit_limit, 500000);
+  assert.equal(s.customers.statement({ id: cust.id }).balance, 150000);
+  const sup = s.importer.suppliers({ rows: [{ name: 'مورد 1', opening_balance: '200' }] });
+  assert.equal(sup.created, 1);
+  assert.equal(s.suppliers.list({})[0].balance, 20000);
+});

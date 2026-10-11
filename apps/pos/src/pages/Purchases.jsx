@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
+import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { today } from './Orders.jsx';
 
 export default function Purchases() {
@@ -245,6 +246,7 @@ function SupplierList() {
         <input placeholder={t('common.search')} value={search} onChange={(e) => setSearch(e.target.value)} />
         <span className="muted">{t('purchases.totalOwed')}: <b className="warn">{m(owed)}</b></span>
         <span className="spacer" />
+        <ExcelButtons kind="suppliers" onImported={reload} />
         <button className="primary" onClick={() => setEditing({ name: '', phone: '', address: '', notes: '', active: true })}>+ {t('purchases.newSupplier')}</button>
       </div>
       <div className="card flush">

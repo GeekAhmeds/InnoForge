@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty } from '../lib/money.js';
 import { Empty, useApp, useLoad } from '../components/ui.jsx';
+import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { today } from './Orders.jsx';
 
 const daysAgo = (n) => {
@@ -35,6 +36,7 @@ export default function Reports() {
           </div>
           <input type="date" value={range.from} onChange={(e) => setRange((x) => ({ ...x, from: e.target.value }))} />
           <input type="date" value={range.to} onChange={(e) => setRange((x) => ({ ...x, to: e.target.value }))} />
+          <ExcelButtons kind="report" exportKind="report" params={range} importable={false} />
         </div>
       </div>
 

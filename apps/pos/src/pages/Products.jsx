@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
+import { ExcelButtons } from '../components/ExcelImport.jsx';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -34,6 +35,7 @@ export default function Products() {
               {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <Toggle checked={lowOnly} onChange={setLowOnly} label={t('products.lowStock')} />
+            <ExcelButtons kind="products" onImported={() => { reload(); reloadCategories(); }} />
             <button className="primary" onClick={() => setEditing({})}>+ {t('products.new')}</button>
           </div>
         )}

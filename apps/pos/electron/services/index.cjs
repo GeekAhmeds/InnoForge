@@ -778,6 +778,7 @@ function createServices(db) {
 
   // ---------- suppliers & purchasing ----------
   const SUPPLIER_BALANCE = `(
+    s.opening_balance +
     COALESCE((SELECT SUM(total) FROM purchases p WHERE p.supplier_id = s.id), 0) -
     COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id = s.id), 0)
   )`;
@@ -826,9 +827,9 @@ function createServices(db) {
         UNION ALL
         SELECT 'payment' AS kind, id, created_at, method AS ref, 0 AS debit, amount AS credit, notes FROM supplier_payments WHERE supplier_id = ?
         ORDER BY created_at, kind DESC, id`).all(id, id));
-      let balance = 0;
+      let balance = supplier.opening_balance || 0;
       for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
-      return { supplier, rows };
+      return { supplier, rows, opening: supplier.opening_balance || 0 };
     },
     pay({ supplierId, amount, method = 'cash', fromDrawer = false, notes = '' } = {}) {
       const u = requirePerm('purchases').user;
@@ -953,11 +954,13 @@ function createServices(db) {
 
   // ---------- customers & credit sales ----------
   function customerBalance(id) {
+    const opening = db.prepare('SELECT opening_balance FROM customers WHERE id = ?').get(id)?.opening_balance || 0;
     const sold = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE customer_id = ? AND status = 'completed'").get(id).t;
     const paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ?').get(id).t;
-    return sold - paid;
+    return opening + sold - paid;
   }
   const CUSTOMER_BALANCE = `(
+    c.opening_balance +
     COALESCE((SELECT SUM(credit) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed'), 0) -
     COALESCE((SELECT SUM(amount) FROM customer_payments cp WHERE cp.customer_id = c.id), 0)
   )`;
@@ -1013,7 +1016,7 @@ function createServices(db) {
         SELECT CASE method WHEN 'return' THEN 'return' ELSE 'payment' END AS kind, id, method AS ref, created_at, amount AS total, 0 AS debit, amount AS credit, notes
           FROM customer_payments WHERE customer_id = ?
         ORDER BY created_at, kind DESC, id`).all(id, id));
-      let balance = 0;
+      let balance = customer.opening_balance || 0;
       for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
       const inRange = rows.filter((r) => (!from || r.created_at >= from) && (!to || r.created_at < `${to} 99`));
       const opening = inRange.length ? inRange[0].balance - inRange[0].debit + inRange[0].credit : balance;
@@ -1090,7 +1093,114 @@ function createServices(db) {
     },
   };
 
-    // ---------- commissions ----------
+  
+  // ---------- bulk import (Excel) ----------
+  // Rows arrive with money in major units (as typed in the sheet). Each sheet row is
+  // validated on its own; bad rows are reported and skipped, good ones applied together.
+  const toMinorUnits = (v) => {
+    if (v === '' || v == null) return null;
+    const n = Number(String(v).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[,٬\s]/g, '').replace('٫', '.'));
+    return Number.isFinite(n) ? Math.round(n * 10 ** (getSettings().decimals ?? 2)) : NaN;
+  };
+  const yes = (v, d) => (v === '' || v == null ? d : /^(1|y|yes|true|نعم|ايوه|أيوه|اه|✓)$/i.test(String(v).trim()));
+
+  function importProducts({ rows = [], updateExisting = true } = {}) {
+    const u = requirePerm('products').user;
+    requirePerm('backup');
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] };
+    const catId = (name) => {
+      if (!str(name)) return null;
+      const found = db.prepare('SELECT id FROM categories WHERE name = ?').get(str(name));
+      return found ? found.id : Number(db.prepare('INSERT INTO categories (name) VALUES (?)').run(str(name)).lastInsertRowid);
+    };
+    transaction(db, () => {
+      rows.forEach((r, i) => {
+        const line = r.__row || i + 2;
+        const name = str(r.name);
+        const price = toMinorUnits(r.price);
+        const cost = toMinorUnits(r.cost);
+        if (!name) { result.errors.push({ row: line, code: 'NAME_REQUIRED' }); return; }
+        if (price == null || Number.isNaN(price) || price < 0) { result.errors.push({ row: line, code: 'INVALID_PRICE', name }); return; }
+        if (Number.isNaN(cost)) { result.errors.push({ row: line, code: 'INVALID_PRICE', name }); return; }
+        const barcode = str(r.barcode) || null;
+        const existing = (barcode && db.prepare('SELECT * FROM products WHERE barcode = ?').get(barcode))
+          || db.prepare('SELECT * FROM products WHERE name = ? AND (barcode IS NULL OR barcode = ?)').get(name, barcode || '');
+        const fields = {
+          name, barcode, price,
+          category_id: str(r.category) ? catId(r.category) : existing?.category_id ?? null,
+          cost: cost ?? existing?.cost ?? 0,
+          unit: str(r.unit) || existing?.unit || 'pcs',
+          min_stock: r.min_stock === '' || r.min_stock == null ? existing?.min_stock ?? 0 : num(r.min_stock),
+          track_stock: yes(r.track_stock, existing ? !!existing.track_stock : true) ? 1 : 0,
+          author: str(r.author) || existing?.author || null,
+          publisher: str(r.publisher) || existing?.publisher || null,
+          kitchen: yes(r.kitchen, existing ? !!existing.kitchen : false) ? 1 : 0,
+          active: 1,
+        };
+        const stock = r.stock === '' || r.stock == null ? null : num(r.stock, NaN);
+        if (Number.isNaN(stock)) { result.errors.push({ row: line, code: 'INVALID_QTY', name }); return; }
+        if (existing) {
+          if (!updateExisting) { result.skipped++; return; }
+          const keys = Object.keys(fields);
+          db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), existing.id);
+          // The sheet's stock is the counted quantity: record the difference as an adjustment.
+          if (stock != null && fields.track_stock && stock !== existing.stock) moveStock(existing.id, stock - existing.stock, 'adjust', null, u.id);
+          result.updated++;
+        } else {
+          const keys = Object.keys(fields);
+          const id = Number(db.prepare(`INSERT INTO products (${keys.join(', ')}, stock) VALUES (${keys.map(() => '?').join(', ')}, 0)`).run(...keys.map((k) => fields[k])).lastInsertRowid);
+          if (stock && fields.track_stock) moveStock(id, stock, 'purchase', null, u.id);
+          result.created++;
+        }
+      });
+      audit('import_products', { details: { created: result.created, updated: result.updated, errors: result.errors.length } });
+    });
+    return result;
+  }
+
+  function importParties(kind, { rows = [], updateExisting = true } = {}) {
+    requirePerm(kind === 'customers' ? 'customers_edit' : 'purchases');
+    requirePerm('backup');
+    const table = kind === 'customers' ? 'customers' : 'suppliers';
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] };
+    transaction(db, () => {
+      rows.forEach((r, i) => {
+        const line = r.__row || i + 2;
+        const name = str(r.name);
+        if (!name) { result.errors.push({ row: line, code: 'NAME_REQUIRED' }); return; }
+        const opening = toMinorUnits(r.opening_balance);
+        const limit = toMinorUnits(r.credit_limit);
+        if (Number.isNaN(opening) || Number.isNaN(limit)) { result.errors.push({ row: line, code: 'INVALID_AMOUNT', name }); return; }
+        const phone = str(r.phone);
+        const existing = (phone && db.prepare(`SELECT * FROM ${table} WHERE phone = ?`).get(phone)) || db.prepare(`SELECT * FROM ${table} WHERE name = ?`).get(name);
+        const fields = { name, phone, address: str(r.address) || existing?.address || '', notes: str(r.notes) || existing?.notes || '' };
+        if (opening != null) fields.opening_balance = opening;
+        if (kind === 'customers') {
+          fields.tax_number = str(r.tax_number) || existing?.tax_number || '';
+          if (limit != null) fields.credit_limit = Math.max(0, limit);
+        }
+        const keys = Object.keys(fields);
+        if (existing) {
+          if (!updateExisting) { result.skipped++; return; }
+          db.prepare(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), existing.id);
+          result.updated++;
+        } else {
+          db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => fields[k]));
+          result.created++;
+        }
+      });
+      audit(`import_${kind}`, { details: { created: result.created, updated: result.updated, errors: result.errors.length } });
+    });
+    return result;
+  }
+
+  const importer = {
+    products: importProducts,
+    customers: (arg) => importParties('customers', arg),
+    suppliers: (arg) => importParties('suppliers', arg),
+  };
+
+  // ---------- commissions ----------
   const commissions = {
     /** Net sales (after returns) per salesperson — the cashier unless another rep was picked. */
     report({ from, to } = {}) {
@@ -1127,7 +1237,7 @@ function createServices(db) {
 
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, requireAdmin, requirePerm, audit, can,
   };
 }
 

@@ -120,6 +120,7 @@
     "url": "https://github.com/GeekAhmeds/InnoForge"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "exceljs": "^4.4.0"
   }
 }

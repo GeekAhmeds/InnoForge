@@ -337,3 +337,8 @@ tr.dim td { opacity: .5; }
 .audit-hot td { background: #fffbeb; }
 .audit-details { color: var(--muted); max-width: 420px; word-break: break-word; }
 .nowrap { white-space: nowrap; }
+
+/* ---------- excel ---------- */
+.excel-intro ol { padding-inline-start: 22px; line-height: 2; }
+.excel-preview { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.excel-result .stats { margin-bottom: 12px; }
