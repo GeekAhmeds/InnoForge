@@ -12,6 +12,9 @@ name: POS installer
 #   POS_DEPLOY_USER   SSH user that can write to the update folder
 #   POS_DEPLOY_KEY    SSH private key for that user
 #   POS_DEPLOY_PATH   folder served at https://0x01source.com:7999/srv/InnoForge/PoS/
+#   Optional, when the update server is not reachable from the internet (e.g. an office
+#   server behind a public front server): SSH goes through that front server first.
+#   POS_DEPLOY_PROXY_HOST, POS_DEPLOY_PROXY_PORT (default 22), POS_DEPLOY_PROXY_USER, POS_DEPLOY_PROXY_KEY
 
 on:
   workflow_dispatch:
@@ -113,3 +116,7 @@ jobs:
           source: update/*
           target: ${{ secrets.POS_DEPLOY_PATH }}
           strip_components: 1
+          proxy_host: ${{ secrets.POS_DEPLOY_PROXY_HOST }}
+          proxy_port: ${{ secrets.POS_DEPLOY_PROXY_PORT || 22 }}
+          proxy_username: ${{ secrets.POS_DEPLOY_PROXY_USER }}
+          proxy_key: ${{ secrets.POS_DEPLOY_PROXY_KEY }}

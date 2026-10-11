@@ -246,3 +246,41 @@ sudo certbot certonly --nginx -d 0x01source.com
 - `pos-license-private.pem`: اعمله نسخة على فلاشة أو مكان آمن **أوفلاين**. لو ضاع، مش هتقدر تطلّع تراخيص ولا توقّع تحديثات جديدة.
 - `pos-deploy` (مفتاح الرفع): لو حسيت إنه اتسرّب، امسح سطره من `/home/deploy/.ssh/authorized_keys` واعمل واحد جديد.
 - المستخدم `deploy` مش بيقدر يعمل حاجة غير الكتابة في فولدر التحديثات.
+
+---
+
+## ملحق: الملفات على السيرفر المحلي (ورا سيرفر Hetzner)
+
+لو ملفات التحديث على سيرفر في المكتب مش ظاهر على الإنترنت (`inno`، `192.168.1.10`، متوصل بـ Tailscale على `100.97.181.102`)،
+وسيرفر Hetzner (`91.99.173.208`) هو اللي عليه `0x01source.com`:
+
+```
+العميل ──https:7999──► Hetzner (nginx) ──Tailscale──► inno:7999 (nginx) ──► /srv/InnoForge/PoS
+GitHub ──ssh:22──► Hetzner (deploy-jump) ──Tailscale ssh──► inno (deploy) ──► /srv/InnoForge/PoS
+```
+
+**على Hetzner:** يحوّل 7999 للسيرفر المحلي:
+
+```nginx
+server {
+    listen 7999 ssl;
+    server_name 0x01source.com;
+    ssl_certificate     /etc/letsencrypt/live/0x01source.com-0001/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/0x01source.com-0001/privkey.pem;
+
+    location /srv/InnoForge/PoS/ {
+        proxy_pass https://100.97.181.102:7999;
+        proxy_set_header Host 0x01source.com;
+        proxy_ssl_server_name on;
+        proxy_ssl_name 0x01source.com;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+}
+```
+
+**الرفع من GitHub:** بيعدّي على Hetzner الأول (jump host)، وبعدين يدخل `inno` على عنوان Tailscale.
+الأسرار: `POS_DEPLOY_HOST=100.97.181.102`، `POS_DEPLOY_USER=deploy` (على inno)، `POS_DEPLOY_KEY`، `POS_DEPLOY_PATH=/srv/InnoForge/PoS`،
+و `POS_DEPLOY_PROXY_HOST=91.99.173.208`، `POS_DEPLOY_PROXY_USER=deploy-jump`، `POS_DEPLOY_PROXY_KEY`.
+
+> لو النت أو الكهرباء قطعت عند السيرفر المحلي، البرامج مش هتلاقي تحديث وهتحاول تاني بعد 6 ساعات. مفيش أي ضرر، بس التحديث بيتأخر.
