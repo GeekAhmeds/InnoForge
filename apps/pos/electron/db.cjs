@@ -546,6 +546,42 @@ const MIGRATIONS = [
   ALTER TABLE quote_items ADD COLUMN manual_discount INTEGER NOT NULL DEFAULT 0;
   UPDATE quote_items SET manual_discount = discount;
   `,
+  // v10: restaurant floor (guests, printed check) and kitchen stations with their own
+  // printers and a kitchen display; tickets are kept so the screen can track them.
+  `
+  ALTER TABLE orders ADD COLUMN guests INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN check_printed_at TEXT;
+
+  CREATE TABLE kitchen_stations (
+    id           INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL,
+    printer_name TEXT NOT NULL DEFAULT '',
+    copies       INTEGER NOT NULL DEFAULT 1,
+    print        INTEGER NOT NULL DEFAULT 1, -- print a ticket on its printer
+    display      INTEGER NOT NULL DEFAULT 1, -- show tickets on the kitchen screen
+    sort         INTEGER NOT NULL DEFAULT 0,
+    active       INTEGER NOT NULL DEFAULT 1
+  );
+  ALTER TABLE categories ADD COLUMN station_id INTEGER REFERENCES kitchen_stations(id) ON DELETE SET NULL;
+  ALTER TABLE products ADD COLUMN station_id INTEGER REFERENCES kitchen_stations(id) ON DELETE SET NULL;
+
+  CREATE TABLE kitchen_tickets (
+    id          INTEGER PRIMARY KEY,
+    order_id    INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    station_id  INTEGER REFERENCES kitchen_stations(id) ON DELETE SET NULL,
+    items       TEXT NOT NULL, -- JSON [{ name, qty, note }]
+    status      TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'preparing', 'ready', 'served', 'cancelled')),
+    table_name  TEXT NOT NULL DEFAULT '',
+    order_type  TEXT NOT NULL DEFAULT '',
+    user_name   TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    started_at  TEXT,
+    ready_at    TEXT,
+    served_at   TEXT
+  );
+  CREATE INDEX idx_kitchen_tickets_status ON kitchen_tickets(status);
+  `,
 ];
 
 function openDatabase(file) {

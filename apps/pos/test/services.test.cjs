@@ -555,3 +555,35 @@ test('trading terms: customer discount, purchase bonus and line discount, suppli
   const rep = s.reports.summary({});
   assert.equal(rep.totals.rebates, 2250);
 });
+
+test('restaurant floor: guests, transfer, merge, split bill, printed check', () => {
+  const { s, db } = setup({ business_type: 'restaurant', tax_rate: 0, service_rate: 0 });
+  const [t1, t2, t3] = s.tables.list().map((x) => x.id);
+  const burger = s.products.save({ name: 'Burger', price: 10000, kitchen: true, track_stock: false });
+  const cola = s.products.save({ name: 'Cola', price: 2000, track_stock: false });
+  s.shifts.open({});
+  const a = s.orders.saveOpen({ order_type: 'dine_in', table_id: t1, guests: 3, items: [{ product_id: burger, qty: 3 }, { product_id: cola, qty: 3 }] });
+  const b = s.orders.saveOpen({ order_type: 'dine_in', table_id: t2, guests: 2, items: [{ product_id: cola, qty: 2 }] });
+  const tl = s.tables.list().find((x) => x.id === t1);
+  assert.deepEqual([tl.guests, tl.order_total, tl.unsent], [3, 36000, 1]);
+  // transfer table 1 → table 3; a busy table is refused
+  assert.equal(tryCode(() => s.floor.transfer({ orderId: a.id, tableId: t2 })), 'TABLE_BUSY');
+  s.floor.transfer({ orderId: a.id, tableId: t3 });
+  assert.equal(s.tables.list().find((x) => x.id === t1).order_id, null);
+  // merge table 2 into table 3
+  const merged = s.floor.merge({ fromId: b.id, toId: a.id });
+  assert.equal(merged.total, 40000);
+  assert.equal(merged.guests, 5);
+  assert.equal(db.prepare('SELECT status FROM orders WHERE id = ?').get(b.id).status, 'void');
+  // split: one burger and two colas go on their own bill
+  const burgerLine = merged.items.find((i) => i.product_id === burger);
+  const colaLine = merged.items.find((i) => i.product_id === cola);
+  const part = s.floor.split({ orderId: a.id, items: [{ order_item_id: burgerLine.id, qty: 1 }, { order_item_id: colaLine.id, qty: 2 }] });
+  assert.equal(part.total, 14000);
+  assert.equal(s.orders.get(a.id).total, 26000);
+  const paid = s.orders.checkout({ ...part, items: part.items.map((i) => ({ id: i.id, product_id: i.product_id, qty: i.qty })), payments: [{ method: 'cash', amount: 14000 }] });
+  assert.equal(paid.status, 'completed');
+  // printed check marks the table
+  s.floor.printCheck(a.id);
+  assert.ok(s.tables.list().find((x) => x.id === t3).check_printed_at);
+});

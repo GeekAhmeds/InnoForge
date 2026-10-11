@@ -80,6 +80,29 @@ export function receiptHtml(order, settings, t, lang) {
   <div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
 }
 
+/** The bill brought to the table before paying (not an invoice: no number, no payments). */
+export function checkHtml(order, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
+  const rows = order.items.map((i) => `<tr><td>${esc(i.name)}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>`).join('');
+  return page(settings, lang, `${header(settings, t)}
+  <hr><div class="c"><b>${t('floor.checkTitle')}</b></div>
+  <div class="c">${order.table_name ? `${t('pos.table')} <b>${esc(order.table_name)}</b>` : t(`order.${order.order_type}`)}${order.guests ? ` · 👥 ${order.guests}` : ''}</div>
+  <div class="c muted">#${order.id} — ${ltr(new Date().toLocaleString('en-GB'))} — ${esc(order.user_name)}</div>
+  <hr>
+  <table><tr><th>${t('receipt.item')}</th><th class="n">${t('receipt.qty')}</th><th class="n">${t('receipt.amount')}</th></tr>${rows}</table>
+  <hr>
+  <table>
+    ${line(t('pos.subtotal'), m(order.subtotal))}
+    ${order.discount ? line(t('pos.discount'), '− ' + m(order.discount)) : ''}
+    ${order.service ? line(t('pos.service'), m(order.service)) : ''}
+    ${order.tax ? line(t('pos.tax'), m(order.tax)) : ''}
+    ${line(t('pos.total'), m(order.total), 'big')}
+    ${order.guests > 1 ? line(t('floor.perGuest', { n: order.guests }), m(Math.ceil(order.total / order.guests))) : ''}
+  </table>
+  <hr><div class="c muted">${t('floor.notInvoice')}</div>`);
+}
+
 export function kitchenHtml(order, items, settings, t, lang) {
   const where = order.order_type === 'dine_in' && order.table_name ? `${t('pos.table')} ${esc(order.table_name)}` : t(`order.${order.order_type}`);
   return page(settings, lang, `<h1>${t('receipt.kitchen')}</h1>

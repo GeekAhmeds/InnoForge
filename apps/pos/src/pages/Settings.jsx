@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { SCREENS, sellScreens } from '../lib/screens.js';
 import { activate, api, backup, copyText, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
@@ -12,7 +13,7 @@ const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'setting
 
 export default function Settings() {
   const { t, settings, can } = useApp();
-  const tabs = TABS.filter((x) => (x !== 'tables' || settings.business_type === 'restaurant') && (!TAB_PERM[x] || can(TAB_PERM[x])));
+  const tabs = TABS.filter((x) => (x !== 'tables' || sellScreens(settings).includes('restaurant')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
   const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', data: 'settings.data', support: 'support.title' };
   return (
@@ -73,7 +74,7 @@ function SettingsForm({ tab }) {
           <Field label={t('setup.businessName')}><input value={f.business_name} onChange={set('business_name')} /></Field>
           <Field label={t('setup.businessType')}>
             <select value={f.business_type} onChange={set('business_type')}>
-              {['retail', 'bookstore', 'restaurant'].map((x) => <option key={x} value={x}>{t(`type.${x}`)}</option>)}
+              {['retail', 'bookstore', 'restaurant', 'trading'].map((x) => <option key={x} value={x}>{t(`type.${x}`)}</option>)}
             </select>
           </Field>
           <Field label={t('settings.address')}><input value={f.address} onChange={set('address')} /></Field>
@@ -87,6 +88,27 @@ function SettingsForm({ tab }) {
             <select value={f.decimals} onChange={set('decimals')}>{[0, 2, 3].map((x) => <option key={x} value={x}>{x}</option>)}</select>
           </Field>
           <div className="span2"><Toggle checked={f.allow_negative_stock} onChange={set('allow_negative_stock')} label={t('settings.negativeStock')} /></div>
+          <div className="span2">
+            <Field label={t('screens.title')} hint={t('screens.hint')}>
+              <div className="screen-picks">
+                {SCREENS.map((sc) => {
+                  const on = sellScreens(f);
+                  const checked = on.includes(sc.id);
+                  return (
+                    <label key={sc.id} className={`screen-pick ${checked ? 'on' : ''}`}>
+                      <input type="checkbox" checked={checked} onChange={(e) => {
+                        const next = e.target.checked ? [...on, sc.id] : on.filter((x) => x !== sc.id);
+                        if (next.length) setF((x) => ({ ...x, sell_screens: next.join(',') }));
+                      }} />
+                      <span className="ico">{sc.icon}</span>
+                      <b>{t(`nav.${sc.page === 'pos' ? 'cashier' : sc.page}`)}</b>
+                      <small className="muted">{t(`screens.${sc.id}`)}</small>
+                    </label>
+                  );
+                })}
+              </div>
+            </Field>
+          </div>
         </div>
       )}
       {tab === 'taxes' && (
@@ -94,13 +116,13 @@ function SettingsForm({ tab }) {
           <Field label={t('settings.taxRate')}><input inputMode="decimal" value={f.tax_rate} onChange={set('tax_rate')} /></Field>
           <Field label={t('settings.taxNumber')}><input value={f.tax_number} onChange={set('tax_number')} /></Field>
           <div className="span2"><Toggle checked={f.prices_include_tax} onChange={set('prices_include_tax')} label={t('settings.pricesIncludeTax')} /></div>
-          {f.business_type === 'restaurant' && <Field label={t('settings.serviceRate')}><input inputMode="decimal" value={f.service_rate} onChange={set('service_rate')} /></Field>}
+          {sellScreens(f).includes('restaurant') && <Field label={t('settings.serviceRate')}><input inputMode="decimal" value={f.service_rate} onChange={set('service_rate')} /></Field>}
         </div>
       )}
       {tab === 'receipt' && (
         <div className="grid2">
           <Field label={t('settings.printer')}>{printerSelect('printer_name')}</Field>
-          {f.business_type === 'restaurant' ? <Field label={t('settings.kitchenPrinter')}>{printerSelect('kitchen_printer_name')}</Field> : <span />}
+          {sellScreens(f).includes('restaurant') ? <Field label={t('settings.kitchenPrinter')}>{printerSelect('kitchen_printer_name')}</Field> : <span />}
           <Field label={t('settings.paperWidth')}>
             <select value={f.paper_width} onChange={set('paper_width')}>{[58, 80].map((x) => <option key={x} value={x}>{x}</option>)}</select>
           </Field>

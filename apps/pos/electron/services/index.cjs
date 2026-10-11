@@ -7,7 +7,8 @@ const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = req
 const DEFAULT_SETTINGS = {
   setup_done: false,
   business_name: '',
-  business_type: 'retail', // retail | bookstore | restaurant
+  business_type: 'retail', // retail | bookstore | restaurant | trading
+  sell_screens: '', // enabled selling screens: cashier,restaurant,trading ('' = by business type)
   address: '',
   phone: '',
   tax_number: '',
@@ -163,7 +164,7 @@ function createServices(db) {
     save(patch) {
       requirePerm('settings');
       audit('settings_change', { details: { keys: Object.keys(patch || {}) } });
-      if (patch && 'business_type' in patch && !['retail', 'bookstore', 'restaurant'].includes(patch.business_type)) {
+      if (patch && 'business_type' in patch && !['retail', 'bookstore', 'restaurant', 'trading'].includes(patch.business_type)) {
         throw new PosError('INVALID_BUSINESS_TYPE');
       }
       transaction(db, () => writeSettings(patch));
@@ -351,8 +352,16 @@ function createServices(db) {
   }
 
   const products = {
-    list({ search = '', categoryId = null, includeInactive = false } = {}) {
+    list({ search = '', categoryId = null, includeInactive = false, top = false } = {}) {
       requireUser();
+      if (top) {
+        // Best sellers of the last 30 days, for the cashier's quick tab.
+        const rows = withUnitsAndPrices(plainAll(db.prepare(`${PRODUCT_SELECT}
+          JOIN (SELECT i.product_id, SUM(i.qty) AS sold FROM order_items i JOIN orders o ON o.id = i.order_id
+                WHERE o.status = 'completed' AND o.completed_at >= datetime('now', 'localtime', '-30 days') GROUP BY i.product_id) t ON t.product_id = p.id
+          WHERE p.active = 1 ORDER BY t.sold DESC LIMIT 40`).all()));
+        return can('view_cost') ? rows : rows.map(({ cost, ...r }) => r);
+      }
       const where = [];
       const params = [];
       if (!includeInactive) where.push('p.active = 1');
@@ -524,9 +533,14 @@ function createServices(db) {
     list() {
       requireUser();
       return plainAll(db.prepare(`
-        SELECT t.*, o.id AS order_id, o.total AS order_total, o.created_at AS order_opened_at
+        SELECT t.*, o.id AS order_id, o.total AS order_total, o.created_at AS order_opened_at, o.guests, o.check_printed_at,
+          u.name AS waiter_name, o.customer_name,
+          CAST((julianday('now', 'localtime') - julianday(o.created_at)) * 1440 AS INTEGER) AS minutes,
+          (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count,
+          (SELECT COUNT(*) FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = o.id AND p.kitchen = 1 AND i.qty > i.kitchen_sent) AS unsent
         FROM dining_tables t
         LEFT JOIN orders o ON o.table_id = t.id AND o.status = 'open'
+        LEFT JOIN users u ON u.id = o.user_id
         WHERE t.active = 1 ORDER BY t.area, CAST(t.name AS INTEGER), t.name`).all());
     },
     save(t = {}) {
@@ -807,6 +821,7 @@ function createServices(db) {
       customer_phone: str(cart.customer_phone),
       customer_address: str(cart.customer_address),
       note: str(cart.note),
+      guests: Math.max(0, int(cart.guests)),
       subtotal: priced.subtotal,
       discount: priced.discount,
       tax: priced.tax,
@@ -1070,6 +1085,93 @@ function createServices(db) {
     },
   };
 
+
+
+  /** Re-prices an open order after its lines changed server-side (merge / split). */
+  function repriceOpen(id) {
+    const o = getOrder(id);
+    const cart = {
+      ...o,
+      items: o.items.map((i) => ({
+        id: i.id, product_id: i.product_id, unit_id: i.unit_id, qty: i.qty, note: i.note, serials: i.serials,
+        discount: Math.max(0, i.discount - (i.promo_discount || 0) - (i.customer_discount || 0)),
+        price_override: true, unit_price: i.unit_price,
+      })),
+    };
+    persistOrder(cart, priceCart(cart), { id: o.user_id }, 'open');
+    return getOrder(id);
+  }
+
+  function openOrder(id) {
+    const o = getOrder(id);
+    if (o.status !== 'open') throw new PosError('ORDER_NOT_OPEN');
+    return o;
+  }
+
+  /** Restaurant floor actions on open orders. */
+  const floor = {
+    /** Moves an order to a free table. */
+    transfer({ orderId, tableId } = {}) {
+      requireUser();
+      return transaction(db, () => {
+        const o = openOrder(orderId);
+        if (!db.prepare('SELECT 1 FROM dining_tables WHERE id = ? AND active = 1').get(tableId)) throw new PosError('NOT_FOUND');
+        if (db.prepare("SELECT 1 FROM orders WHERE table_id = ? AND status = 'open' AND id != ?").get(tableId, orderId)) throw new PosError('TABLE_BUSY');
+        db.prepare("UPDATE orders SET table_id = ?, order_type = 'dine_in' WHERE id = ?").run(tableId, orderId);
+        audit('table_transfer', { entity: 'order', entityId: orderId, details: { from: o.table_name, to: db.prepare('SELECT name FROM dining_tables WHERE id = ?').get(tableId).name } });
+        return getOrder(orderId);
+      });
+    },
+    /** Joins one table's order into another's (the first is closed). */
+    merge({ fromId, toId } = {}) {
+      requireUser();
+      if (fromId === toId) throw new PosError('INVALID_STATUS');
+      return transaction(db, () => {
+        const from = openOrder(fromId);
+        const to = openOrder(toId);
+        db.prepare('UPDATE order_items SET order_id = ? WHERE order_id = ?').run(toId, fromId);
+        db.prepare('UPDATE kitchen_tickets SET order_id = ? WHERE order_id = ?').run(toId, fromId);
+        db.prepare("UPDATE orders SET status = 'void', note = TRIM(note || ' ' || ?) WHERE id = ?").run(`→ #${toId}`, fromId);
+        db.prepare('UPDATE orders SET guests = guests + ? WHERE id = ?').run(from.guests || 0, toId);
+        audit('table_merge', { entity: 'order', entityId: toId, details: { from: from.table_name || `#${fromId}`, to: to.table_name || `#${toId}` } });
+        return repriceOpen(toId);
+      });
+    },
+    /** Moves some lines (or part of their quantity) to a new open order so they can be paid apart. */
+    split({ orderId, items = [] } = {}) {
+      const u = requireUser();
+      return transaction(db, () => {
+        const o = openOrder(orderId);
+        const moves = items.map((r) => ({ line: o.items.find((i) => i.id === int(r.order_item_id)), qty: num(r.qty) })).filter((m) => m.line && m.qty > 0);
+        if (!moves.length) throw new PosError('NOTHING_TO_SPLIT');
+        for (const m of moves) if (m.qty > m.line.qty + 1e-9) throw new PosError('INVALID_QTY');
+        if (moves.every((m) => m.qty >= m.line.qty - 1e-9) && moves.length === o.items.length) throw new PosError('NOTHING_TO_SPLIT');
+        const newId = Number(db.prepare(`INSERT INTO orders (status, order_type, table_id, user_id, customer_name, note, guests)
+          VALUES ('open', ?, NULL, ?, ?, ?, 0)`).run(o.order_type, u.id, o.customer_name, `${o.table_name ? `${o.table_name} ` : ''}#${orderId}`).lastInsertRowid);
+        for (const m of moves) {
+          const l = m.line;
+          const sent = Math.min(m.qty, l.kitchen_sent);
+          if (m.qty >= l.qty - 1e-9) {
+            db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?').run(newId, l.id);
+          } else {
+            db.prepare('UPDATE order_items SET qty = qty - ?, kitchen_sent = MAX(0, kitchen_sent - ?) WHERE id = ?').run(m.qty, sent, l.id);
+            db.prepare(`INSERT INTO order_items (order_id, product_id, name, unit_price, unit_cost, qty, discount, line_total, note, unit_id, unit_name, unit_factor, kitchen_sent)
+              VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)`).run(newId, l.product_id, l.name, l.unit_price, l.unit_cost, m.qty, l.note, l.unit_id, l.unit_name, l.unit_factor, sent);
+          }
+        }
+        audit('bill_split', { entity: 'order', entityId: orderId, details: { table: o.table_name, items: moves.map((m) => ({ name: m.line.name, qty: m.qty })) } });
+        repriceOpen(orderId);
+        return repriceOpen(newId);
+      });
+    },
+    /** The customer asked for the bill: marks the table and returns the order to print. */
+    printCheck(id) {
+      requireUser();
+      openOrder(id);
+      db.prepare("UPDATE orders SET check_printed_at = datetime('now', 'localtime') WHERE id = ?").run(id);
+      return getOrder(id);
+    },
+  };
 
   // ---------- suppliers & purchasing ----------
   const SUPPLIER_BALANCE = `(
@@ -2111,7 +2213,7 @@ function createServices(db) {
 
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, requireAdmin, requirePerm, audit, can,
   };
 }
 

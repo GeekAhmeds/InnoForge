@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
-import { a4Html, kitchenHtml, receiptHtml } from '../lib/receipt.js';
+import { a4Html, checkHtml, kitchenHtml, receiptHtml } from '../lib/receipt.js';
+import { sellScreens } from '../lib/screens.js';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -11,7 +12,7 @@ const emptyCart = (orderType) => ({
 
 // Converts a stored open order back into an editable cart.
 const cartFromOrder = (o) => ({
-  id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '',
+  id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '', guests: o.guests || 0,
   discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
   customer_address: o.customer_address, note: o.note,
   salesperson_id: o.salesperson_id,
@@ -24,14 +25,16 @@ const cartFromOrder = (o) => ({
 
 export default function Pos() {
   const app = useApp();
-  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval, pendingCart, setPendingCart } = app;
+  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval, pendingCart, setPendingCart, setPage, ask } = app;
+  const floorOn = sellScreens(settings).includes('restaurant');
+  const [lastSale, setLastSale] = useState(null);
   const [salespeople, setSalespeople] = useState([]);
   useEffect(() => { api.auth.salespeople().then(setSalespeople).catch(() => {}); }, []);
   // Only offer the salesperson picker when someone besides the cashier earns commission.
   const reps = salespeople.filter((p) => p.commission_rate > 0);
   const [priceLists, setPriceLists] = useState([]);
   useEffect(() => { api.priceLists.list().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => {}); }, []);
-  const restaurant = settings.business_type === 'restaurant';
+  const restaurant = settings.business_type === 'restaurant' || floorOn;
   const defaultType = restaurant ? 'takeaway' : 'sale';
 
   const [categories, setCategories] = useState([]);
@@ -50,7 +53,7 @@ export default function Pos() {
 
   useEffect(() => { api.categories.list().then(setCategories); }, []);
   useEffect(() => {
-    const h = setTimeout(() => api.products.list({ search, categoryId }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
+    const h = setTimeout(() => api.products.list(categoryId === 'top' && !search ? { top: true } : { search, categoryId: categoryId === 'top' ? null : categoryId }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
     return () => clearTimeout(h);
   }, [search, categoryId, notify, tErr]);
 
@@ -73,6 +76,7 @@ export default function Pos() {
       else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: price, list_price: price, qty, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial });
       return { ...c, items };
     });
+    setLastSale(null);
   }, []);
 
   async function onSearchEnter() {
@@ -93,6 +97,10 @@ export default function Pos() {
   }
 
   const reset = useCallback(() => { setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch]);
+  // A new dine-in order needs a table; an existing one (e.g. a split bill) can be paid without.
+  const needsTable = () => cart.order_type === 'dine_in' && !cart.table_id && !cart.id;
+  // Table orders go back to the floor plan once saved, sent or paid.
+  const done = useCallback((c) => { if (floorOn && c.order_type === 'dine_in') setPage('floor'); else reset(); }, [floorOn, setPage, reset]);
 
   async function saveOpen() {
     const saved = await api.orders.saveOpen(cart);
@@ -105,14 +113,14 @@ export default function Pos() {
   }
 
   const holdOrSave = () => run(async () => {
-    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    if (needsTable()) return setModal({ kind: 'tables' });
     await saveOpen();
     notify(t('pos.orderSaved'));
-    reset();
+    done(cart);
   });
 
   const sendKitchen = () => run(async () => {
-    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    if (needsTable()) return setModal({ kind: 'tables' });
     const saved = await saveOpen();
     const { order, items } = await api.orders.sendToKitchen(saved.id);
     setCart(cartFromOrder(order));
@@ -120,11 +128,24 @@ export default function Pos() {
     if (await printDoc(kitchenHtml(order, items, settings, t, lang), settings.kitchen_printer_name || settings.printer_name)) {
       notify(t('pos.kitchenSent'));
     }
+    if (floorOn && order.order_type === 'dine_in') setPage('floor');
   });
+
+  const printCheck = () => run(async () => {
+    const saved = await saveOpen();
+    const o = await api.floor.printCheck(saved.id);
+    await printDoc(checkHtml(o, settings, t, lang));
+    done(cart);
+  });
+
+  const setGuests = async () => {
+    const g = await ask(t('floor.guestsShort'), { type: 'number', initial: String(cart.guests || '') });
+    if (g !== null) setCart((c) => ({ ...c, guests: Number(g) || 0 }));
+  };
 
   const openPay = () => run(async () => {
     if (!cart.items.length || !quote) return;
-    if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
+    if (needsTable()) return setModal({ kind: 'tables' });
     const customer = cart.customer_id ? await api.customers.get(cart.customer_id) : null;
     setModal({ kind: 'pay', customer });
   });
@@ -134,6 +155,20 @@ export default function Pos() {
       if (modal) return;
       if (e.key === 'F2') { e.preventDefault(); focusSearch(); }
       if (e.key === 'F9') { e.preventDefault(); openPay(); }
+      if (e.key === 'F4') { e.preventDefault(); setModal({ kind: 'customer' }); }
+      if (e.key === 'F8' && cart.items.length) { e.preventDefault(); holdOrSave(); }
+      if (e.key === 'Escape' && search) { e.preventDefault(); setSearch(''); }
+      // With an empty search box: +/- change the last line's quantity, Delete removes it.
+      const otherField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) && e.target !== searchRef.current;
+      if (!otherField && !search && cart.items.length && ['+', '-', 'Delete'].includes(e.key)) {
+        e.preventDefault();
+        const last = cart.items.length - 1;
+        setCart((c) => ({
+          ...c,
+          items: e.key === 'Delete' ? c.items.slice(0, -1)
+            : c.items.map((x, i) => (i === last ? { ...x, qty: Math.max(1, x.qty + (e.key === '+' ? 1 : -1)) } : x)),
+        }));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -159,11 +194,14 @@ export default function Pos() {
             onKeyDown={(e) => e.key === 'Enter' && onSearchEnter()}
           />
           {!restaurant && <button onClick={() => setModal({ kind: 'held' })}>⏸ {t('pos.held')}</button>}
-          {restaurant && <button onClick={() => setModal({ kind: 'tables' })}>🍽 {t('nav.tables')}</button>}
+          {restaurant && (floorOn
+            ? <button onClick={() => setPage('floor')}>🍽 {t('nav.floor')}</button>
+            : <button onClick={() => setModal({ kind: 'tables' })}>🍽 {t('nav.tables')}</button>)}
           {restaurant && <button onClick={() => setModal({ kind: 'held' })}>📋 {t('orders.open')}</button>}
         </div>
         <div className="chips">
           <button className={!categoryId ? 'on' : ''} onClick={() => setCategoryId(null)}>{t('pos.allCategories')}</button>
+          <button className={categoryId === 'top' ? 'on' : ''} style={{ '--chip': '#f7a531' }} onClick={() => setCategoryId('top')}>⭐ {t('pos.topSellers')}</button>
           {categories.map((c) => (
             <button key={c.id} className={categoryId === c.id ? 'on' : ''} style={{ '--chip': c.color }} onClick={() => setCategoryId(c.id)}>{c.name}</button>
           ))}
@@ -177,7 +215,10 @@ export default function Pos() {
               {p.track_stock ? <span className={`p-stock ${p.stock <= p.min_stock ? 'low' : ''}`}>{p.stock > 0 ? formatQty(p.stock) : t('pos.outOfStock')}</span> : null}
             </button>
           ))}
-          {!products.length && <Empty>{t('common.none')}</Empty>}
+          {!products.length && <Empty>{categoryId === 'top' ? t('pos.noTopSellers') : t('common.none')}</Empty>}
+        </div>
+        <div className="shortcuts muted small">
+          {[['F2', t('pos.kSearch')], ['F4', t('pos.customer')], ['F8', t('pos.hold')], ['F9', t('pos.pay')], ['+ − Del', t('pos.kLast')]].map(([k, v]) => <span key={k}><kbd dir="ltr">{k}</kbd> {v}</span>)}
         </div>
       </section>
 
@@ -192,10 +233,11 @@ export default function Pos() {
         <div className="cart-head">
           <b>{t('pos.cart')}{cart.id ? ` #${cart.id}` : ''}</b>
           {cart.order_type === 'dine_in' && (
-            <button className="ghost" onClick={() => setModal({ kind: 'tables' })}>
-              {cart.table_id ? `${t('pos.table')} ${cart.table_name}` : t('pos.chooseTable')}
+            <button className="ghost" onClick={() => (floorOn && !cart.table_id ? setPage('floor') : setModal({ kind: 'tables' }))}>
+              {cart.table_id ? `${t('pos.table')} ${cart.table_name}` : cart.id && cart.note ? `✂ ${cart.note}` : t('pos.chooseTable')}
             </button>
           )}
+          {cart.order_type === 'dine_in' && <button className="ghost" onClick={setGuests}>👥 {cart.guests || '—'}</button>}
           <button className={cart.customer_id ? 'customer-chip' : 'ghost'} onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
           {priceLists.length > 0 && (
             <select className="rep-select" title={t('priceLists.title')} value={cart.price_list_id || ''} onChange={(e) => setCart((c) => ({ ...c, price_list_id: Number(e.target.value) || null }))}>
@@ -213,7 +255,14 @@ export default function Pos() {
         </div>
 
         <div className="cart-lines">
-          {!cart.items.length && <Empty>{t('pos.empty')}</Empty>}
+          {!cart.items.length && lastSale && (
+            <div className="last-sale">
+              <div>✓ {t('pos.lastSale', { n: lastSale.invoice_no })}</div>
+              {lastSale.change_due > 0 && <div className="change">{t('pay.change')}: <b>{m(lastSale.change_due)}</b></div>}
+              <button onClick={() => printDoc(receiptHtml(lastSale, settings, t, lang))}>🖨 {t('orders.reprint')}</button>
+            </div>
+          )}
+          {!cart.items.length && !lastSale && <Empty>{t('pos.empty')}</Empty>}
           {cart.items.map((it, idx) => {
             const ql = quote?.lines?.[idx];
             return (
@@ -246,6 +295,7 @@ export default function Pos() {
 
         <div className="cart-actions three">
           {restaurant && <button onClick={sendKitchen} disabled={!cart.items.length}>🔔 {t('pos.kitchen')}</button>}
+          {cart.order_type === 'dine_in' && <button onClick={printCheck} disabled={!cart.items.length || !cart.table_id}>🧾 {t('floor.check')}</button>}
           <button onClick={holdOrSave} disabled={!cart.items.length}>{restaurant ? t('pos.saveOrder') : `⏸ ${t('pos.hold')}`}</button>
           {!restaurant && <button onClick={() => setModal({ kind: 'quote' })} disabled={!cart.items.length || !!cart.id}>📝 {t('quotes.save')}</button>}
           <button
@@ -327,7 +377,8 @@ export default function Pos() {
               if (settings.invoice_format === 'a4') await printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name);
               else await printDoc(receiptHtml(order, settings, t, lang));
             }
-            reset();
+            setLastSale(order);
+            done(cart);
           })}
         />
       )}
@@ -358,7 +409,7 @@ function Row({ label, value, big, link, onClick }) {
   );
 }
 
-function NoShift() {
+export function NoShift() {
   const { t, tErr, notify, reloadShift, settings } = useApp();
   const [cash, setCash] = useState('');
   return (

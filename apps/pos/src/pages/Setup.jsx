@@ -8,6 +8,7 @@ const TYPES = [
   { id: 'retail', icon: '🏪' },
   { id: 'bookstore', icon: '📚' },
   { id: 'restaurant', icon: '🍽' },
+  { id: 'trading', icon: '🏢' },
 ];
 
 export default function Setup({ onDone }) {

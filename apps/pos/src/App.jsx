@@ -13,6 +13,9 @@ import Settings from './pages/Settings.jsx';
 import Activation from './pages/Activation.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Customers from './pages/Customers.jsx';
+import Floor from './pages/Floor.jsx';
+import SalesInvoice from './pages/SalesInvoice.jsx';
+import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { UpdateBanner } from './components/Updates.jsx';
 import ApprovalModal from './components/Approval.jsx';
 import logoMark from './assets/logo-mark.png';
@@ -34,7 +37,6 @@ export default function App() {
 }
 
 const NAV = [
-  { id: 'pos', icon: '🛒' },
   { id: 'orders', icon: '🧾' },
   { id: 'customers', icon: '👥' },
   { id: 'products', icon: '📦', perm: 'products' },
@@ -101,17 +103,20 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   const ctx = useMemo(() => ({
     settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
     isAdmin: user?.role === 'admin', can, withApproval, ask, pendingCart, setPendingCart,
-    openInPos: (cart) => { setPendingCart(cart); setPage('pos'); },
+    // Quotations open in the trading invoice when that screen is on; everything else in the cashier.
+    openInPos: (cart) => { setPendingCart(cart); setPage(cart.quote_id && sellScreens(settings).includes('trading') ? 'invoice' : 'pos'); },
   }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval, ask, pendingCart]);
 
   let content;
   if (!settings.setup_done) {
-    content = <Setup onDone={async (u) => { await reloadSettings(); setUser(u); setPage('pos'); }} />;
+    content = <Setup onDone={async (u) => { const s = await api.settings.get(); await reloadSettings(); setUser(u); setPage(homePage(s)); }} />;
   } else if (!user) {
-    content = <Login onLogin={(u) => { setUser(u); setPage('pos'); }} />;
+    content = <Login onLogin={(u) => { setUser(u); setPage(homePage(settings)); }} />;
   } else {
-    const nav = NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]));
-    const Page = { pos: Pos, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const screens = sellScreens(settings);
+    const sellNav = screens.map((id) => SCREENS.find((x) => x.id === id)).map((x) => ({ id: x.page, icon: x.icon, label: screens.length > 1 ? `nav.${x.page === 'pos' ? 'cashier' : x.page}` : 'nav.pos' }));
+    const nav = [...sellNav, ...NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]))];
+    const Page = { pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">
@@ -120,7 +125,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
             {nav.map((n) => (
               <button key={n.id} className={page === n.id ? 'active' : ''} onClick={() => setPage(n.id)}>
                 <span className="ico">{n.icon}</span>
-                <span>{n.id === 'pos' && settings.business_type === 'restaurant' ? t('nav.pos') : t(`nav.${n.id}`)}</span>
+                <span>{t(n.label || `nav.${n.id}`)}</span>
               </button>
             ))}
           </nav>
