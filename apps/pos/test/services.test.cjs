@@ -938,3 +938,30 @@ test('employees: punch in/out, absence, advances from the drawer, payroll and un
   assert.equal(s.employees.punch({ employeeId: day }).action, 'in');
   assert.equal(tryCode(() => s.employees.payroll({ month })), 'FORBIDDEN');
 });
+
+test('license editions: locked features refuse, limits stop new users / warehouses', () => {
+  const { entitlements } = require('../electron/editions.cjs');
+  let ent = entitlements({ edition: 'basic' });
+  const db = openDatabase(':memory:');
+  const s = createServices(db, { entitlements: () => ent });
+  s.auth.setup({ business: { business_name: 'Shop', tax_rate: 0 }, admin: { name: 'Admin', username: 'admin', pin: '1234' } });
+  s.auth.login({ username: 'admin', pin: '1234' });
+  assert.equal(tryCode(() => s.employees.list()), 'FEATURE_LOCKED');
+  assert.equal(tryCode(() => s.treasury.overview()), 'FEATURE_LOCKED');
+  assert.deepEqual(s.treasury.accounts(), []); // read-only lists other screens use stay open
+  assert.equal(tryCode(() => s.settings.save({ kds_lan: true })), 'FEATURE_LOCKED');
+  const id = s.products.save({ name: 'Tea', price: 1000, stock: 9 });
+  s.shifts.open({ openingCash: 0 });
+  assert.equal(tryCode(() => s.orders.quote({ items: [{ product_id: id, qty: 1 }], order_type: 'delivery' })), 'FEATURE_LOCKED');
+  assert.equal(tryCode(() => s.orders.quote({ items: [{ product_id: id, qty: 1 }], coupon_code: 'X' })), 'FEATURE_LOCKED');
+  s.users.save({ name: 'C1', username: 'c1', pin: '1111', role: 'cashier' }); // 2nd user: allowed
+  assert.equal(tryCode(() => s.users.save({ name: 'C2', username: 'c2', pin: '1111', role: 'cashier' })), 'LIMIT_USERS');
+  assert.equal(tryCode(() => s.warehouses.save({ name: 'Back' })), 'FEATURE_LOCKED');
+  // Upgrading the key (new entitlements) opens them at once, with the data intact.
+  ent = entitlements({ edition: 'basic', addons: ['warehouses', 'employees'], limits: { users: 3, warehouses: 2 } });
+  assert.deepEqual(s.employees.list(), []);
+  s.warehouses.save({ name: 'Back' });
+  assert.equal(tryCode(() => s.warehouses.save({ name: 'Third' })), 'LIMIT_WAREHOUSES');
+  s.users.save({ name: 'C2', username: 'c2', pin: '1111', role: 'cashier' });
+  assert.equal(s.license.get().edition, 'basic');
+});

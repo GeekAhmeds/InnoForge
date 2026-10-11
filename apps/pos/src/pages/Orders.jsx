@@ -7,6 +7,7 @@ import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { CollectModal } from '../components/Collect.jsx';
 import { MakePlanModal, ScheduleModal } from '../components/Installments.jsx';
+import { has } from '../lib/features.js';
 
 export const today = () => new Date().toLocaleDateString('en-CA');
 
@@ -126,7 +127,7 @@ function OrderModal({ id, onClose, onChanged }) {
           {canRefund && <button className="danger-ghost" onClick={() => setRefunding(true)}>↩ {t('orders.refund')}</button>}
           <span className="spacer" />
           {order.installments ? <button onClick={() => setPlan('view')}>📆 {t('inst.schedule')}</button>
-            : order.open_amount > 0 && <button onClick={() => setPlan('make')}>📆 {t('inst.make')}</button>}
+            : order.open_amount > 0 && has('installments') && <button onClick={() => setPlan('make')}>📆 {t('inst.make')}</button>}
           {order.open_amount > 0 && <button className="primary" onClick={() => setCollecting(true)}>💵 {t('customers.collect')}</button>}
           <button onClick={() => openWhatsApp(order.customer?.phone || order.customer_phone, invoiceText(order, settings, t))}>💬 {t('share.whatsapp')}</button>
           <button onClick={() => savePdf({ html: a4Html(order, 'invoice', settings, t, lang), name: `${t('receipt.invoice')} ${order.invoice_no}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>

@@ -3,6 +3,7 @@ import { api, onSerialPorts, openCustomerDisplay, openDrawer, serialListOnly } f
 import { connectScale, disconnectScale, onScale, scaleSupported } from '../lib/scale.js';
 import { formatQty } from '../lib/money.js';
 import { Field, Toggle, useApp } from './ui.jsx';
+import { has } from '../lib/features.js';
 
 /** Settings → Devices: electronic scales (barcode labels and scales on a cable). */
 export default function Devices() {
@@ -52,6 +53,7 @@ export default function Devices() {
         )}
       </div>
 
+{has('customer_display') && (
       <div className="card">
         <h3>🖥 {t('display.title')}</h3>
         <p className="muted small">{t('display.hint')}</p>
@@ -59,7 +61,9 @@ export default function Devices() {
         <Field label={t('display.message')}><input value={f.display_message} placeholder={t('display.messagePh')} onChange={set('display_message')} /></Field>
         <button type="button" onClick={() => openCustomerDisplay().catch((err) => notify(tErr(err), 'error'))}>🖥 {t('display.open')}</button>
       </div>
+      )}
 
+{has('scale') && (<>
       <div className="card">
         <h3>⚖ {t('devices.labelScale')}</h3>
         <p className="muted small">{t('devices.labelScaleHint')}</p>
@@ -118,6 +122,7 @@ export default function Devices() {
           </>
         )}
       </div>
+      </>)}
       <div className="form-foot"><button className="primary" onClick={save}>{t('common.save')}</button></div>
     </>
   );

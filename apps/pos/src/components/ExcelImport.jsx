@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api, excelExport, excelPick, excelTemplate } from '../lib/api.js';
 import { Empty, Modal, Toggle, useApp } from './ui.jsx';
+import { has } from '../lib/features.js';
 
 const PREVIEW_FIELDS = {
   products: ['name', 'barcode', 'category', 'price', 'cost', 'stock', 'unit'],
@@ -97,7 +98,7 @@ export function ExcelButtons({ kind, exportKind = kind, params = {}, onImported,
   };
   return (
     <>
-      {importable && can('backup') && <button onClick={() => setOpen(true)}>📥 {t('excel.importBtn')}</button>}
+      {importable && can('backup') && has('excel') && <button onClick={() => setOpen(true)}>📥 {t('excel.importBtn')}</button>}
       <button onClick={doExport}>📤 {t('excel.exportBtn')}</button>
       {open && <ExcelImportModal kind={kind} onClose={() => setOpen(false)} onDone={onImported} />}
     </>

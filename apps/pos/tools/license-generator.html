@@ -29,12 +29,16 @@
   th { color:var(--muted); font-size:12px; }
   .tag { display:inline-block; padding:1px 8px; border-radius:99px; background:#f3f4f6; font-size:12px; }
   .tag.exp { background:#fef2f2; color:var(--danger); }
+  .feat-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:6px; }
+  .feat-grid label { flex-direction:row; align-items:flex-start; gap:8px; color:#111827; font-size:13px; border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  .feat-grid label.inc { background:#f3f4f6; color:var(--muted); }
+  .feat-grid input { width:auto; margin-top:3px; }
 </style>
 </head>
 <body>
 <main>
   <h1>🔑 InnoForge POS — مولّد مفاتيح الترخيص</h1>
-  <p class="muted">أداة خاصة بيك إنت بس كبائع. كل مفتاح بيتعمل لجهاز واحد بعينه (برقم الجهاز اللي بيظهر للعميل في شاشة التفعيل)، ولمدة إنت بتحددها.</p>
+  <p class="muted">أداة خاصة بيك إنت بس كبائع (أو للموزّع اللي معاه تصريح). كل مفتاح بيتعمل لجهاز واحد بعينه (برقم الجهاز اللي بيظهر للعميل في شاشة التفعيل)، ولمدة وباقة ومميزات إنت بتحددها. لو العميل عايز يرقّي باقته، اعمله مفتاح جديد لنفس الجهاز.</p>
 
   <section class="card">
     <h2>1) المفتاح الخاص (Private key)</h2>
@@ -42,6 +46,10 @@
       <input type="file" id="keyFile" accept=".pem,.txt" style="max-width:340px">
       <span id="keyState" class="muted">لم يتم تحميل المفتاح</span>
     </div>
+    <details style="margin-top:10px"><summary>أنا موزّع / وكيل (معايا تصريح من Inno Source)</summary>
+      <p class="muted">حمّل مفتاحك الخاص فوق (مش مفتاح Inno Source)، وحمّل ملف التصريح <code>reseller-….cert</code> هنا. المفاتيح هتطلع باسمك، وفي حدود التصريح بس.</p>
+      <div class="row"><input type="file" id="certFile" accept=".cert,.txt" style="max-width:340px"><span id="certState" class="muted">من غير تصريح = مفتاح Inno Source نفسه</span></div>
+    </details>
     <p class="muted" style="margin-bottom:0">الملف ده (<code>pos-license-private.pem</code>) هو سرّك: بيتقري جوه الصفحة دي بس، ومش بيتحفظ ولا بيتبعت لأي مكان. خلّي معاك منه نسخة احتياطية في مكان آمن.</p>
   </section>
 
@@ -63,7 +71,14 @@
         </select>
       </label>
       <label id="customWrap" hidden>عدد الأيام<input id="customDays" type="number" min="1" value="60"></label>
+      <label>الباقة<select id="edition"></select></label>
+      <label>عدد المستخدمين (فاضي = حسب الباقة، 0 = بدون حد)<input id="lim_users" type="number" min="0"></label>
+      <label>عدد المخازن (فاضي = حسب الباقة، 0 = بدون حد)<input id="lim_warehouses" type="number" min="0"></label>
       <label>ملاحظات (للسجل بس)<input id="notes"></label>
+      <div style="grid-column:1/-1">
+        <div class="muted" style="font-size:13px;margin-bottom:6px">المميزات (✓ رمادي = جوه الباقة، علّم الباقي كإضافات مدفوعة)</div>
+        <div id="features" class="feat-grid"></div>
+      </div>
       <div class="row" style="grid-column:1/-1">
         <button class="primary" type="submit">إنشاء مفتاح الترخيص</button>
         <span id="formMsg"></span>
@@ -80,12 +95,30 @@
     <div class="row" style="justify-content:space-between"><h2 style="margin:0">سجل التراخيص</h2>
       <div class="row"><button id="exportBtn" type="button">تصدير CSV</button><button id="clearBtn" type="button">مسح السجل</button></div></div>
     <p class="muted">السجل ده محفوظ في المتصفح ده بس. صدّره من وقت للتاني عشان تحتفظ بنسخة.</p>
-    <table><thead><tr><th>التاريخ</th><th>العميل</th><th>رقم الجهاز</th><th>المدة</th><th>ينتهي</th><th></th></tr></thead><tbody id="log"></tbody></table>
+    <table><thead><tr><th>التاريخ</th><th>العميل</th><th>رقم الجهاز</th><th>الباقة</th><th>المدة</th><th>ينتهي</th><th></th></tr></thead><tbody id="log"></tbody></table>
   </section>
 </main>
 <script>
 (() => {
+  const EDITIONS_DATA = {"features":{"restaurant":{"ar":"المطعم: الصالة والطاولات والمطبخ وشاشة المطبخ والأحجام والإضافات والريسيبي","en":"Restaurant: floor & tables, kitchen & kitchen screen, sizes/extras, recipes"},"delivery":{"ar":"الدليفري: المناطق والطيارين والتسوية","en":"Delivery: zones, drivers, settlement"},"trading":{"ar":"فاتورة البيع التجارية وقوائم الأسعار وعروض الأسعار","en":"Trading invoice screen, price lists, quotations"},"rebates":{"ar":"اتفاقيات وبونص الموردين","en":"Supplier rebate agreements"},"installments":{"ar":"البيع بالتقسيط","en":"Installment sales"},"treasury":{"ar":"الخزنة والبنوك والشيكات الصادرة","en":"Treasury, bank accounts, cheques issued"},"warehouses":{"ar":"أكتر من مخزن والتحويل بينهم","en":"Several warehouses and transfers"},"purchase_orders":{"ar":"أوامر الشراء من النواقص","en":"Purchase orders from low stock"},"employees":{"ar":"الموظفين: الحضور والسلف والمرتبات","en":"Employees: attendance, advances, payroll"},"promotions":{"ar":"العروض التلقائية ونقاط الولاء","en":"Automatic promotions and loyalty points"},"coupons":{"ar":"الكوبونات وكروت الهدايا","en":"Coupons and gift cards"},"scale":{"ar":"الميزان الإلكتروني","en":"Electronic scales"},"labels":{"ar":"طباعة ملصقات الباركود","en":"Barcode labels"},"batches":{"ar":"الصلاحية والتشغيلات والسيريال","en":"Expiry batches and serial numbers"},"customer_display":{"ar":"شاشة العميل","en":"Customer display"},"lan":{"ar":"تابلت على الشبكة الداخلية (شاشة المطبخ/العميل)","en":"Tablets on the local network (kitchen/customer screens)"},"excel":{"ar":"استيراد الأصناف والعملاء والموردين من إكسيل","en":"Import products, customers and suppliers from Excel"},"commissions":{"ar":"عمولات الكاشير والمندوبين","en":"Cashier and sales-rep commissions"}},"limits":{"users":{"ar":"عدد المستخدمين","en":"Users"},"warehouses":{"ar":"عدد المخازن","en":"Warehouses"}},"editions":{"basic":{"ar":"أساسي","en":"Basic","features":[],"limits":{"users":2,"warehouses":1}},"market":{"ar":"سوبر ماركت","en":"Supermarket","features":["scale","labels","batches","promotions","coupons","customer_display","purchase_orders","excel"],"limits":{"users":5,"warehouses":1}},"restaurant":{"ar":"مطاعم","en":"Restaurant","features":["restaurant","delivery","customer_display","lan","promotions","coupons","excel"],"limits":{"users":10,"warehouses":1}},"trading":{"ar":"تجاري","en":"Trading","features":["trading","rebates","installments","treasury","purchase_orders","batches","commissions","labels","excel"],"limits":{"users":10,"warehouses":1}},"full":{"ar":"شامل","en":"Full","features":"*","limits":{"users":0,"warehouses":0}}}};
+  // end editions — must equal apps/pos/electron/editions.json (a test checks it)
   const $ = (id) => document.getElementById(id);
+  let cert = null; // { text, payload } when issuing as a reseller
+  const FEATURES = Object.keys(EDITIONS_DATA.features);
+  const editionFeatures = (ed) => { const f = EDITIONS_DATA.editions[ed].features; return f === '*' ? FEATURES : f; };
+  function renderEditions() {
+    const allowed = cert && cert.payload.editions !== '*' ? cert.payload.editions : Object.keys(EDITIONS_DATA.editions);
+    $('edition').innerHTML = allowed.map((k) => `<option value="${k}">${EDITIONS_DATA.editions[k].ar} — ${EDITIONS_DATA.editions[k].en}</option>`).join('');
+    renderFeatures();
+  }
+  function renderFeatures() {
+    const inc = new Set(editionFeatures($('edition').value));
+    const ed = EDITIONS_DATA.editions[$('edition').value];
+    const okAddon = (f) => !cert || cert.payload.addons === '*' || (cert.payload.addons || []).includes(f);
+    $('features').innerHTML = FEATURES.map((f) => `<label class="${inc.has(f) ? 'inc' : ''}"><input type="checkbox" value="${f}" ${inc.has(f) ? 'checked disabled' : okAddon(f) ? '' : 'disabled'}>${EDITIONS_DATA.features[f].ar}</label>`).join('');
+    $('lim_users').placeholder = ed.limits.users || '∞';
+    $('lim_warehouses').placeholder = ed.limits.warehouses || '∞';
+  }
   const LOG_KEY = 'innoforge-pos-licenses';
   let signingKey = null;
 
@@ -112,6 +145,24 @@
   });
 
   $('duration').addEventListener('change', () => { $('customWrap').hidden = $('duration').value !== 'custom'; });
+  $('edition').addEventListener('change', renderFeatures);
+  $('certFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = (await file.text()).trim();
+      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(text.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
+      if (payload.type !== 'reseller') throw new Error('not a permit');
+      cert = { text, payload };
+      $('certState').textContent = `✓ ${payload.name} (${payload.id}) — ساري لحد ${String(payload.expires).slice(0, 10)}${payload.max_days ? ` — أقصى مدة ${payload.max_days} يوم` : ''}`;
+      $('certState').className = 'ok';
+    } catch {
+      cert = null;
+      $('certState').textContent = 'الملف ده مش تصريح موزّع صالح';
+      $('certState').className = 'err';
+    }
+    renderEditions();
+  });
 
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -122,16 +173,30 @@
     const days = $('duration').value === 'custom' ? Number($('customDays').value) : Number($('duration').value);
     const now = new Date();
     // Same field order and encoding as tools/license.cjs so both produce compatible keys.
+    const edition = $('edition').value;
+    const inc = new Set(editionFeatures(edition));
+    const addons = [...$('features').querySelectorAll('input:checked:not(:disabled)')].map((x) => x.value).filter((f) => !inc.has(f));
+    const limits = {};
+    for (const k of Object.keys(EDITIONS_DATA.limits)) { const v = $(`lim_${k}`).value; if (v !== '') limits[k] = Number(v); }
+    if (cert) {
+      const p = cert.payload;
+      if (p.max_days && (!days || days > p.max_days)) { $('formMsg').textContent = `تصريحك بيسمح بمدة أقصاها ${p.max_days} يوم`; $('formMsg').className = 'err'; return; }
+      if (p.expires && now > new Date(p.expires)) { $('formMsg').textContent = 'تصريحك منتهي — كلّم Inno Source لتجديده'; $('formMsg').className = 'err'; return; }
+    }
     const payload = {
       product: 'innoforge-pos',
       machine: id.match(/.{4}/g).join('-'),
       customer: $('customer').value.trim(),
       issued: now.toISOString(),
       expires: days ? new Date(now.getTime() + days * 86400000).toISOString() : null,
+      edition,
+      ...(addons.length ? { addons } : {}),
+      ...(Object.keys(limits).length ? { limits } : {}),
+      ...(cert ? { reseller: cert.payload.id } : {}),
     };
     const body = new TextEncoder().encode(JSON.stringify(payload));
     const sig = await crypto.subtle.sign({ name: 'Ed25519' }, signingKey, body);
-    const key = `${b64url(body)}.${b64url(sig)}`;
+    const key = `${b64url(body)}.${b64url(sig)}${cert ? `.${cert.text}` : ''}`;
     $('keyOut').textContent = key;
     $('expiresOut').textContent = `ينتهي: ${fmtDate(payload.expires)}`;
     $('result').hidden = false;
@@ -153,6 +218,7 @@
       <td>${esc(fmtDate(l.issued))}</td>
       <td><b>${esc(l.customer)}</b><br><span class="muted">${esc(l.phone)} ${esc(l.notes)}</span></td>
       <td class="ltr"><code>${esc(l.machine)}</code></td>
+      <td>${esc(EDITIONS_DATA.editions[l.edition || 'full']?.ar || l.edition)}${l.addons?.length ? `<br><span class="muted">+ ${esc(l.addons.map((a) => EDITIONS_DATA.features[a]?.ar.split(':')[0] || a).join('، '))}</span>` : ''}</td>
       <td>${l.days ? `${l.days} يوم` : 'مدى الحياة'}</td>
       <td><span class="tag ${l.expires && Date.parse(l.expires) < now ? 'exp' : ''}">${esc(fmtDate(l.expires))}</span></td>
       <td><button type="button" data-copy="${i}">نسخ</button></td></tr>`).join('');
@@ -163,8 +229,8 @@
   });
 
   $('exportBtn').addEventListener('click', () => {
-    const rows = [['issued', 'customer', 'phone', 'machine', 'days', 'expires', 'notes', 'key'],
-      ...loadLog().map((l) => [l.issued, l.customer, l.phone, l.machine, l.days, l.expires || 'lifetime', l.notes, l.key])];
+    const rows = [['issued', 'customer', 'phone', 'machine', 'edition', 'addons', 'limits', 'reseller', 'days', 'expires', 'notes', 'key'],
+      ...loadLog().map((l) => [l.issued, l.customer, l.phone, l.machine, l.edition || 'full', (l.addons || []).join(' '), JSON.stringify(l.limits || {}), l.reseller || '', l.days, l.expires || 'lifetime', l.notes, l.key])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -173,6 +239,7 @@
   });
   $('clearBtn').addEventListener('click', () => { if (confirm('مسح السجل من المتصفح ده؟ صدّره الأول لو محتاجه.')) { saveLog([]); renderLog(); } });
 
+  renderEditions();
   renderLog();
 })();
 </script>

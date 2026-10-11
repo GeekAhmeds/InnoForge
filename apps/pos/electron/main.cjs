@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('elect
 const { openDatabase } = require('./db.cjs');
 const { createServices, PosError } = require('./services/index.cjs');
 const { createLicenseStore } = require('./license.cjs');
+const { entitlements, FULL } = require('./editions.cjs');
 const { createUpdater } = require('./updater.cjs');
 const excel = require('./excel.cjs');
 const { createKdsServer } = require('./kds-server.cjs');
@@ -44,9 +45,21 @@ function licenseOk() {
   return license.valid;
 }
 
+// What this copy may use. From source (not packaged) everything is on, unless
+// INNOFORGE_POS_EDITION=basic|market|… is set to try an edition.
+function currentEntitlements() {
+  if (!licenseRequired()) {
+    const ed = !app.isPackaged && process.env.INNOFORGE_POS_EDITION;
+    return ed ? entitlements({ edition: ed }) : FULL;
+  }
+  if (!license?.valid) return FULL; // nothing runs without a valid license anyway
+  return { edition: license.edition, features: new Set(license.features), addons: license.addons, limits: license.limits };
+}
+const entitlementsJSON = () => { const e = currentEntitlements(); return { edition: e.edition, features: [...e.features], addons: e.addons, limits: e.limits }; };
+
 function boot() {
   db = openDatabase(dbFile());
-  services = createServices(db);
+  services = createServices(db, { entitlements: currentEntitlements });
   licenses = createLicenseStore({
     file: path.join(app.getPath('userData'), 'license.json'),
     publicKeyPem: require('./license-public.cjs'),
@@ -232,15 +245,15 @@ ipcMain.handle('pos:openKds', (_e, { station = '' } = {}) => {
   return ok(true);
 });
 
-ipcMain.handle('pos:license', () => ok({ ...license, required: licenseRequired(), valid: licenseOk() }));
+ipcMain.handle('pos:license', () => ok({ ...license, ...entitlementsJSON(), required: licenseRequired(), valid: licenseOk() }));
 
 ipcMain.handle('pos:activate', (_e, key) => {
   const result = licenses.activate(key);
   if (result.valid) {
     license = result;
-    services.audit('license_activate', { userId: null, details: { customer: result.customer, expires: result.expires } });
+    services.audit('license_activate', { userId: null, details: { customer: result.customer, expires: result.expires, edition: result.edition } });
   }
-  return result.valid ? ok({ ...result, required: licenseRequired() }) : fail(new PosError(`LICENSE_${result.reason}`));
+  return result.valid ? ok({ ...result, ...entitlementsJSON(), required: licenseRequired() }) : fail(new PosError(`LICENSE_${result.reason}`));
 });
 
 ipcMain.handle('pos:printers', async () => {
@@ -327,6 +340,7 @@ const stampName = (base) => `${base}-${new Date().toLocaleDateString('en-CA')}.x
 ipcMain.handle('pos:excelTemplate', async (_e, kind) => {
   try {
     services.requirePerm('backup');
+    services.license.requireFeature('excel');
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: `innoforge-${kind}-template.xlsx`, filters: xlsxFilter });
     if (canceled || !filePath) return ok(null);
     await excel.writeTemplate(kind, filePath);
@@ -340,6 +354,11 @@ ipcMain.handle('pos:excelTemplate', async (_e, kind) => {
 ipcMain.handle('pos:excelPick', async (_e, kind) => {
   try {
     services.requirePerm('backup');
+    services.license.requireFeature('excel');
+  } catch (err) {
+    return fail(err);
+  }
+  try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters: [{ name: 'Excel / CSV', extensions: ['xlsx', 'csv'] }] });
     if (canceled || !filePaths?.length) return ok(null);
     return ok({ file: path.basename(filePaths[0]), ...(await excel.parseFile(kind, filePaths[0])) });

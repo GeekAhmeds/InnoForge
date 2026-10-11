@@ -535,3 +535,10 @@ button.link { background: none; border: 0; padding: 0; color: var(--brand); text
 .pay-customer.gift { background: #fdf2f8; border: 1px solid #f9a8d4; }
 .gift-card-face { background: linear-gradient(135deg, #be185d, #7c3aed); color: #fff; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
 .gift-card-face .code { font: bold 22px monospace; letter-spacing: 2px; direction: ltr; }
+
+/* license */
+.edition-badge { display: inline-block; margin-top: 4px; padding: 4px 14px; border-radius: 99px; background: linear-gradient(135deg, var(--brand), #0890c4); color: #fff; font-weight: 700; }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+.feature { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; }
+.feature.on { background: #ecfdf5; border-color: #a7f3d0; }
+.feature.off { color: var(--muted); background: #f8fafc; }

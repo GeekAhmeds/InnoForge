@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
+const { entitlements, toJSON, resellerAllows } = require('./editions.cjs');
 
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
 
@@ -50,38 +51,77 @@ function signLicense(payload, privateKeyPem) {
   return `${b64url(body)}.${b64url(sig)}`;
 }
 
+const verifySig = (body, sigB64, key) => {
+  try {
+    return crypto.verify(null, body, key, Buffer.from(sigB64, 'base64url'));
+  } catch {
+    return false;
+  }
+};
+const parseSigned = (bodyB64) => {
+  const body = Buffer.from(bodyB64, 'base64url');
+  return { body, payload: JSON.parse(body.toString('utf8')) };
+};
+
 /**
- * @returns {{valid: boolean, reason?: string, payload?: object}}
- * reasons: EMPTY | MALFORMED | BAD_SIGNATURE | WRONG_MACHINE | EXPIRED | CLOCK
+ * A reseller certificate: the vendor signs a reseller's public key together with what
+ * that reseller may sell. Resellers then sign customer licenses with their own key and
+ * append the certificate, so the vendor's private key never leaves the vendor.
+ */
+function signResellerCert(cert, vendorPrivateKeyPem) {
+  return signLicense({ type: 'reseller', ...cert }, vendorPrivateKeyPem);
+}
+
+/**
+ * Key formats: `body.sig` (signed by the vendor) or `body.sig.certBody.certSig`
+ * (signed by a reseller whose certificate the vendor signed).
+ * @returns {{valid: boolean, reason?: string, payload?: object, reseller?: object}}
+ * reasons: EMPTY | MALFORMED | BAD_SIGNATURE | WRONG_MACHINE | EXPIRED | CLOCK | RESELLER_*
  */
 function verifyLicense(key, { machine, publicKeyPem, now = Date.now(), lastSeen = 0 }) {
   const text = String(key || '').replace(/\s+/g, '');
   if (!text) return { valid: false, reason: 'EMPTY' };
-  const [bodyB64, sigB64, extra] = text.split('.');
-  if (!bodyB64 || !sigB64 || extra !== undefined) return { valid: false, reason: 'MALFORMED' };
+  const parts = text.split('.');
+  if (!(parts.length === 2 || parts.length === 4) || parts.some((p) => !p)) return { valid: false, reason: 'MALFORMED' };
+  const [bodyB64, sigB64, certB64, certSigB64] = parts;
   let body;
   let payload;
   try {
-    body = Buffer.from(bodyB64, 'base64url');
-    payload = JSON.parse(body.toString('utf8'));
+    ({ body, payload } = parseSigned(bodyB64));
   } catch {
     return { valid: false, reason: 'MALFORMED' };
   }
-  let ok = false;
-  try {
-    ok = crypto.verify(null, body, crypto.createPublicKey(publicKeyPem), Buffer.from(sigB64, 'base64url'));
-  } catch {
-    ok = false;
+  let signer = crypto.createPublicKey(publicKeyPem);
+  let reseller = null;
+  if (certB64) {
+    let cert;
+    try {
+      cert = parseSigned(certB64);
+    } catch {
+      return { valid: false, reason: 'MALFORMED' };
+    }
+    if (!verifySig(cert.body, certSigB64, signer) || cert.payload.type !== 'reseller') return { valid: false, reason: 'BAD_SIGNATURE' };
+    reseller = cert.payload;
+    try {
+      signer = crypto.createPublicKey({ key: Buffer.from(reseller.pub, 'base64'), format: 'der', type: 'spki' });
+    } catch {
+      return { valid: false, reason: 'BAD_SIGNATURE' };
+    }
   }
-  if (!ok) return { valid: false, reason: 'BAD_SIGNATURE' };
+  if (!verifySig(body, sigB64, signer)) return { valid: false, reason: 'BAD_SIGNATURE' };
   if (payload.product !== 'innoforge-pos') return { valid: false, reason: 'BAD_SIGNATURE' };
+  if (reseller) {
+    if (payload.reseller !== reseller.id) return { valid: false, reason: 'BAD_SIGNATURE' };
+    const why = resellerAllows(reseller, payload);
+    if (why) return { valid: false, reason: why, payload };
+  }
   if (normalizeId(payload.machine) !== normalizeId(machine)) return { valid: false, reason: 'WRONG_MACHINE', payload };
   if (payload.expires) {
     // A clock moved far behind the last time we ran means someone is dodging expiry.
     if (lastSeen && now < lastSeen - 36 * 3600 * 1000) return { valid: false, reason: 'CLOCK', payload };
     if (now > Date.parse(payload.expires)) return { valid: false, reason: 'EXPIRED', payload };
   }
-  return { valid: true, payload };
+  return { valid: true, payload, reseller };
 }
 
 /** Stores the license next to the database and tracks the last time the app ran. */
@@ -104,6 +144,9 @@ function createLicenseStore({ file, publicKeyPem, machine = machineId() }) {
       reason: result.valid ? null : data.key ? result.reason : 'EMPTY',
       customer: result.payload?.customer || null,
       expires: result.payload?.expires || null,
+      issued: result.payload?.issued || null,
+      reseller: result.reseller ? { id: result.reseller.id, name: result.reseller.name, phone: result.reseller.phone || '' } : null,
+      ...toJSON(entitlements(result.valid ? result.payload : null)),
     };
   }
 
@@ -117,4 +160,4 @@ function createLicenseStore({ file, publicKeyPem, machine = machineId() }) {
   return { status, activate, machine };
 }
 
-module.exports = { machineId, rawMachineId, signLicense, verifyLicense, createLicenseStore, normalizeId };
+module.exports = { machineId, rawMachineId, signLicense, signResellerCert, verifyLicense, createLicenseStore, normalizeId };

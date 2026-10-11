@@ -7,6 +7,7 @@ import { Empty, Field, Toggle, useApp } from '../components/ui.jsx';
 import { InstallmentFields, newInstallmentForm } from '../components/Installments.jsx';
 import { NoShift } from './Pos.jsx';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
+import { has } from '../lib/features.js';
 
 // Trading (B2B) sales invoice: customer first, then a line grid with unit, quantity,
 // price, discount % and stock; due date, salesperson and partial payment on one screen.
@@ -298,7 +299,7 @@ export default function SalesInvoice() {
             </p>
           )}
           {!customer && paidNow < total && <p className="warn">{t('invoice.needCustomer')}</p>}
-          {customer && onAccount > 0 && (
+          {customer && onAccount > 0 && has('installments') && (
             <>
               <Toggle checked={!!inst} onChange={(v) => setInst(v ? newInstallmentForm() : null)} label={`📆 ${t('inst.sellInInstallments')}`} />
               {inst && <InstallmentFields value={inst} onChange={setInst} amount={onAccount} />}

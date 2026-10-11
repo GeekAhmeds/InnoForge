@@ -8,6 +8,7 @@ import { openWhatsApp } from '../lib/share.js';
 import { poHtml } from '../lib/receipt.js';
 import { AccountSelect } from './Treasury.jsx';
 import { WarehouseSelect } from '../components/Warehouses.jsx';
+import { has } from '../lib/features.js';
 
 export default function Purchases() {
   const { t } = useApp();
@@ -17,7 +18,7 @@ export default function Purchases() {
       <div className="page-head">
         <h2>🚚 {t('nav.purchases')}</h2>
         <div className="seg">
-          {['purchases', 'orders', 'suppliers', 'rebates', 'expenses'].map((x) => (
+          {['purchases', 'orders', 'suppliers', 'rebates', 'expenses'].filter((x) => has({ orders: 'purchase_orders', rebates: 'rebates' }[x])).map((x) => (
             <button key={x} className={tab === x ? 'on' : ''} onClick={() => setTab(x)}>{t(`purchases.tab.${x}`)}</button>
           ))}
         </div>

@@ -5,12 +5,20 @@
 //
 //   node tools/license.cjs keygen                     # once: create the key pair
 //   node tools/license.cjs issue --machine 7F3A-91C2-04BE-D5E8-2A6F --customer "مكتبة النور" [--days 365]
+//        [--edition basic|market|restaurant|trading|full] [--addons warehouses,employees] [--users 5] [--warehouses 3]
 //   node tools/license.cjs machine                    # print this computer's Machine ID
+//
+// Resellers (they never get the vendor key):
+//   reseller:  node tools/license.cjs reseller-keygen --key ~/.innoforge/reseller.pem      → sends reseller.pub.txt to the vendor
+//   vendor:    node tools/license.cjs reseller-cert --pub reseller.pub.txt --id R001 --name "شركة الأمل" [--phone 010…]
+//                [--editions basic,market] [--addons '*'] [--max-days 365] [--max-users 5] [--valid-days 90]   → reseller.cert
+//   reseller:  node tools/license.cjs issue --key ~/.innoforge/reseller.pem --cert reseller.cert --machine … --edition market --days 365
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { signLicense, machineId, normalizeId } = require('../electron/license.cjs');
+const { signLicense, signResellerCert, machineId, normalizeId } = require('../electron/license.cjs');
+const { EDITIONS, FEATURES, LIMITS, resellerAllows } = require('../electron/editions.cjs');
 
 const PUBLIC_KEY_FILE = path.join(__dirname, '..', 'electron', 'license-public.cjs');
 const DEFAULT_PRIVATE = path.join(os.homedir(), '.innoforge', 'pos-license-private.pem');
@@ -23,6 +31,14 @@ function args() {
     else out._.push(argv[i]);
   }
   return out;
+}
+
+const die = (msg) => { console.error(msg); process.exit(1); };
+const list = (v) => (v && v !== true ? String(v).split(',').map((x) => x.trim()).filter(Boolean) : []);
+function readCert(file) {
+  const text = fs.readFileSync(file, 'utf8').trim();
+  const [body] = text.split('.');
+  return { text, payload: JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) };
 }
 
 const a = args();
@@ -62,19 +78,67 @@ module.exports = \`${pem}
       process.exit(1);
     }
     const days = a.days && a.days !== true ? Number(a.days) : null;
+    const edition = a.edition && a.edition !== true ? String(a.edition) : 'full';
+    if (!EDITIONS.includes(edition)) die(`Unknown edition "${edition}". One of: ${EDITIONS.join(', ')}`);
+    const addons = list(a.addons);
+    const bad = addons.filter((f) => !FEATURES.includes(f));
+    if (bad.length) die(`Unknown add-on(s): ${bad.join(', ')}. Known: ${FEATURES.join(', ')}`);
+    const limits = {};
+    for (const k of LIMITS) if (a[k] != null && a[k] !== true) limits[k] = Number(a[k]);
+    const cert = a.cert ? readCert(a.cert) : null;
     const payload = {
       product: 'innoforge-pos',
       machine: normalizeId(a.machine).match(/.{4}/g).join('-'),
       customer: a.customer && a.customer !== true ? String(a.customer) : '',
       issued: new Date().toISOString(),
       expires: days ? new Date(Date.now() + days * 86400000).toISOString() : null,
+      edition,
+      ...(addons.length ? { addons } : {}),
+      ...(Object.keys(limits).length ? { limits } : {}),
+      ...(cert ? { reseller: cert.payload.id } : {}),
     };
-    console.log(signLicense(payload, fs.readFileSync(privateFile, 'utf8')));
+    if (cert) {
+      const why = resellerAllows(cert.payload, payload);
+      if (why) die(`Your reseller permit does not allow this key (${why}).`);
+    }
+    const key = signLicense(payload, fs.readFileSync(privateFile, 'utf8'));
+    console.log(cert ? `${key}.${cert.text}` : key);
+    break;
+  }
+  case 'reseller-keygen': {
+    if (fs.existsSync(privateFile) && !a.force) die(`Key already exists: ${privateFile} (use --force to replace).`);
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+    fs.mkdirSync(path.dirname(privateFile), { recursive: true });
+    fs.writeFileSync(privateFile, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+    const pubFile = a.out && a.out !== true ? a.out : 'reseller.pub.txt';
+    fs.writeFileSync(pubFile, publicKey.export({ type: 'spki', format: 'der' }).toString('base64'));
+    console.log(`Your private key (keep it secret): ${privateFile}\nSend this file to Inno Source: ${path.resolve(pubFile)}`);
+    break;
+  }
+  case 'reseller-cert': {
+    if (!a.pub || !a.id || !a.name) die('Usage: reseller-cert --pub reseller.pub.txt --id R001 --name "Reseller" [--editions a,b] [--addons a,b|*] [--max-days N] [--max-users N] [--max-warehouses N] [--valid-days 90]');
+    if (!fs.existsSync(privateFile)) die(`Vendor private key not found: ${privateFile}`);
+    const pub = fs.readFileSync(a.pub, 'utf8').trim();
+    crypto.createPublicKey({ key: Buffer.from(pub, 'base64'), format: 'der', type: 'spki' }); // validates
+    const editions = a.editions && a.editions !== true && a.editions !== '*' ? list(a.editions) : '*';
+    if (editions !== '*' && editions.some((e) => !EDITIONS.includes(e))) die(`Unknown edition in --editions. One of: ${EDITIONS.join(', ')}`);
+    const addons = a.addons === '*' ? '*' : list(a.addons);
+    const validDays = Number(a['valid-days']) || 90;
+    const maxLimits = {};
+    for (const k of LIMITS) if (a[`max-${k}`] && a[`max-${k}`] !== true) maxLimits[k] = Number(a[`max-${k}`]);
+    const cert = {
+      id: String(a.id), name: String(a.name), phone: a.phone && a.phone !== true ? String(a.phone) : '', pub,
+      editions, addons, max_days: Number(a['max-days']) || 0, max_limits: maxLimits,
+      issued: new Date().toISOString(), expires: new Date(Date.now() + validDays * 86400000).toISOString(),
+    };
+    const out = a.out && a.out !== true ? a.out : `reseller-${cert.id}.cert`;
+    fs.writeFileSync(out, signResellerCert(cert, fs.readFileSync(privateFile, 'utf8')));
+    console.log(`Reseller permit written to ${path.resolve(out)} (valid until ${cert.expires.slice(0, 10)}). Send it to the reseller.`);
     break;
   }
   case 'machine':
     console.log(machineId());
     break;
   default:
-    console.log('Usage: node tools/license.cjs <keygen|issue|machine> [--machine ID] [--customer NAME] [--days N] [--key private.pem]');
+    console.log('Usage: node tools/license.cjs <keygen|issue|machine|reseller-keygen|reseller-cert> — see the comment at the top of this file.');
 }

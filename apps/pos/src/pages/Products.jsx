@@ -7,6 +7,7 @@ import { ExcelButtons } from '../components/ExcelImport.jsx';
 import LabelsModal from '../components/Labels.jsx';
 import { sellScreens } from '../lib/screens.js';
 import { ModifierGroups, ProductKitchenFields } from '../components/Modifiers.jsx';
+import { has } from '../lib/features.js';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -32,8 +33,8 @@ export default function Products() {
           <button className={tab === 'products' ? 'on' : ''} onClick={() => setTab('products')}>{t('products.title')}</button>
           <button className={tab === 'categories' ? 'on' : ''} onClick={() => setTab('categories')}>{t('products.categories')}</button>
           {can('purchases') && <button className={tab === 'counts' ? 'on' : ''} onClick={() => setTab('counts')}>{t('counts.title')}</button>}
-          <button className={tab === 'warehouses' ? 'on' : ''} onClick={() => setTab('warehouses')}>{t('wh.title')}</button>
-          <button className={tab === 'expiry' ? 'on' : ''} onClick={() => setTab('expiry')}>{t('expiry.title')}</button>
+          {has('warehouses') && <button className={tab === 'warehouses' ? 'on' : ''} onClick={() => setTab('warehouses')}>{t('wh.title')}</button>}
+          {has('batches') && <button className={tab === 'expiry' ? 'on' : ''} onClick={() => setTab('expiry')}>{t('expiry.title')}</button>}
           {sellScreens(settings).includes('restaurant') && can('products') && <button className={tab === 'modifiers' ? 'on' : ''} onClick={() => setTab('modifiers')}>{t('mods.title')}</button>}
         </div>
         {tab === 'products' && (
@@ -44,7 +45,7 @@ export default function Products() {
               {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <Toggle checked={lowOnly} onChange={setLowOnly} label={t('products.lowStock')} />
-            <button onClick={() => setLabels(true)}>🏷 {t('labels.button')}</button>
+            {has('labels') && <button onClick={() => setLabels(true)}>🏷 {t('labels.button')}</button>}
             <ExcelButtons kind="products" onImported={() => { reload(); reloadCategories(); }} />
             <button className="primary" onClick={() => setEditing({})}>+ {t('products.new')}</button>
           </div>
@@ -106,7 +107,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
   const { t, tErr, notify, settings, can } = useApp();
   const d = settings.decimals;
   const isNew = !product.id;
-  const restaurant = sellScreens(settings).includes('restaurant');
+  const restaurant = has('restaurant') && sellScreens(settings).includes('restaurant');
   const bookstore = settings.business_type === 'bookstore';
   const [f, setF] = useState({
     name: product.name || '',
@@ -213,9 +214,9 @@ function ProductModal({ product, categories, onClose, onSaved }) {
               {stations.map((st) => <option key={st.id} value={st.id}>🍳 {st.name}</option>)}
             </select>
           )}
-          <Toggle checked={f.track_expiry} onChange={set('track_expiry')} label={t('products.trackExpiry')} />
-          <Toggle checked={f.track_serial} onChange={set('track_serial')} label={t('products.trackSerial')} />
-          <Toggle checked={f.by_weight} onChange={(v) => setF((x) => ({ ...x, by_weight: v, unit: v && (!x.unit || x.unit === 'pcs') ? 'kg' : x.unit }))} label={`⚖ ${t('products.byWeight')}`} />
+          {has('batches') && <Toggle checked={f.track_expiry} onChange={set('track_expiry')} label={t('products.trackExpiry')} />}
+          {has('batches') && <Toggle checked={f.track_serial} onChange={set('track_serial')} label={t('products.trackSerial')} />}
+          {has('scale') && <Toggle checked={f.by_weight} onChange={(v) => setF((x) => ({ ...x, by_weight: v, unit: v && (!x.unit || x.unit === 'pcs') ? 'kg' : x.unit }))} label={`⚖ ${t('products.byWeight')}`} />}
           {f.by_weight && <input className="w-amount mono" dir="ltr" placeholder={t('products.plu')} title={t('products.pluHint')} value={f.plu} onChange={set('plu')} />}
           <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />
         </div>

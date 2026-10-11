@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { SCREENS, sellScreens } from '../lib/screens.js';
-import { activate, api, backup, copyText, dataPath, printers as listPrinters, restore } from '../lib/api.js';
+import { api, backup, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { formatMoney } from '../lib/money.js';
@@ -9,16 +9,20 @@ import { UpdatePanel } from '../components/Updates.jsx';
 import KitchenSettings from '../components/Kitchen.jsx';
 import Devices from '../components/Devices.jsx';
 import { Coupons } from '../components/Coupons.jsx';
+import LicenseTab from '../components/License.jsx';
+import { has } from '../lib/features.js';
 
-const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'data', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'data', 'license', 'support'];
 // Which permission opens each tab.
-const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', data: 'backup', support: null };
+// Which licensed feature a tab needs.
+const TAB_FEATURE = { priceLists: 'trading', tables: 'restaurant', kitchen: 'restaurant' };
+const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', data: 'backup', license: null, support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
-  const tabs = TABS.filter((x) => (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
+  const tabs = TABS.filter((x) => (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && has(TAB_FEATURE[x]) && (x !== 'promos' || has('promotions') || has('coupons')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', data: 'settings.data', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -29,11 +33,12 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'audit' && <AuditLog />}
       {tab === 'priceLists' && <PriceLists />}
-      {tab === 'promos' && <><Promotions /><Coupons /><Loyalty /></>}
+      {tab === 'promos' && <>{has('promotions') && <Promotions />}{has('coupons') && <Coupons />}{has('promotions') && <Loyalty />}</>}
       {tab === 'tables' && <Tables />}
       {tab === 'kitchen' && <KitchenSettings />}
       {tab === 'devices' && <Devices />}
       {tab === 'data' && <Data />}
+      {tab === 'license' && <LicenseTab />}
       {tab === 'support' && (
         <>
           <div className="card narrow"><Support t={t} /></div>
@@ -96,7 +101,7 @@ function SettingsForm({ tab }) {
           <div className="span2">
             <Field label={t('screens.title')} hint={t('screens.hint')}>
               <div className="screen-picks">
-                {SCREENS.map((sc) => {
+                {SCREENS.filter((sc) => has(sc.feature)).map((sc) => {
                   const on = sellScreens(f);
                   const checked = on.includes(sc.id);
                   return (
@@ -505,44 +510,11 @@ function Tables() {
 }
 
 function Data() {
-  const { t, tErr, notify, license, setLicense } = useApp();
-  const [renewing, setRenewing] = useState(false);
-  const [newKey, setNewKey] = useState('');
-  async function renew() {
-    try {
-      setLicense(await activate(newKey));
-      setRenewing(false);
-      setNewKey('');
-      notify(t('license.updated'));
-    } catch (err) {
-      notify(tErr(err), 'error');
-    }
-  }
+  const { t, tErr, notify } = useApp();
   const [path, setPath] = useState('');
   useEffect(() => { dataPath().then(setPath).catch(() => {}); }, []);
   return (
     <div className="card narrow">
-      <h3>{t('license.info')}</h3>
-      {license?.required ? (
-        <dl className="kv">
-          <dt>{t('license.customer')}</dt><dd>{license.customer || '—'}</dd>
-          <dt>{t('license.machineId')}</dt><dd className="mono" dir="ltr">{license.machine}</dd>
-          <dt>{t('license.expires')}</dt><dd>{license.expires ? new Date(license.expires).toLocaleDateString('en-GB') : t('license.lifetime')}</dd>
-        </dl>
-      ) : <p className="muted">{t('license.devMode')}</p>}
-      {license?.required && (
-        <div className="row bottom-gap">
-          <button onClick={() => copyText(license.machine).then(() => notify(t('license.copied')))}>{t('license.copy')} {t('license.machineId')}</button>
-          <button className="primary" onClick={() => setRenewing(true)}>🔑 {t('license.update')}</button>
-        </div>
-      )}
-      {renewing && (
-        <Modal title={t('license.update')} onClose={() => setRenewing(false)}
-          footer={<><span className="spacer" /><button onClick={() => setRenewing(false)}>{t('common.cancel')}</button><button className="primary" disabled={!newKey.trim()} onClick={renew}>{t('license.activate')}</button></>}>
-          <p className="muted">{t('license.updateHint')}</p>
-          <textarea dir="ltr" className="mono" rows={5} autoFocus value={newKey} onChange={(e) => setNewKey(e.target.value)} />
-        </Modal>
-      )}
       <h3>{t('settings.data')}</h3>
       <Field label={t('settings.dataPath')}><input readOnly className="mono" value={path} /></Field>
       <div className="row">

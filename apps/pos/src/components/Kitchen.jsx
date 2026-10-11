@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, copyText, kdsInfo, openKds, printers as listPrinters } from '../lib/api.js';
 import { kitchenHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from './ui.jsx';
+import { has } from '../lib/features.js';
 
 /**
  * Prints an order's new kitchen tickets: one per station on that station's printer
@@ -94,7 +95,7 @@ export default function KitchenSettings() {
         </div>
         <div className="grid3 top-gap">
           <div className="span3"><Toggle checked={lan.kitchen_auto_send} onChange={(v) => setLan({ ...lan, kitchen_auto_send: v })} label={t('kitchen.autoSend')} /></div>
-          <div className="span3"><Toggle checked={lan.kds_lan} onChange={(v) => setLan({ ...lan, kds_lan: v })} label={t('kitchen.lan')} /></div>
+          {has('lan') && <div className="span3"><Toggle checked={lan.kds_lan} onChange={(v) => setLan({ ...lan, kds_lan: v })} label={t('kitchen.lan')} /></div>}
           <Field label={t('kitchen.port')}><input type="number" value={lan.kds_port} onChange={(e) => setLan({ ...lan, kds_port: e.target.value })} /></Field>
           <span /><div className="row end"><button className="primary" onClick={saveScreen}>{t('common.save')}</button></div>
         </div>

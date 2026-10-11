@@ -9,6 +9,7 @@ import { openCustomerDisplay, openDrawer, sendDisplay } from '../lib/api.js';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { ModifierPicker } from '../components/Modifiers.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
+import { has } from '../lib/features.js';
 
 const emptyCart = (orderType) => ({
   id: null, order_type: orderType, table_id: null, table_name: '', items: [], discount: 0,
@@ -42,7 +43,7 @@ export default function Pos() {
   const [drivers, setDrivers] = useState([]);
   useEffect(() => { api.delivery.zones().then(setZones).catch(() => {}); api.delivery.drivers().then(setDrivers).catch(() => {}); }, []);
   useEffect(() => { api.priceLists.list().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => {}); }, []);
-  const restaurant = settings.business_type === 'restaurant' || floorOn;
+  const restaurant = has('restaurant') && (settings.business_type === 'restaurant' || floorOn);
   const defaultType = restaurant ? 'takeaway' : 'sale';
 
   const [categories, setCategories] = useState([]);
@@ -294,7 +295,7 @@ export default function Pos() {
       <section className="cart">
         {restaurant && (
           <div className="seg full">
-            {['dine_in', 'takeaway', 'delivery'].map((ty) => (
+            {['dine_in', 'takeaway', 'delivery'].filter((ty) => ty !== 'delivery' || has('delivery')).map((ty) => (
               <button key={ty} className={cart.order_type === ty ? 'on' : ''} onClick={() => setType(ty)}>{t(`order.${ty}`)}</button>
             ))}
           </div>
@@ -618,14 +619,14 @@ function DiscountModal({ subtotal, current, onClose, onSave, onCoupon }) {
         <input className="xl" autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
         <p className="muted">= {formatMoney(compute(), settings)}</p>
       </form>
-      <div className="coupon-box">
+      {has('coupons') && <div className="coupon-box">
         <label>🎟 {t('coupon.haveCode')}</label>
         <div className="row">
           <input dir="ltr" className="mono" value={code} placeholder="EID2026" onChange={(e) => { setCode(e.target.value.toUpperCase()); setCodeErr(''); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); } }} />
           <button type="button" disabled={!code.trim()} onClick={applyCoupon}>{t('coupon.apply')}</button>
         </div>
         {codeErr && <p className="warn small">{codeErr}</p>}
-      </div>
+      </div>}
     </Modal>
   );
 }
@@ -818,7 +819,7 @@ function PayModal({ total, customer, onClose, onPay }) {
             }}>{t('loyalty.redeem')}</button>}
         </div>
       )}
-      {!gift?.open ? (
+      {!has('coupons') ? null : !gift?.open ? (
         <button type="button" className="ghost sm gift-toggle" onClick={() => setGift({ open: true, code: '', card: null, amount: 0, err: '' })}>🎁 {t('gift.payWith')}</button>
       ) : (
         <div className="pay-customer gift">

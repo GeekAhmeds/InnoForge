@@ -20,6 +20,7 @@ import Treasury from './pages/Treasury.jsx';
 import Employees from './pages/Employees.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
+import { has, setFeatures } from './lib/features.js';
 import { UpdateBanner } from './components/Updates.jsx';
 import ApprovalModal from './components/Approval.jsx';
 import logoMark from './assets/logo-mark.png';
@@ -29,6 +30,8 @@ export default function App() {
   const [license, setLicense] = useState(null);
   const reloadSettings = useCallback(async () => setSettings(await api.settings.get()), []);
   useEffect(() => { reloadSettings(); licenseStatus().then(setLicense); }, [reloadSettings]);
+  // Features must be known before the first render that builds the menu.
+  if (license) setFeatures(license.features);
 
   if (!settings || !license) return null;
   return (
@@ -44,11 +47,11 @@ const NAV = [
   { id: 'dashboard', icon: '📈', perm: 'reports' },
   { id: 'orders', icon: '🧾' },
   { id: 'customers', icon: '👥' },
-  { id: 'treasury', icon: '🏦', perm: 'treasury' },
+  { id: 'treasury', icon: '🏦', perm: 'treasury', feature: 'treasury' },
   { id: 'products', icon: '📦', perm: 'products' },
   { id: 'purchases', icon: '🚚', perm: 'purchases' },
   { id: 'reports', icon: '📊', perm: 'reports' },
-  { id: 'employees', icon: '🧑‍💼' },
+  { id: 'employees', icon: '🧑‍💼', feature: 'employees' },
   { id: 'shift', icon: '⏱' },
   { id: 'settings', icon: '⚙', perm: ['settings', 'users', 'audit', 'backup'] },
 ];
@@ -109,7 +112,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
 
   const ctx = useMemo(() => ({
     settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
-    isAdmin: user?.role === 'admin', can, withApproval, ask, pendingCart, setPendingCart,
+    isAdmin: user?.role === 'admin', can, has, withApproval, ask, pendingCart, setPendingCart,
     // Quotations open in the trading invoice when that screen is on; everything else in the cashier.
     openInPos: (cart) => { setPendingCart(cart); setPage(cart.quote_id && sellScreens(settings).includes('trading') ? 'invoice' : 'pos'); },
   }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval, ask, pendingCart]);
@@ -123,8 +126,8 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     const screens = sellScreens(settings);
     const sellNav = screens.map((id) => SCREENS.find((x) => x.id === id)).map((x) => ({ id: x.page, icon: x.icon, label: screens.length > 1 ? `nav.${x.page === 'pos' ? 'cashier' : x.page}` : 'nav.pos' }));
     // Restaurants also get the delivery board right after the floor.
-    if (screens.includes('restaurant')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
-    const nav = [...sellNav, ...NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]))];
+    if (screens.includes('restaurant') && has('delivery')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
+    const nav = [...sellNav, ...NAV.filter((n) => has(n.feature) && (!n.perm || [].concat(n.perm).some((p) => user.perms?.[p])))];
     const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">

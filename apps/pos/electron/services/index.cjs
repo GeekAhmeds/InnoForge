@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { transaction } = require('../db.cjs');
 const { computeTotals } = require('./totals.cjs');
 const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = require('./permissions.cjs');
+const { FULL, toJSON } = require('../editions.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -96,8 +97,18 @@ function dateRange(from, to) {
  * Builds the service layer. `session` holds the logged-in user for this
  * window; every method that changes data checks it.
  */
-function createServices(db) {
+function createServices(db, { entitlements = () => FULL } = {}) {
   const session = { user: null };
+
+  // What this copy's license allows (edition features, add-ons, limits; 0 = unlimited).
+  const has = (feature) => entitlements().features.has(feature);
+  function requireFeature(feature) {
+    if (!has(feature)) throw new PosError('FEATURE_LOCKED', feature);
+  }
+  function checkLimit(kind, current) {
+    const max = entitlements().limits[kind] || 0;
+    if (max && current >= max) throw new PosError(`LIMIT_${kind.toUpperCase()}`, String(max));
+  }
 
   function requireUser() {
     if (!session.user) throw new PosError('NOT_LOGGED_IN');
@@ -187,6 +198,10 @@ function createServices(db) {
       if (patch && 'business_type' in patch && !['retail', 'bookstore', 'restaurant', 'trading'].includes(patch.business_type)) {
         throw new PosError('INVALID_BUSINESS_TYPE');
       }
+      if (patch?.kds_lan) requireFeature('lan');
+      if (patch?.customer_display) requireFeature('customer_display');
+      if (patch?.scale_barcodes || patch?.scale_serial) requireFeature('scale');
+      if (patch?.loyalty_enabled) requireFeature('promotions');
       // The kitchen screen key only changes through newKdsKey (forms send stale copies of it).
       const { kds_key: _key, ...rest } = patch || {};
       transaction(db, () => writeSettings(rest));
@@ -277,8 +292,10 @@ function createServices(db) {
       const overrides = JSON.stringify(parseOverrides(u.overrides || {}));
       const commission = Math.min(100, Math.max(0, num(u.commission_rate)));
       return transaction(db, () => {
+        const activeUsers = db.prepare('SELECT COUNT(*) AS n FROM users WHERE active = 1').get().n;
         if (u.id) {
           if (u.id === me.id && (role !== me.role || u.active === false)) throw new PosError('CANNOT_DEMOTE_SELF');
+          if (u.active !== false && !db.prepare('SELECT active FROM users WHERE id = ?').get(u.id)?.active) checkLimit('users', activeUsers);
           db.prepare('UPDATE users SET name = ?, username = ?, role = ?, active = ?, permissions = ?, commission_rate = ? WHERE id = ?').run(
             str(u.name), str(u.username), role, u.active === false ? 0 : 1, overrides, commission, u.id,
           );
@@ -290,6 +307,7 @@ function createServices(db) {
           return u.id;
         }
         validatePin(u.pin);
+        checkLimit('users', activeUsers);
         const id = Number(
           db.prepare('INSERT INTO users (name, username, pin_hash, role, permissions, commission_rate) VALUES (?, ?, ?, ?, ?, ?)').run(
             str(u.name), str(u.username), hashPin(u.pin), role, overrides, commission,
@@ -481,7 +499,7 @@ function createServices(db) {
     byBarcode(barcode) {
       requireUser();
       const code = str(barcode);
-      const weighed = scaleBarcode(code);
+      const weighed = has('scale') ? scaleBarcode(code) : null;
       if (weighed) return weighed;
       const direct = db.prepare(`${PRODUCT_SELECT} WHERE p.barcode = ? AND p.active = 1`).get(code);
       if (direct) return withUnitsAndPrices([plain(direct)])[0];
@@ -791,6 +809,7 @@ function createServices(db) {
 
   /** Gives each line the single best promotion that applies to it (added to its discount). */
   function applyPromotions(items) {
+    if (!has('promotions')) return;
     const promos = activePromotions();
     if (!promos.length) return;
     for (const it of items) {
@@ -925,10 +944,13 @@ function createServices(db) {
     }
     applyPromotions(items);
     const orderType = ['sale', 'dine_in', 'takeaway', 'delivery'].includes(cart.order_type) ? cart.order_type : 'sale';
+    if (orderType === 'delivery') requireFeature('delivery');
+    if (orderType === 'dine_in' || items.some((i) => i.modifiers.length)) requireFeature('restaurant');
     // Delivery: the zone's fee (or a typed fee), added after tax and never discounted.
     const zone = orderType === 'delivery' && int(cart.zone_id) ? db.prepare('SELECT * FROM delivery_zones WHERE id = ? AND active = 1').get(int(cart.zone_id)) : null;
     const deliveryFee = orderType === 'delivery' ? (zone ? zone.fee : Math.max(0, int(cart.delivery_fee))) : 0;
     // A coupon code is an extra invoice discount (validated here, counted at checkout).
+    if (str(cart.coupon_code)) requireFeature('coupons');
     const coupon = str(cart.coupon_code) ? findCoupon(cart.coupon_code) : null;
     let couponDiscount = 0;
     if (coupon) {
@@ -1117,7 +1139,7 @@ function createServices(db) {
         if (cart.customer_id && !customer) throw new PosError('CUSTOMER_NOT_FOUND');
 
         // Loyalty points redeemed count as a payment worth points × point value.
-        const loyalty = priced.settings.loyalty_enabled && customer;
+        const loyalty = priced.settings.loyalty_enabled && has('promotions') && customer;
         const redeem = loyalty ? Math.max(0, Math.floor(num(cart.redeem_points))) : 0;
         if (num(cart.redeem_points) > 0 && !loyalty) throw new PosError('LOYALTY_UNAVAILABLE');
         if (redeem) {
@@ -1128,6 +1150,7 @@ function createServices(db) {
           payments.push({ method: 'points', amount: value });
         }
         // A gift card pays like any other method, out of its balance.
+        if (int(cart.gift_card?.amount) > 0) requireFeature('coupons');
         const gift = int(cart.gift_card?.amount) > 0 ? cardByCode(cart.gift_card.code) : null;
         if (gift) {
           if (int(cart.gift_card.amount) > gift.balance) throw new PosError('GIFT_CARD_BALANCE', String(gift.balance));
@@ -2290,9 +2313,11 @@ function createServices(db) {
       return transaction(db, () => {
         if (id) {
           // The main warehouse absorbs differences, so it always stays active.
+          if (active && !db.prepare('SELECT active FROM warehouses WHERE id = ?').get(id)?.active) checkLimit('warehouses', db.prepare('SELECT COUNT(*) AS n FROM warehouses WHERE active = 1').get().n);
           db.prepare('UPDATE warehouses SET name = ?, active = ? WHERE id = ?').run(str(name), id === 1 || active ? 1 : 0, id);
           return id;
         }
+        checkLimit('warehouses', db.prepare('SELECT COUNT(*) AS n FROM warehouses WHERE active = 1').get().n);
         syncMainWarehouse();
         const newId = Number(db.prepare('INSERT INTO warehouses (name) VALUES (?)').run(str(name)).lastInsertRowid);
         audit('warehouse_add', { entity: 'warehouse', entityId: newId, details: { name: str(name) } });
@@ -3455,10 +3480,27 @@ function createServices(db) {
     },
   };
 
-  return {
+  const api = {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
     auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
+    license: { get: () => toJSON(entitlements()), has, requireFeature },
   };
+  // Whole namespaces that belong to a licensed feature. Read-only methods other screens rely
+  // on stay open, so data made under a bigger license can still be seen.
+  const LOCKED = {
+    floor: ['restaurant'], tables: ['restaurant'], kitchenStations: ['restaurant'], kds: ['restaurant', ['ensureKey']], modifiers: ['restaurant', ['forProduct', 'list']],
+    delivery: ['delivery'], priceLists: ['trading', ['list']], quotes: ['trading'], rebates: ['rebates'],
+    installments: ['installments', ['get']], treasury: ['treasury', ['accounts']], warehouses: ['warehouses', ['list']],
+    purchaseOrders: ['purchase_orders'], employees: ['employees'], promotions: ['promotions'], coupons: ['coupons'], giftCards: ['coupons'],
+    importer: ['excel'], commissions: ['commissions'],
+  };
+  for (const [ns, [feature, open = []]] of Object.entries(LOCKED)) {
+    for (const [name, fn] of Object.entries(api[ns])) {
+      if (typeof fn !== 'function' || open.includes(name)) continue;
+      api[ns][name] = (...args) => { requireFeature(feature); return fn(...args); };
+    }
+  }
+  return api;
 }
 
 module.exports = { createServices, PosError, DEFAULT_SETTINGS, hashPin, verifyPin };
