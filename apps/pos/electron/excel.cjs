@@ -161,4 +161,109 @@ async function writeSheets(file, sheets, decimals = 2) {
   await wb.xlsx.writeFile(file);
 }
 
-module.exports = { COLUMNS, parseFile, writeTemplate, writeSheets, mapHeaders };
+
+/**
+ * A report as a formatted sheet: business name and title on top, the period, a coloured
+ * header row, number formats per column type, zebra rows, a bold totals row, frozen
+ * header, auto-filter and right-to-left layout for Arabic.
+ * `report` = services.reports.run() output; `labels` = translated texts from the renderer.
+ */
+async function writeReport(file, report, { labels, business = '', decimals = 2, currency = '', rtl = true }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'InnoForge POS';
+  wb.created = new Date();
+  const ws = wb.addWorksheet(String(labels.title || 'Report').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31), {
+    views: [{ rightToLeft: rtl, state: 'frozen', ySplit: 5 }],
+    pageSetup: { paperSize: 9, orientation: report.columns.length > 6 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } },
+    headerFooter: { oddFooter: '&LInnoForge POS&C&P / &N&R&D' },
+  });
+  const money = decimals ? `#,##0.${'0'.repeat(decimals)}` : '#,##0';
+  const FMT = { money, qty: '#,##0.###', int: '#,##0', pct: '0.0"%"', date: 'yyyy-mm-dd', datetime: 'yyyy-mm-dd hh:mm' };
+  const cols = report.columns;
+  const n = cols.length;
+  const BRAND = 'FF0A43C9';
+  const LIGHT = 'FFEEF4FF';
+
+  // Title block
+  ws.mergeCells(1, 1, 1, n);
+  ws.getCell(1, 1).value = business;
+  ws.getCell(1, 1).font = { bold: true, size: 15, color: { argb: BRAND } };
+  ws.mergeCells(2, 1, 2, n);
+  ws.getCell(2, 1).value = labels.title;
+  ws.getCell(2, 1).font = { bold: true, size: 13 };
+  ws.mergeCells(3, 1, 3, n);
+  ws.getCell(3, 1).value = labels.period || '';
+  ws.getCell(3, 1).font = { color: { argb: 'FF64748B' } };
+  for (const r of [1, 2, 3]) ws.getCell(r, 1).alignment = { horizontal: rtl ? 'right' : 'left' };
+
+  // Header
+  const header = ws.getRow(5);
+  cols.forEach((c, i) => {
+    const cell = header.getCell(i + 1);
+    cell.value = labels.columns[c.key] || c.key;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FF1E3A8A' } } };
+  });
+  header.height = 24;
+
+  const value = (c, v) => {
+    if (v == null || v === '') return null;
+    if (c.type === 'money') return Number(v) / 10 ** decimals;
+    if (['qty', 'int', 'pct'].includes(c.type)) return Number(v);
+    if (c.type === 'date') return new Date(`${String(v).slice(0, 10)}T00:00:00Z`);
+    if (c.type === 'datetime') return new Date(`${String(v).replace(' ', 'T')}Z`);
+    return labels.values?.[c.key]?.[v] ?? v;
+  };
+  report.rows.forEach((row, ri) => {
+    const r = ws.getRow(6 + ri);
+    cols.forEach((c, i) => {
+      const cell = r.getCell(i + 1);
+      cell.value = value(c, row[c.key]);
+      if (FMT[c.type]) cell.numFmt = FMT[c.type];
+      if (c.type === 'money' && Number(row[c.key]) < 0) cell.font = { color: { argb: 'FFB91C1C' } };
+      if (ri % 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      cell.border = { bottom: { style: 'hair', color: { argb: 'FFE5E7EB' } } };
+    });
+    if (row.kind === 'sum') r.font = { bold: true };
+  });
+
+  // Totals
+  const hasTotals = cols.some((c) => c.total);
+  if (hasTotals && report.rows.length) {
+    const r = ws.getRow(6 + report.rows.length);
+    cols.forEach((c, i) => {
+      const cell = r.getCell(i + 1);
+      if (i === 0) cell.value = labels.total;
+      else if (c.total) {
+        cell.value = c.type === 'money' ? report.totals[c.key] / 10 ** decimals : report.totals[c.key];
+        cell.numFmt = FMT[c.type] || FMT.int;
+      }
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LIGHT } };
+      cell.border = { top: { style: 'medium', color: { argb: BRAND } } };
+    });
+  }
+  // Summary lines (e.g. margins)
+  let line = 6 + report.rows.length + (hasTotals ? 2 : 1);
+  for (const sline of labels.summary || []) {
+    ws.getCell(line, 1).value = sline;
+    ws.getCell(line, 1).font = { bold: true };
+    line += 1;
+  }
+  if (currency) {
+    ws.getCell(line + 1, 1).value = labels.currencyNote;
+    ws.getCell(line + 1, 1).font = { italic: true, color: { argb: 'FF94A3B8' } };
+  }
+
+  // Widths from content
+  cols.forEach((c, i) => {
+    const longest = Math.max(String(labels.columns[c.key] || '').length, ...report.rows.slice(0, 500).map((row) => String(value(c, row[c.key]) instanceof Date ? '2026-01-01 00:00' : row[c.key] ?? '').length));
+    ws.getColumn(i + 1).width = Math.min(48, Math.max(10, longest + 3));
+  });
+  if (report.rows.length) ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5 + report.rows.length, column: n } };
+  await wb.xlsx.writeFile(file);
+}
+
+module.exports = { COLUMNS, parseFile, writeTemplate, writeSheets, writeReport, mapHeaders };

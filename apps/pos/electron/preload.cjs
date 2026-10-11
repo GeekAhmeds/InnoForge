@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('posBridge', {
   excelPick: (kind) => ipcRenderer.invoke('pos:excelPick', kind),
   excelExport: (job) => ipcRenderer.invoke('pos:excelExport', job),
   savePdf: (job) => ipcRenderer.invoke('pos:savePdf', job),
+  reportExcel: (job) => ipcRenderer.invoke('pos:reportExcel', job),
   kdsInfo: () => ipcRenderer.invoke('pos:kdsInfo'),
   openKds: (opts) => ipcRenderer.invoke('pos:openKds', opts),
   serialListOnly: () => ipcRenderer.invoke('pos:serialListOnly'),

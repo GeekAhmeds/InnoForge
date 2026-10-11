@@ -468,12 +468,32 @@ ipcMain.handle('pos:excelExport', async (_e, { kind, ...params } = {}) => {
   }
 });
 
+// One report from the Reports page as a formatted Excel file. The numbers are re-read
+// from the services (never trusted from the window); only the translated texts come from it.
+ipcMain.handle('pos:reportExcel', async (_e, { id, from, to, labels } = {}) => {
+  try {
+    const report = services.reports.run({ id, from, to });
+    const s = services.settings.get();
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: path.join(app.getPath('documents'), `${String(labels?.title || id).replace(/[\\/:*?"<>|]+/g, '-')} ${from || ''}${to && to !== from ? ` - ${to}` : ''}.xlsx`.replace(/\s+\.xlsx$/, '.xlsx')),
+      filters: xlsxFilter,
+    });
+    if (canceled || !filePath) return ok(null);
+    await excel.writeReport(filePath, report, { labels: labels || { title: id, columns: {} }, business: s.business_name, decimals: s.decimals ?? 2, currency: s.currency, rtl: s.language !== 'en' });
+    services.audit('export', { details: { kind: `report:${id}` } });
+    shell.showItemInFolder(filePath);
+    return ok(filePath);
+  } catch (err) {
+    return fail(err);
+  }
+});
+
 // Renders a document to PDF (A4) and lets the user save it, e.g. to attach on WhatsApp.
-ipcMain.handle('pos:savePdf', async (_e, { html, name = 'document' } = {}) => {
+ipcMain.handle('pos:savePdf', async (_e, { html, name = 'document', landscape = false } = {}) => {
   const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
   try {
     await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    const pdf = await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
+    const pdf = await win.webContents.printToPDF({ pageSize: 'A4', landscape: !!landscape, printBackground: true, margins: { marginType: 'none' } });
     const safe = String(name).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: path.join(app.getPath('documents'), `${safe}.pdf`),

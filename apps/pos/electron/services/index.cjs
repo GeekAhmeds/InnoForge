@@ -4,6 +4,7 @@ const { transaction } = require('../db.cjs');
 const { computeTotals } = require('./totals.cjs');
 const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = require('./permissions.cjs');
 const { FULL, toJSON } = require('../editions.cjs');
+const { buildCatalog } = require('./report-catalog.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -101,7 +102,7 @@ function createServices(db, { entitlements = () => FULL } = {}) {
   const session = { user: null };
 
   // What this copy's license allows (edition features, add-ons, limits; 0 = unlimited).
-  const has = (feature) => entitlements().features.has(feature);
+  const has = (feature) => !feature || entitlements().features.has(feature);
   function requireFeature(feature) {
     if (!has(feature)) throw new PosError('FEATURE_LOCKED', feature);
   }
@@ -2119,6 +2120,33 @@ function createServices(db, { entitlements = () => FULL } = {}) {
   };
 
   
+
+  // Report catalog (Reports page): one shape for every report, so one viewer / Excel / PDF.
+  let catalog = null;
+  const getCatalog = () => catalog || (catalog = buildCatalog({
+    db, can: (p) => can(p), has, CUSTOMER_BALANCE, SUPPLIER_BALANCE, aging,
+    installmentsDue: () => installments.due({ days: 36500 }),
+    commissions: (range) => commissions.report(range),
+  }));
+  const reportAllowed = (r) => has(r.feature) && (!r.perm || can(r.perm));
+  Object.assign(reports, {
+    catalog() {
+      requirePerm('reports');
+      return Object.entries(getCatalog()).filter(([, r]) => reportAllowed(r)).map(([id, r]) => ({ id, group: r.group, noRange: !!r.noRange }));
+    },
+    run({ id, from, to } = {}) {
+      requirePerm('reports');
+      const r = getCatalog()[id];
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!has(r.feature ?? null)) throw new PosError('FEATURE_LOCKED', r.feature);
+      if (r.perm && !can(r.perm)) throw new PosError('FORBIDDEN');
+      const [f, t] = dateRange(from, to);
+      const out = r.run({ f, t });
+      const totals = {};
+      for (const c of out.columns) if (c.total) totals[c.key] = out.rows.reduce((sum, row) => sum + (Number(row[c.key]) || 0), 0);
+      return { id, group: r.group, from: r.noRange ? null : f, to: r.noRange ? null : t, ...out, totals };
+    },
+  });
 
   // ---------- price lists ----------
   const priceLists = {

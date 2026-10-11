@@ -965,3 +965,37 @@ test('license editions: locked features refuse, limits stop new users / warehous
   s.users.save({ name: 'C2', username: 'c2', pin: '1111', role: 'cashier' });
   assert.equal(s.license.get().edition, 'basic');
 });
+
+test('reports catalog: every report runs, totals add up, cost columns follow view_cost', () => {
+  const { s } = setup({ tax_rate: 14, prices_include_tax: false });
+  const cat = s.categories.save({ name: 'Drinks' });
+  const a = s.products.save({ name: 'Cola', price: 1000, cost: 600, stock: 50, category_id: cat, min_stock: 60 });
+  const b = s.products.save({ name: 'Water', price: 500, cost: 200, stock: 40 });
+  const cust = s.customers.save({ name: 'Mona', credit_limit: 100000 });
+  const sup = s.suppliers.save({ name: 'Nile' });
+  s.shifts.open({ openingCash: 0 });
+  s.orders.checkout({ items: [{ product_id: a, qty: 3 }, { product_id: b, qty: 2 }], payments: [{ method: 'cash', amount: 100000 }] });
+  const o2 = s.orders.checkout({ items: [{ product_id: a, qty: 1 }], customer_id: cust, payments: [] });
+  s.orders.refund({ orderId: o2.id, items: [{ order_item_id: o2.items[0].id, qty: 1 }] });
+  s.purchases.create({ supplierId: sup, items: [{ product_id: b, qty: 10, unit_cost: 200 }] });
+  s.expenses.create({ category: 'Rent', amount: 5000, fromDrawer: true });
+  const list = s.reports.catalog();
+  assert.ok(list.length >= 25);
+  for (const { id } of list) {
+    const r = s.reports.run({ id });
+    assert.ok(Array.isArray(r.columns) && Array.isArray(r.rows), id);
+    for (const c of r.columns) if (c.total) assert.equal(r.totals[c.key], r.rows.reduce((x, row) => x + (Number(row[c.key]) || 0), 0), `${id}.${c.key}`);
+  }
+  const prod = s.reports.run({ id: 'sales_by_product' });
+  const cola = prod.rows.find((x) => x.name === 'Cola');
+  assert.equal(cola.qty, 3); // the returned one is not counted
+  assert.equal(cola.profit, 1200);
+  const pl = s.reports.run({ id: 'profit_loss' });
+  assert.equal(pl.rows.at(-1).amount, 1200 + 600 - 5000); // gross profit (cola 3 × 400 + water 2 × 300) − rent
+  assert.equal(s.reports.run({ id: 'low_stock' }).rows[0].name, 'Cola');
+  // A cashier with reports but no view_cost sees no cost columns and no P&L.
+  s.users.save({ name: 'R', username: 'r', pin: '1111', role: 'cashier', overrides: { reports: true } });
+  s.auth.logout(); s.auth.login({ username: 'r', pin: '1111' });
+  assert.ok(!s.reports.run({ id: 'sales_by_product' }).columns.some((c) => c.key === 'profit'));
+  assert.ok(!s.reports.catalog().some((r) => r.id === 'profit_loss'));
+});

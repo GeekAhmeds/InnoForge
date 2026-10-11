@@ -26,6 +26,7 @@ export const excelTemplate = (kind) => unwrap(bridge.excelTemplate(kind));
 export const excelPick = (kind) => unwrap(bridge.excelPick(kind));
 export const excelExport = (job) => unwrap(bridge.excelExport(job));
 export const savePdf = (job) => unwrap(bridge.savePdf(job));
+export const reportExcel = (job) => unwrap(bridge.reportExcel(job));
 export const kdsInfo = () => unwrap(bridge.kdsInfo());
 export const openKds = (opts) => unwrap(bridge.openKds(opts));
 export const serialListOnly = () => unwrap(bridge.serialListOnly());

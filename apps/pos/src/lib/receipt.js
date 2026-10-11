@@ -375,3 +375,44 @@ export function giftCardHtml(card, settings, t, lang) {
   </table>
   <hr><div class="c muted">${t('gift.slipNote')}</div>`);
 }
+
+/**
+ * Any report from the Reports page as an A4 document (landscape when wide): letterhead
+ * with logo, title and period, the table with a totals row, summary lines and a footer.
+ * `fmt(column, value, row)` formats a cell exactly like the screen does.
+ */
+export function reportHtml(report, labels, settings, lang, fmt) {
+  const wide = report.columns.length > 6;
+  const numeric = (c) => ['money', 'qty', 'int', 'pct'].includes(c.type);
+  const head = report.columns.map((c) => `<th class="${numeric(c) ? 'n' : ''}">${esc(labels.columns[c.key])}</th>`).join('');
+  const body = report.rows.map((row) => `<tr class="${row.kind === 'sum' ? 'sum' : ''}">${report.columns.map((c) => {
+    const v = fmt(c, row[c.key], row);
+    return `<td class="${numeric(c) ? 'n' : ''}${c.type === 'money' && row[c.key] < 0 ? ' neg' : ''}">${numeric(c) || c.type?.startsWith('date') ? ltr(v) : esc(v)}</td>`;
+  }).join('')}</tr>`).join('');
+  const hasTotals = report.columns.some((c) => c.total) && report.rows.length;
+  const foot = hasTotals ? `<tfoot><tr>${report.columns.map((c, i) => `<td class="${c.total ? 'n' : ''}">${i === 0 ? esc(labels.total) : c.total ? ltr(fmt(c, report.totals[c.key], null)) : ''}</td>`).join('')}</tr></tfoot>` : '';
+  const now = new Date();
+  return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4 ${wide ? 'landscape' : 'portrait'}; margin: 12mm 10mm; }
+    * { box-sizing: border-box; } body { margin: 0; font: 11.5px/1.45 Tahoma, "Segoe UI", Arial, sans-serif; color: #0f172a; }
+    .head { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0a43c9; padding-bottom: 8px; margin-bottom: 10px; gap: 12px; }
+    .head img { max-height: 54px; max-width: 160px; } .biz { font-size: 17px; font-weight: bold; color: #0a43c9; }
+    .title { text-align: end; } .title h1 { margin: 0; font-size: 18px; } .muted { color: #64748b; }
+    table { width: 100%; border-collapse: collapse; } thead { display: table-header-group; } tr { page-break-inside: avoid; }
+    th { background: #0a43c9; color: #fff; padding: 6px 7px; text-align: start; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    td { padding: 5px 7px; border-bottom: 1px solid #e5e7eb; text-align: start; } tbody tr:nth-child(even) td { background: #f8fafc; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .n { text-align: end; white-space: nowrap; } .neg { color: #b91c1c; } tr.sum td { font-weight: bold; border-top: 1px solid #94a3b8; }
+    tfoot td { font-weight: bold; background: #eef4ff; border-top: 2px solid #0a43c9; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .summary { margin-top: 10px; font-weight: bold; } .foot { margin-top: 14px; display: flex; justify-content: space-between; color: #94a3b8; font-size: 10px; }
+  </style></head><body>
+  <div class="head">
+    <div>${settings.business_logo ? `<img src="${esc(settings.business_logo)}" alt="">` : ''}<div class="biz">${esc(settings.business_name)}</div>
+      <div class="muted">${esc(settings.address || '')} ${settings.phone ? ltr(settings.phone) : ''}</div></div>
+    <div class="title"><h1>${esc(labels.title)}</h1><div class="muted">${esc(labels.period)}</div></div>
+  </div>
+  <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table>
+  ${report.rows.length ? '' : '<p class="muted">—</p>'}
+  ${(labels.summary || []).map((x) => `<div class="summary">${esc(x)}</div>`).join('')}
+  <div class="foot"><span>${esc(labels.currencyNote || '')}</span><span>InnoForge POS — ${ltr(now.toLocaleString('en-GB'))}</span></div>
+  </body></html>`;
+}
