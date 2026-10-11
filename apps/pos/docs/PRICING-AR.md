@@ -84,19 +84,22 @@
 
 ### إزاي بيشتغل (فنياً)
 
-1. **الوكيل** بيعمل مفتاح خاص بيه، وبيبعتلك الجزء العام بس (`reseller.pub.txt`):
-   ```bash
-   node tools/license.cjs reseller-keygen --key ~/.innoforge/reseller.pem
-   ```
-2. **إنت** بتعمله **تصريح** موقّع بمفتاحك. التصريح بيحدد: الباقات المسموح يبيعها، والإضافات، وأقصى مدة لكل مفتاح، وأقصى عدد مستخدمين، ومدة صلاحية التصريح نفسه:
-   ```bash
-   node tools/license.cjs reseller-cert --pub reseller.pub.txt --id R001 --name "شركة الأمل" --phone 010… \
-        --editions basic,market,restaurant --addons warehouses,employees --max-days 365 --max-users 10 --valid-days 90
-   ```
-3. **الوكيل** بيطلّع المفاتيح لعملائه، يا إما من مولّد المفاتيح (`license-generator.html` ← «أنا موزّع») بمفتاحه وملف التصريح، أو من سطر الأوامر:
-   ```bash
-   node tools/license.cjs issue --key ~/.innoforge/reseller.pem --cert reseller-R001.cert --machine … --edition market --days 365
-   ```
+كل ده من صفحات HTML بتتفتح في Chrome أو Edge من غير نت، ومن غير سطر أوامر:
+
+1. **الوكيل** بيفتح صفحته `tools/reseller-portal.html` (ابعتهاله) ويضغط «اعمل مفاتيحي». بتنزل عنده:
+   - `reseller-private.pem`: يحتفظ بيه ومايبعتوش لحد.
+   - `reseller-public.txt`: يبعتهولك.
+2. **إنت** من صفحتك `tools/license-generator.html` ← قسم «تصاريح الموزّعين»:
+   - حمّل مفتاحك الخاص و`reseller-public.txt` بتاع الوكيل.
+   - حدد كوده واسمه، والباقات والإضافات المسموحة، وأقصى مدة لكل مفتاح، وأقصى عدد مستخدمين ومخازن وأجهزة، ومدة صلاحية التصريح نفسه.
+   - هينزل ملف `reseller-R001.cert`، ابعته للوكيل.
+3. **الوكيل** بيحمّل مفتاحه وملف التصريح في صفحته، ويطلّع مفاتيح لعملائه:
+   - الصفحة بتعرضله الباقات والإضافات والمدد المسموحة بس.
+   - بترفض أي حاجة برا التصريح.
+   - بتسجّل كل المفاتيح اللي طلّعها.
+
+(نفس الحاجات موجودة في سطر الأوامر للي يحب: `reseller-keygen` و `reseller-cert` و `issue --cert` في `tools/license.cjs`.)
+
 4. **البرنامج عند العميل** بيتأكد من التوقيعين، ومش هيقبل المفتاح لو:
    - الباقة أو الإضافة برا التصريح.
    - المدة أطول من المسموح.

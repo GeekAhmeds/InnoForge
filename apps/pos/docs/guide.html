@@ -459,7 +459,7 @@ npm run license -- issue --key path/to/pos-license-private.pem --machine 4091-4F
         <ul>
           <li><b>من مولّد المفاتيح:</b> اختار الباقة، وعلّم الإضافات، واكتب الحدود لو عايز تغيّر الافتراضي. والمفاتيح القديمة اللي من غير باقة بتشتغل «شامل».</li>
           <li><b>الترقية:</b> مفتاح جديد لنفس رقم الجهاز. الميزة بتتفتح على طول من غير تسطيب، والبيانات زي ما هي.</li>
-          <li><b>الوكلاء والموزعين:</b> الوكيل بيعمل مفتاح خاص بيه وبيبعتلك الجزء العام بس. وإنت بتعمله <b>تصريح</b> بالباقات والمدة المسموح بيها، وصلاحية التصريح نفسه (مثلاً 90 يوم). الوكيل بيطلّع المفاتيح لعملائه من نفس المولّد («أنا موزّع»)، والبرنامج بيرفض أي حاجة برا التصريح، وبيعرض اسم الوكيل اللي باع.</li>
+          <li><b>الوكلاء والموزعين:</b> الوكيل بيعمل مفتاح خاص بيه وبيبعتلك الجزء العام بس. وإنت بتعمله <b>تصريح</b> بالباقات والمدة المسموح بيها، وصلاحية التصريح نفسه (مثلاً 90 يوم). الوكيل ليه صفحته <code>reseller-portal.html</code> بيعمل منها مفاتيحه ومفاتيح عملائه، وإنت بتعمله التصريح من قسم «تصاريح الموزّعين» في المولّد، والبرنامج بيرفض أي حاجة برا التصريح، وبيعرض اسم الوكيل اللي باع.</li>
         </ul>
         <div class="note"><b>الأسعار المقترحة ومستويات الوكلاء</b> موجودة في <code>docs/PRICING-AR.md</code>.</div>
       </div>
@@ -469,7 +469,7 @@ npm run license -- issue --key path/to/pos-license-private.pem --machine 4091-4F
         <ul>
           <li><b>Generator:</b> pick the edition, tick add-ons, and set limits if you want other than the default. Old keys without an edition stay full.</li>
           <li><b>Upgrades:</b> a new key for the same Machine ID; features unlock at once, no reinstall, data unchanged.</li>
-          <li><b>Resellers:</b> they make their own key and send you only the public part; you sign a <b>permit</b> with the editions and durations they may sell and the permit's own validity (e.g. 90 days). They issue keys from the same generator ("I am a reseller"); the app rejects anything outside the permit and shows who sold it.</li>
+          <li><b>Resellers:</b> they make their own key and send you only the public part; you sign a <b>permit</b> with the editions and durations they may sell and the permit's own validity (e.g. 90 days). Resellers have their own page, <code>reseller-portal.html</code>, for their key pair and their customers' keys; you issue the permit from the generator's "Reseller permits" section; the app rejects anything outside the permit and shows who sold it.</li>
         </ul>
         <div class="note"><b>Suggested prices and partner tiers</b> are in <code>docs/PRICING-AR.md</code>.</div>
       </div>

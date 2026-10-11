@@ -67,7 +67,7 @@ src/
   i18n/ar.js, en.js   flat key → text dictionaries; `{name}` placeholders
   help/topics.js      in-app user guide (Arabic + English), shown by pages/Help.jsx (F1)
 test/                 node:test suites (services, license, updater, excel, scale parser, i18n)
-tools/                vendor tools: license.cjs, license-generator.html, sign-update.cjs, videos/ (record tutorials + promo)
+tools/                vendor tools: license.cjs, license-generator.html (keys + reseller permits), reseller-portal.html (resellers' page), sign-update.cjs, videos/ (record tutorials + promo)
 scripts/package.cjs   obfuscate → stage/ → electron-builder → release/update (signed)
 docs/                 guide.html + developer docs
 ```

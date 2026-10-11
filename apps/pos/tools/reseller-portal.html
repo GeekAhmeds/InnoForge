@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InnoForge POS — بوابة الموزّعين</title>
+<!-- For InnoForge POS resellers. Works offline: open this file in Chrome/Edge. The private
+     key is created and read inside this page only and never sent anywhere. Keys issued
+     here carry the reseller's permit and only work within it. -->
+<style>
+  :root { --brand:#4f46e5; --line:#e5e7eb; --muted:#6b7280; --bg:#f4f5f7; --danger:#dc2626; --good:#059669; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin:0; background:var(--bg); font:15px/1.5 "Segoe UI", Tahoma, sans-serif; color:#111827; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--muted); }
+  input, select, textarea { font:inherit; color:#111827; padding:9px 11px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; }
+  textarea { font-family: Consolas, monospace; font-size: 13px; }
+  button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ok { color: var(--good); } .err { color: var(--danger); }
+  .ltr { direction:ltr; text-align:left; }
+  .key-out { background:#eef2ff; border-radius:8px; padding:12px; word-break:break-all; font-family:Consolas, monospace; font-size:13px; direction:ltr; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:start; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; background:#f3f4f6; font-size:12px; }
+  .tag.exp { background:#fef2f2; color:var(--danger); }
+  .feat-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:6px; }
+  .feat-grid label { flex-direction:row; align-items:flex-start; gap:8px; color:#111827; font-size:13px; border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  .feat-grid label.inc { background:#f3f4f6; color:var(--muted); }
+  .feat-grid input { width:auto; margin-top:3px; }
+</style>
+<style>
+  .steps { counter-reset: s; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:99px; background:#eef2ff; color:var(--brand); font-size:12px; margin:2px; }
+  .permit { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px; }
+  .permit.bad { background:#fef2f2; border-color:#fecaca; }
+  .warnbox { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:10px 12px; font-size:13px; }
+  .locked { opacity:.55; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🤝 InnoForge POS — بوابة الموزّعين</h1>
+  <p class="muted">الصفحة دي للموزّع أو الوكيل المعتمد من Inno Source: بتعمل منها مفاتيح التفعيل لعملائك، في حدود التصريح اللي Inno Source إدّاهولك (الباقات، الإضافات، أقصى مدة، والحدود). بتشتغل من غير نت، ومفيش حاجة بتخرج من جهازك.</p>
+
+  <section class="card">
+    <h2>أول مرة بس: اعمل مفاتيحك</h2>
+    <p class="muted">بتعمل مرة واحدة: <b>مفتاح خاص</b> بيفضل معاك (احفظه في مكان آمن ومعاه نسخة احتياطية — لو ضاع هتحتاج تصريح جديد)، و<b>مفتاح عام</b> تبعته لـ Inno Source عشان يعملولك ملف التصريح.</p>
+    <div class="row">
+      <button class="primary" id="genBtn" type="button">اعمل مفاتيحي</button>
+      <span id="genMsg" class="muted"></span>
+    </div>
+    <div id="genOut" hidden style="margin-top:10px">
+      <p class="ok">✓ اتعملوا ونزلوا على جهازك:</p>
+      <ul>
+        <li><code>reseller-private.pem</code> — <b>سرّي</b>: متبعتهوش لحد خالص.</li>
+        <li><code>reseller-public.txt</code> — ابعته لـ Inno Source (واتساب أو إيميل). ده آمن.</li>
+      </ul>
+      <div class="key-out" id="pubOut"></div>
+      <div class="row" style="margin-top:8px"><button id="copyPub" type="button">نسخ المفتاح العام</button><button id="dlPub" type="button">تنزيل reseller-public.txt تاني</button></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>1) حمّل مفتاحك الخاص وملف التصريح</h2>
+    <div class="grid">
+      <label>مفتاحك الخاص — ملف <code>reseller-private.pem</code><input type="file" id="keyFile" accept=".pem,.txt"></label>
+      <label>ملف التصريح من Inno Source — <code>reseller-R….cert</code><input type="file" id="certFile" accept=".cert,.txt"></label>
+    </div>
+    <div id="permit" class="permit" hidden style="margin-top:12px"></div>
+  </section>
+
+  <section class="card" id="issueCard">
+    <h2>2) مفتاح تفعيل لعميل</h2>
+    <form id="form" class="grid">
+      <label>اسم العميل / النشاط<input id="customer" required></label>
+      <label>تليفون العميل (للسجل بس)<input id="phone"></label>
+      <label>رقم الجهاز (من شاشة التفعيل عند العميل)<input id="machine" class="ltr" required placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"></label>
+      <label>المدة<select id="duration"></select></label>
+      <label id="customWrap" hidden>عدد الأيام<input id="customDays" type="number" min="1" value="60"></label>
+      <label>الباقة<select id="edition"></select></label>
+      <label id="w_users">عدد المستخدمين<input id="lim_users" type="number" min="0"></label>
+      <label id="w_warehouses">عدد المخازن<input id="lim_warehouses" type="number" min="0"></label>
+      <label id="w_devices">عدد الأجهزة على نفس البيانات<input id="lim_devices" type="number" min="0"></label>
+      <label>ملاحظات (للسجل بس)<input id="notes"></label>
+      <div style="grid-column:1/-1">
+        <div class="muted" style="font-size:13px;margin-bottom:6px">المميزات (✓ رمادي = جوه الباقة، علّم الإضافات اللي العميل دافع تمنها — 🔒 = مش في تصريحك)</div>
+        <div id="features" class="feat-grid"></div>
+      </div>
+      <div class="row" style="grid-column:1/-1">
+        <button class="primary" type="submit">إنشاء مفتاح التفعيل</button>
+        <span id="formMsg"></span>
+      </div>
+    </form>
+    <div id="result" hidden>
+      <p><b>المفتاح:</b> ابعته للعميل يلصقه في شاشة التفعيل.</p>
+      <div class="key-out" id="keyOut"></div>
+      <div class="row" style="margin-top:8px"><button id="copyBtn" type="button">نسخ المفتاح</button><span id="expiresOut" class="muted"></span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">سجل المفاتيح اللي عملتها</h2>
+      <div class="row"><button id="exportBtn" type="button">تصدير CSV</button><button id="clearBtn" type="button">مسح السجل</button></div></div>
+    <p class="muted">محفوظ في المتصفح ده بس. صدّره من وقت للتاني.</p>
+    <table><thead><tr><th>التاريخ</th><th>العميل</th><th>رقم الجهاز</th><th>الباقة</th><th>ينتهي</th><th></th></tr></thead><tbody id="log"></tbody></table>
+  </section>
+
+  <p class="muted" style="text-align:center">InnoForge POS — Inno Source · innovationsrc.com · 01011600023 / 01117330111</p>
+</main>
+<script>
+(() => {
+  const EDITIONS_DATA = {"features":{"restaurant":{"ar":"المطعم: الصالة والطاولات والمطبخ وشاشة المطبخ والأحجام والإضافات والريسيبي","en":"Restaurant: floor & tables, kitchen & kitchen screen, sizes/extras, recipes"},"delivery":{"ar":"الدليفري: المناطق والطيارين والتسوية","en":"Delivery: zones, drivers, settlement"},"trading":{"ar":"فاتورة البيع التجارية وقوائم الأسعار وعروض الأسعار","en":"Trading invoice screen, price lists, quotations"},"rebates":{"ar":"اتفاقيات وبونص الموردين","en":"Supplier rebate agreements"},"installments":{"ar":"البيع بالتقسيط","en":"Installment sales"},"treasury":{"ar":"الخزنة والبنوك والشيكات الصادرة","en":"Treasury, bank accounts, cheques issued"},"warehouses":{"ar":"أكتر من مخزن والتحويل بينهم","en":"Several warehouses and transfers"},"purchase_orders":{"ar":"أوامر الشراء من النواقص","en":"Purchase orders from low stock"},"employees":{"ar":"الموظفين: الحضور والسلف والمرتبات","en":"Employees: attendance, advances, payroll"},"promotions":{"ar":"العروض التلقائية ونقاط الولاء","en":"Automatic promotions and loyalty points"},"coupons":{"ar":"الكوبونات وكروت الهدايا","en":"Coupons and gift cards"},"scale":{"ar":"الميزان الإلكتروني","en":"Electronic scales"},"labels":{"ar":"طباعة ملصقات الباركود","en":"Barcode labels"},"batches":{"ar":"الصلاحية والتشغيلات والسيريال","en":"Expiry batches and serial numbers"},"customer_display":{"ar":"شاشة العميل","en":"Customer display"},"lan":{"ar":"تابلت على الشبكة الداخلية (شاشة المطبخ/العميل)","en":"Tablets on the local network (kitchen/customer screens)"},"excel":{"ar":"استيراد الأصناف والعملاء والموردين من إكسيل","en":"Import products, customers and suppliers from Excel"},"commissions":{"ar":"عمولات الكاشير والمندوبين","en":"Cashier and sales-rep commissions"},"eta":{"ar":"الفاتورة والإيصال الإلكتروني (مصلحة الضرائب)","en":"Egyptian e-invoice and e-receipt (ETA)"}},"limits":{"users":{"ar":"عدد المستخدمين","en":"Users"},"warehouses":{"ar":"عدد المخازن","en":"Warehouses"},"devices":{"ar":"عدد الأجهزة على نفس البيانات","en":"Computers on the same data"}},"editions":{"basic":{"ar":"أساسي","en":"Basic","features":[],"limits":{"users":2,"warehouses":1,"devices":1}},"market":{"ar":"سوبر ماركت","en":"Supermarket","features":["scale","labels","batches","promotions","coupons","customer_display","purchase_orders","excel"],"limits":{"users":5,"warehouses":1,"devices":3}},"restaurant":{"ar":"مطاعم","en":"Restaurant","features":["restaurant","delivery","customer_display","lan","promotions","coupons","excel"],"limits":{"users":10,"warehouses":1,"devices":5}},"trading":{"ar":"تجاري","en":"Trading","features":["trading","rebates","installments","treasury","purchase_orders","batches","commissions","labels","excel","eta"],"limits":{"users":10,"warehouses":1,"devices":5}},"full":{"ar":"شامل","en":"Full","features":"*","limits":{"users":0,"warehouses":0,"devices":0}}}};
+  // end editions — must equal apps/pos/electron/editions.json (a test checks it)
+  const $ = (id) => document.getElementById(id);
+  const FEATURES = Object.keys(EDITIONS_DATA.features);
+  const LIMITS = Object.keys(EDITIONS_DATA.limits);
+  const editionFeatures = (ed) => { const f = EDITIONS_DATA.editions[ed].features; return f === '*' ? FEATURES : f; };
+  const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  const pemToDer = (pem) => unb64(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, ''));
+  const normalizeId = (id) => String(id || '').toUpperCase().replace(/[^0-9A-F]/g, '');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB') : 'مدى الحياة');
+  const download = (name, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = name; a.click(); };
+  const LOG_KEY = 'innoforge-pos-reseller-licenses';
+  const loadLog = () => { try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch { return []; } };
+  const saveLog = (log) => { try { localStorage.setItem(LOG_KEY, JSON.stringify(log)); } catch {} };
+  let signingKey = null;
+  let myPubRaw = null; // public half of the loaded private key (to match the permit)
+  let cert = null;
+
+  // ---------- once: the reseller's key pair ----------
+  $('genBtn').addEventListener('click', async () => {
+    try {
+      const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+      const pkcs8 = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+      const spki = await crypto.subtle.exportKey('spki', pair.publicKey);
+      const pem = `-----BEGIN PRIVATE KEY-----\n${b64(pkcs8).match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----\n`;
+      download('reseller-private.pem', pem);
+      const pub = b64(spki);
+      // Browsers may drop a second download fired at the same moment.
+      setTimeout(() => download('reseller-public.txt', `${pub}\n`), 600);
+      $('pubOut').textContent = pub;
+      $('genOut').hidden = false;
+      $('genMsg').textContent = '';
+    } catch {
+      $('genMsg').textContent = 'المتصفح ده مش بيدعم المفاتيح دي — استخدم Chrome أو Edge حديث';
+      $('genMsg').className = 'err';
+    }
+  });
+  $('copyPub').addEventListener('click', () => navigator.clipboard.writeText($('pubOut').textContent));
+  $('dlPub').addEventListener('click', () => download('reseller-public.txt', `${$('pubOut').textContent}\n`));
+
+  // ---------- load key + permit ----------
+  $('keyFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const der = pemToDer(await file.text());
+      signingKey = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, false, ['sign']);
+      const jwk = await crypto.subtle.exportKey('jwk', await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, true, ['sign']));
+      myPubRaw = jwk.x;
+    } catch {
+      signingKey = null; myPubRaw = null;
+      alert('الملف ده مش مفتاح خاص صالح (أو المتصفح قديم — استخدم Chrome أو Edge حديث)');
+    }
+    showPermit();
+  });
+  $('certFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = (await file.text()).trim();
+      const payload = JSON.parse(new TextDecoder().decode(unb64(text.split('.')[0])));
+      if (payload.type !== 'reseller' || text.split('.').length !== 2) throw new Error('not a permit');
+      cert = { text, payload };
+    } catch {
+      cert = null;
+      alert('الملف ده مش تصريح موزّع صالح');
+    }
+    showPermit();
+  });
+
+  // The permit's public key (SPKI DER, base64) ends with the raw 32-byte Ed25519 key.
+  const permitRaw = () => b64url(unb64(cert.payload.pub).slice(-32));
+  const permitProblem = () => {
+    if (!cert) return 'حمّل ملف التصريح';
+    if (!signingKey) return 'حمّل مفتاحك الخاص';
+    if (myPubRaw && permitRaw() !== myPubRaw) return 'المفتاح الخاص ده مش بتاع التصريح ده — حمّل المفتاح اللي بعت نصّه العام لـ Inno Source';
+    if (cert.payload.expires && Date.now() > Date.parse(cert.payload.expires)) return `التصريح انتهى في ${fmtDate(cert.payload.expires)} — كلّم Inno Source لتجديده`;
+    return '';
+  };
+
+  function showPermit() {
+    const box = $('permit');
+    if (!cert) { box.hidden = true; renderForm(); return; }
+    const p = cert.payload;
+    const eds = p.editions === '*' ? ['كل الباقات'] : p.editions.map((k) => EDITIONS_DATA.editions[k]?.ar || k);
+    const ads = p.addons === '*' ? ['كل الإضافات'] : (p.addons || []).length ? p.addons.map((k) => EDITIONS_DATA.features[k]?.ar.split(':')[0] || k) : ['من غير إضافات'];
+    const caps = LIMITS.filter((k) => p.max_limits?.[k]).map((k) => `${EDITIONS_DATA.limits[k].ar}: ${p.max_limits[k]} كحد أقصى`);
+    const problem = permitProblem();
+    box.className = `permit ${problem ? 'bad' : ''}`;
+    box.hidden = false;
+    box.innerHTML = `<b>${esc(p.name)}</b> <span class="muted">(${esc(p.id)})</span> — التصريح ساري لحد <b>${fmtDate(p.expires)}</b>
+      <div style="margin-top:6px">الباقات: ${eds.map((x) => `<span class="badge">${esc(x)}</span>`).join('')}</div>
+      <div>الإضافات: ${ads.map((x) => `<span class="badge">${esc(x)}</span>`).join('')}</div>
+      <div>أقصى مدة للمفتاح: <b>${p.max_days ? `${p.max_days} يوم` : 'من غير حد (ومسموح مدى الحياة)'}</b>${caps.length ? ` — ${caps.map(esc).join('، ')}` : ''}</div>
+      ${problem ? `<p class="err" style="margin:8px 0 0">${esc(problem)}</p>` : '<p class="ok" style="margin:8px 0 0">✓ جاهز — تقدر تعمل مفاتيح</p>'}`;
+    renderForm();
+  }
+
+  // ---------- the license form, limited to the permit ----------
+  function renderForm() {
+    const p = cert?.payload;
+    const editions = p && p.editions !== '*' ? p.editions : Object.keys(EDITIONS_DATA.editions);
+    const current = $('edition').value;
+    $('edition').innerHTML = editions.map((k) => `<option value="${k}">${EDITIONS_DATA.editions[k].ar} — ${EDITIONS_DATA.editions[k].en}</option>`).join('');
+    if (editions.includes(current)) $('edition').value = current;
+    const maxDays = p?.max_days || 0;
+    const opts = [[14, 'تجربة — 14 يوم'], [30, 'شهر'], [90, '3 شهور'], [180, '6 شهور'], [365, 'سنة'], [730, 'سنتين'], [0, 'مدى الحياة']]
+      .filter(([d]) => !maxDays || (d && d <= maxDays));
+    const dur = $('duration').value;
+    $('duration').innerHTML = opts.map(([d, l]) => `<option value="${d}">${l}</option>`).join('') + '<option value="custom">عدد أيام مخصص…</option>';
+    $('duration').value = opts.some(([d]) => String(d) === dur) ? dur : String(opts.find(([d]) => d === 365)?.[0] ?? opts[opts.length - 1]?.[0] ?? 'custom');
+    $('customWrap').hidden = $('duration').value !== 'custom';
+    if (maxDays) $('customDays').max = maxDays;
+    renderFeatures();
+    $('issueCard').classList.toggle('locked', !!permitProblem());
+  }
+  function renderFeatures() {
+    const p = cert?.payload;
+    const ed = EDITIONS_DATA.editions[$('edition').value];
+    const inc = new Set(editionFeatures($('edition').value));
+    const okAddon = (f) => p && (p.addons === '*' || (p.addons || []).includes(f));
+    const checked = new Set([...$('features').querySelectorAll('input:checked:not(:disabled)')].map((x) => x.value));
+    $('features').innerHTML = FEATURES.map((f) => `<label class="${inc.has(f) ? 'inc' : ''}"><input type="checkbox" value="${f}" ${inc.has(f) ? 'checked disabled' : okAddon(f) ? (checked.has(f) ? 'checked' : '') : 'disabled'}>${inc.has(f) || okAddon(f) ? '' : '🔒 '}${EDITIONS_DATA.features[f].ar}</label>`).join('');
+    for (const k of LIMITS) {
+      const cap = p?.max_limits?.[k] || 0;
+      const input = $(`lim_${k}`);
+      input.placeholder = `${ed.limits[k] || '∞'} (حسب الباقة)`;
+      input.min = cap ? 1 : 0;
+      if (cap) input.max = cap; else input.removeAttribute('max');
+      $(`w_${k}`).firstChild.textContent = `${EDITIONS_DATA.limits[k].ar}${cap ? ` (أقصى ${cap})` : ' (0 = بدون حد)'}`;
+    }
+  }
+  $('edition').addEventListener('change', renderFeatures);
+  $('duration').addEventListener('change', () => { $('customWrap').hidden = $('duration').value !== 'custom'; });
+
+  // Same rule as the app (electron/editions.cjs → entitlements) to check the permit's caps.
+  function effectiveLimits(edition, addons, limits) {
+    const ed = EDITIONS_DATA.editions[edition];
+    const out = {};
+    for (const k of LIMITS) out[k] = Number.isInteger(limits[k]) && limits[k] >= 0 ? limits[k] : ed.limits[k] ?? 0;
+    const base = editionFeatures(edition);
+    if ((base.includes('warehouses') || addons.includes('warehouses')) && out.warehouses === 1 && limits.warehouses == null) out.warehouses = 3;
+    return out;
+  }
+
+  const fail = (msg) => { $('formMsg').textContent = msg; $('formMsg').className = 'err'; };
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('formMsg').textContent = '';
+    const problem = permitProblem();
+    if (problem) return fail(problem);
+    const p = cert.payload;
+    const id = normalizeId($('machine').value);
+    if (id.length !== 20) return fail('رقم الجهاز لازم يكون 20 حرف/رقم زي 7F3A-91C2-04BE-D5E8-2A6F');
+    const days = $('duration').value === 'custom' ? Number($('customDays').value) : Number($('duration').value);
+    if (p.max_days && (!days || days > p.max_days)) return fail(`تصريحك بيسمح بمدة أقصاها ${p.max_days} يوم`);
+    const edition = $('edition').value;
+    const inc = new Set(editionFeatures(edition));
+    const addons = [...$('features').querySelectorAll('input:checked:not(:disabled)')].map((x) => x.value).filter((f) => !inc.has(f));
+    const limits = {};
+    for (const k of LIMITS) { const v = $(`lim_${k}`).value; if (v !== '') limits[k] = Number(v); }
+    const eff = effectiveLimits(edition, addons, limits);
+    for (const k of LIMITS) {
+      const cap = p.max_limits?.[k];
+      if (cap && (eff[k] === 0 || eff[k] > cap)) return fail(`${EDITIONS_DATA.limits[k].ar}: تصريحك بيسمح بـ ${cap} كحد أقصى (الباقة دي ${eff[k] || 'بدون حد'} — اكتب رقم ${cap} أو أقل)`);
+    }
+    const now = new Date();
+    // Same field order and encoding as tools/license.cjs and the vendor generator.
+    const payload = {
+      product: 'innoforge-pos',
+      machine: id.match(/.{4}/g).join('-'),
+      customer: $('customer').value.trim(),
+      issued: now.toISOString(),
+      expires: days ? new Date(now.getTime() + days * 86400000).toISOString() : null,
+      edition,
+      ...(addons.length ? { addons } : {}),
+      ...(Object.keys(limits).length ? { limits } : {}),
+      reseller: p.id,
+    };
+    const body = new TextEncoder().encode(JSON.stringify(payload));
+    const sig = await crypto.subtle.sign({ name: 'Ed25519' }, signingKey, body);
+    const key = `${b64url(body)}.${b64url(sig)}.${cert.text}`;
+    $('keyOut').textContent = key;
+    $('expiresOut').textContent = `ينتهي: ${fmtDate(payload.expires)}`;
+    $('result').hidden = false;
+    const log = loadLog();
+    log.unshift({ ...payload, phone: $('phone').value.trim(), notes: $('notes').value.trim(), days, key });
+    saveLog(log);
+    renderLog();
+  });
+  $('copyBtn').addEventListener('click', async () => {
+    await navigator.clipboard.writeText($('keyOut').textContent);
+    $('copyBtn').textContent = '✓ اتنسخ';
+    setTimeout(() => { $('copyBtn').textContent = 'نسخ المفتاح'; }, 1500);
+  });
+
+  function renderLog() {
+    const now = Date.now();
+    $('log').innerHTML = loadLog().map((l, i) => `<tr>
+      <td>${esc(fmtDate(l.issued))}</td>
+      <td><b>${esc(l.customer)}</b><br><span class="muted">${esc(l.phone)} ${esc(l.notes)}</span></td>
+      <td class="ltr"><code>${esc(l.machine)}</code></td>
+      <td>${esc(EDITIONS_DATA.editions[l.edition]?.ar || l.edition)}${l.addons?.length ? `<br><span class="muted">+ ${esc(l.addons.map((a) => EDITIONS_DATA.features[a]?.ar.split(':')[0] || a).join('، '))}</span>` : ''}</td>
+      <td><span class="tag ${l.expires && Date.parse(l.expires) < now ? 'exp' : ''}">${esc(fmtDate(l.expires))}</span></td>
+      <td><button type="button" data-copy="${i}">نسخ</button></td></tr>`).join('');
+  }
+  $('log').addEventListener('click', (e) => { const i = e.target.dataset.copy; if (i != null) navigator.clipboard.writeText(loadLog()[i].key); });
+  $('exportBtn').addEventListener('click', () => {
+    const rows = [['issued', 'customer', 'phone', 'machine', 'edition', 'addons', 'limits', 'days', 'expires', 'notes', 'key'],
+      ...loadLog().map((l) => [l.issued, l.customer, l.phone, l.machine, l.edition, (l.addons || []).join(' '), JSON.stringify(l.limits || {}), l.days, l.expires || 'lifetime', l.notes, l.key])];
+    const csv = '\ufeff' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `innoforge-reseller-licenses-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  });
+  $('clearBtn').addEventListener('click', () => { if (confirm('مسح السجل من المتصفح ده؟ صدّره الأول لو محتاجه.')) { saveLog([]); renderLog(); } });
+
+  renderForm();
+  renderLog();
+})();
+</script>
+</body>
+</html>

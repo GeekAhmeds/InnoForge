@@ -48,10 +48,11 @@ Back up the `.pem` somewhere safe and offline. **Never commit it** (`*.pem` is g
 `INNOFORGE_POS_FORCE_LICENSE=1 npm start`; `npm run license -- machine` prints this computer's ID.
 
 ## Resellers
+Pages (offline, Chrome/Edge): resellers use `tools/reseller-portal.html` (make key pair once → send `reseller-public.txt`; load key + permit → issue keys limited to the permit); the vendor issues permits in `tools/license-generator.html` → «تصاريح الموزّعين». Both pages carry the EDITIONS_DATA copy (test-enforced). CLI equivalents:
 1. Reseller: `npm run license -- reseller-keygen --key ~/.innoforge/reseller.pem` → sends `reseller.pub.txt`.
 2. Vendor: `npm run license -- reseller-cert --pub reseller.pub.txt --id R001 --name "…" --editions basic,market --addons warehouses --max-days 365 --max-users 10 --valid-days 90`
    → `reseller-R001.cert` (send it back). Keep permits short and renew them as the reseller pays.
-3. Reseller issues keys: CLI `issue --key reseller.pem --cert reseller-R001.cert …` or the generator page («أنا موزّع»).
+3. Reseller issues keys: CLI `issue --key reseller.pem --cert reseller-R001.cert …` or `reseller-portal.html`.
 4. The app verifies permit (vendor key) → key (reseller key) → payload within the permit (`resellerAllows`), and shows the seller.
 5. Revoke for new keys: add the id to `revoked_resellers` in `editions.json` and ship an update.
 Prices and partner tiers proposal: `apps/pos/docs/PRICING-AR.md`.

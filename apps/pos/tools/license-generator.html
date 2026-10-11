@@ -9,6 +9,7 @@
 <style>
   :root { --brand:#4f46e5; --line:#e5e7eb; --muted:#6b7280; --bg:#f4f5f7; --danger:#dc2626; --good:#059669; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin:0; background:var(--bg); font:15px/1.5 "Segoe UI", Tahoma, sans-serif; color:#111827; }
   main { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
   h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 12px; }
@@ -46,10 +47,7 @@
       <input type="file" id="keyFile" accept=".pem,.txt" style="max-width:340px">
       <span id="keyState" class="muted">لم يتم تحميل المفتاح</span>
     </div>
-    <details style="margin-top:10px"><summary>أنا موزّع / وكيل (معايا تصريح من Inno Source)</summary>
-      <p class="muted">حمّل مفتاحك الخاص فوق (مش مفتاح Inno Source)، وحمّل ملف التصريح <code>reseller-….cert</code> هنا. المفاتيح هتطلع باسمك، وفي حدود التصريح بس.</p>
-      <div class="row"><input type="file" id="certFile" accept=".cert,.txt" style="max-width:340px"><span id="certState" class="muted">من غير تصريح = مفتاح Inno Source نفسه</span></div>
-    </details>
+    <p class="muted">الموزّعين ليهم صفحتهم: <code>reseller-portal.html</code> — ابعتهالهم، ومن القسم «تصاريح الموزّعين» تحت بتعملهم التصريح.</p>
     <p class="muted" style="margin-bottom:0">الملف ده (<code>pos-license-private.pem</code>) هو سرّك: بيتقري جوه الصفحة دي بس، ومش بيتحفظ ولا بيتبعت لأي مكان. خلّي معاك منه نسخة احتياطية في مكان آمن.</p>
   </section>
 
@@ -90,6 +88,27 @@
       <div class="key-out" id="keyOut"></div>
       <div class="row" style="margin-top:8px"><button id="copyBtn" type="button">نسخ المفتاح</button><span id="expiresOut" class="muted"></span></div>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>تصاريح الموزّعين (الوكلاء)</h2>
+    <p class="muted">الموزّع بيفتح <code>reseller-portal.html</code> ويعمل مفاتيحه، ويبعتلك ملف <code>reseller-public….txt</code>. حمّله هنا، وحدد المسموح له، واعمل التصريح وابعتهوله. المفاتيح اللي هيعملها هتشتغل في الحدود دي بس، وتقدر توقف موزّع بإضافة كوده لـ <code>revoked_resellers</code> في <code>electron/editions.json</code> (بتسري مع التحديث الجاي).</p>
+    <form id="permitForm" class="grid">
+      <label>المفتاح العام للموزّع — ملف <code>reseller-public.txt</code><input type="file" id="pubFile" accept=".txt"></label>
+      <label>أو الصق المفتاح العام<input id="pubText" class="ltr" placeholder="MCowBQYDK2VwAyEA…"></label>
+      <label>كود الموزّع<input id="r_id" class="ltr" required placeholder="R001"></label>
+      <label>اسم الموزّع<input id="r_name" required></label>
+      <label>تليفون الموزّع (بيظهر للعملاء في البرنامج)<input id="r_phone" class="ltr"></label>
+      <label>التصريح ساري لمدة<select id="r_valid"><option value="90">3 شهور</option><option value="180">6 شهور</option><option value="365" selected>سنة</option><option value="730">سنتين</option></select></label>
+      <label>أقصى مدة لكل مفتاح<select id="r_maxdays"><option value="30">شهر</option><option value="90">3 شهور</option><option value="365" selected>سنة</option><option value="0">من غير حد (يقدر يعمل مدى الحياة)</option></select></label>
+      <label>أقصى عدد مستخدمين في المفتاح (فاضي = بدون حد)<input id="r_max_users" type="number" min="1"></label>
+      <label>أقصى عدد مخازن (فاضي = بدون حد)<input id="r_max_warehouses" type="number" min="1"></label>
+      <label>أقصى عدد أجهزة (فاضي = بدون حد)<input id="r_max_devices" type="number" min="1"></label>
+      <div style="grid-column:1/-1"><div class="muted" style="font-size:13px;margin-bottom:6px">الباقات المسموحة</div><div id="r_editions" class="feat-grid"></div></div>
+      <div style="grid-column:1/-1"><div class="muted" style="font-size:13px;margin-bottom:6px">الإضافات المسموحة</div><div id="r_addons" class="feat-grid"></div></div>
+      <div class="row" style="grid-column:1/-1"><button class="primary" type="submit">إنشاء التصريح وتنزيله</button><span id="permitMsg"></span></div>
+    </form>
+    <table style="margin-top:12px"><thead><tr><th>الكود</th><th>الموزّع</th><th>المسموح</th><th>ساري لحد</th></tr></thead><tbody id="permitLog"></tbody></table>
   </section>
 
   <section class="card">
@@ -148,23 +167,6 @@
 
   $('duration').addEventListener('change', () => { $('customWrap').hidden = $('duration').value !== 'custom'; });
   $('edition').addEventListener('change', renderFeatures);
-  $('certFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const text = (await file.text()).trim();
-      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(text.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
-      if (payload.type !== 'reseller') throw new Error('not a permit');
-      cert = { text, payload };
-      $('certState').textContent = `✓ ${payload.name} (${payload.id}) — ساري لحد ${String(payload.expires).slice(0, 10)}${payload.max_days ? ` — أقصى مدة ${payload.max_days} يوم` : ''}`;
-      $('certState').className = 'ok';
-    } catch {
-      cert = null;
-      $('certState').textContent = 'الملف ده مش تصريح موزّع صالح';
-      $('certState').className = 'err';
-    }
-    renderEditions();
-  });
 
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -240,6 +242,58 @@
     a.click();
   });
   $('clearBtn').addEventListener('click', () => { if (confirm('مسح السجل من المتصفح ده؟ صدّره الأول لو محتاجه.')) { saveLog([]); renderLog(); } });
+
+
+  // ---------- reseller permits ----------
+  const PERMIT_LOG = 'innoforge-pos-reseller-permits';
+  const loadPermits = () => { try { return JSON.parse(localStorage.getItem(PERMIT_LOG)) || []; } catch { return []; } };
+  $('r_editions').innerHTML = '<label><input type="checkbox" value="*" checked> كل الباقات</label>' + Object.keys(EDITIONS_DATA.editions).map((k) => `<label><input type="checkbox" value="${k}"> ${EDITIONS_DATA.editions[k].ar}</label>`).join('');
+  $('r_addons').innerHTML = '<label><input type="checkbox" value="*" checked> كل الإضافات</label>' + FEATURES.map((f) => `<label><input type="checkbox" value="${f}"> ${EDITIONS_DATA.features[f].ar}</label>`).join('');
+  $('pubFile').addEventListener('change', async (e) => { const f = e.target.files[0]; if (f) $('pubText').value = (await f.text()).split(/\s+/)[0]; });
+  const picked = (box) => {
+    const vals = [...$(box).querySelectorAll('input:checked')].map((x) => x.value);
+    return vals.includes('*') ? '*' : vals;
+  };
+  function renderPermits() {
+    $('permitLog').innerHTML = loadPermits().map((c) => `<tr><td class="ltr">${esc(c.id)}</td><td><b>${esc(c.name)}</b><br><span class="muted">${esc(c.phone)}</span></td>
+      <td>${c.editions === '*' ? 'كل الباقات' : esc(c.editions.map((k) => EDITIONS_DATA.editions[k]?.ar || k).join('، '))}<br><span class="muted">${c.max_days ? `أقصى ${c.max_days} يوم` : 'مدة مفتوحة'}</span></td>
+      <td><span class="tag ${Date.parse(c.expires) < Date.now() ? 'exp' : ''}">${esc(fmtDate(c.expires))}</span></td></tr>`).join('');
+  }
+  $('permitForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = (t, ok) => { $('permitMsg').textContent = t; $('permitMsg').className = ok ? 'ok' : 'err'; };
+    if (!signingKey) return msg('حمّل مفتاح Inno Source الخاص فوق الأول');
+    const pub = $('pubText').value.trim();
+    try {
+      const raw = pemToDer(pub);
+      if (raw.length !== 44) throw new Error('size');
+      await crypto.subtle.importKey('spki', raw, { name: 'Ed25519' }, false, ['verify']);
+    } catch { return msg('المفتاح العام ده مش صالح — لازم يكون من ملف reseller-public.txt'); }
+    const editions = picked('r_editions');
+    const addons = picked('r_addons');
+    if (editions !== '*' && !editions.length) return msg('اختار باقة واحدة على الأقل');
+    const maxLimits = {};
+    for (const k of Object.keys(EDITIONS_DATA.limits)) { const v = $(`r_max_${k}`).value; if (v !== '') maxLimits[k] = Number(v); }
+    const now = new Date();
+    // Same fields and order as tools/license.cjs reseller-cert.
+    const certPayload = {
+      type: 'reseller', id: $('r_id').value.trim(), name: $('r_name').value.trim(), phone: $('r_phone').value.trim(), pub,
+      editions, addons, max_days: Number($('r_maxdays').value) || 0, max_limits: maxLimits,
+      issued: now.toISOString(), expires: new Date(now.getTime() + Number($('r_valid').value) * 86400000).toISOString(),
+    };
+    const body = new TextEncoder().encode(JSON.stringify(certPayload));
+    const sig = await crypto.subtle.sign({ name: 'Ed25519' }, signingKey, body);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([`${b64url(body)}.${b64url(sig)}`], { type: 'text/plain' }));
+    a.download = `reseller-${certPayload.id.replace(/[^A-Za-z0-9_-]+/g, '-')}.cert`;
+    a.click();
+    const log = loadPermits();
+    log.unshift({ ...certPayload, pub: undefined });
+    try { localStorage.setItem(PERMIT_LOG, JSON.stringify(log)); } catch {}
+    renderPermits();
+    msg(`✓ اتعمل ونزل: ${a.download} — ابعته للموزّع مع reseller-portal.html`, true);
+  });
+  renderPermits();
 
   renderEditions();
   renderLog();

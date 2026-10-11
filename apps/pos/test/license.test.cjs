@@ -99,10 +99,12 @@ test('resellers: keys signed by a reseller carry the vendor-signed permit and st
   assert.equal(verifyLicense(resold({}).split('.').slice(0, 2).join('.'), { machine, publicKeyPem: pub }).reason, 'BAD_SIGNATURE');
 });
 
-test('license generator page carries the same editions as the app', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'tools', 'license-generator.html'), 'utf8');
-  const m = html.match(/const EDITIONS_DATA = (\{[\s\S]*?\});\s*\/\/ end editions/);
-  assert.ok(m, 'EDITIONS_DATA block missing in license-generator.html');
+test('license generator and reseller portal pages carry the same editions as the app', () => {
   const data = require('../electron/editions.json');
-  assert.deepEqual(JSON.parse(m[1]), { features: data.features, limits: data.limits, editions: data.editions });
+  for (const page of ['license-generator.html', 'reseller-portal.html']) {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'tools', page), 'utf8');
+    const m = html.match(/const EDITIONS_DATA = (\{[\s\S]*?\});\s*\/\/ end editions/);
+    assert.ok(m, `EDITIONS_DATA block missing in ${page}`);
+    assert.deepEqual(JSON.parse(m[1]), { features: data.features, limits: data.limits, editions: data.editions }, page);
+  }
 });
