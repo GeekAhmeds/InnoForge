@@ -14,12 +14,17 @@ const cartFromOrder = (o) => ({
   id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '',
   discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
   customer_address: o.customer_address, note: o.note,
-  items: o.items.map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, unit_price: i.unit_price, qty: i.qty, discount: i.discount, note: i.note, kitchen_sent: i.kitchen_sent })),
+  salesperson_id: o.salesperson_id,
+  items: o.items.map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, unit_price: i.unit_price, list_price: i.unit_price, qty: i.qty, discount: i.discount, note: i.note, kitchen_sent: i.kitchen_sent })),
 });
 
 export default function Pos() {
   const app = useApp();
-  const { settings, shift, t, tErr, notify, printDoc, lang } = app;
+  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval } = app;
+  const [salespeople, setSalespeople] = useState([]);
+  useEffect(() => { api.auth.salespeople().then(setSalespeople).catch(() => {}); }, []);
+  // Only offer the salesperson picker when someone besides the cashier earns commission.
+  const reps = salespeople.filter((p) => p.commission_rate > 0);
   const restaurant = settings.business_type === 'restaurant';
   const defaultType = restaurant ? 'takeaway' : 'sale';
 
@@ -54,7 +59,7 @@ export default function Pos() {
       const idx = c.items.findIndex((i) => i.product_id === p.id && !i.note && !i.discount);
       const items = [...c.items];
       if (idx >= 0) items[idx] = { ...items[idx], qty: items[idx].qty + qty };
-      else items.push({ product_id: p.id, name: p.name, unit_price: p.price, qty, discount: 0, note: '', kitchen_sent: 0 });
+      else items.push({ product_id: p.id, name: p.name, unit_price: p.price, list_price: p.price, qty, discount: 0, note: '', kitchen_sent: 0 });
       return { ...c, items };
     });
   }, []);
@@ -85,7 +90,7 @@ export default function Pos() {
   }
 
   async function run(fn) {
-    try { return await fn(); } catch (err) { notify(tErr(err), 'error'); return undefined; }
+    try { return await fn(); } catch (err) { if (err.code !== 'CANCELLED') notify(tErr(err), 'error'); return undefined; }
   }
 
   const holdOrSave = () => run(async () => {
@@ -181,6 +186,12 @@ export default function Pos() {
             </button>
           )}
           <button className={cart.customer_id ? 'customer-chip' : 'ghost'} onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
+          {reps.length > 0 && (
+            <select className="rep-select" title={t('pos.salesperson')} value={cart.salesperson_id || ''} onChange={(e) => setCart((c) => ({ ...c, salesperson_id: Number(e.target.value) || null }))}>
+              <option value="">🧑‍💼 {t('pos.salesperson')}</option>
+              {reps.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="cart-lines">
@@ -221,7 +232,7 @@ export default function Pos() {
             onClick={() => run(async () => {
               if (cart.id) {
                 if (!window.confirm(t('common.areYouSure'))) return;
-                await api.orders.voidOpen(cart.id);
+                await withApproval((approval) => api.orders.voidOpen({ id: cart.id, approval }));
               }
               reset();
             })}
@@ -276,7 +287,7 @@ export default function Pos() {
           customer={modal.customer}
           onClose={() => { setModal(null); focusSearch(); }}
           onPay={(payments, printReceipt) => run(async () => {
-            const order = await api.orders.checkout({ ...cart, payments });
+            const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval }));
             setModal(null);
             notify(t('pay.done', { n: order.invoice_no }));
             if (printReceipt) await printDoc(receiptHtml(order, settings, t, lang));
@@ -322,7 +333,13 @@ function LineModal({ item, onClose, onSave, onRemove }) {
   const [qty, setQty] = useState(String(item.qty));
   const [discount, setDiscount] = useState(item.discount ? fromMinor(item.discount, settings.decimals) : '');
   const [note, setNote] = useState(item.note);
-  const save = () => onSave({ qty: Math.max(0.001, Number(qty) || 1), discount: toMinor(discount, settings.decimals), note });
+  const [price, setPrice] = useState(fromMinor(item.unit_price, settings.decimals));
+  // A changed price is flagged so checkout can ask for the price_override permission.
+  const save = () => {
+    const newPrice = toMinor(price, settings.decimals);
+    const changed = newPrice !== item.unit_price || item.price_override;
+    onSave({ qty: Math.max(0.001, Number(qty) || 1), discount: toMinor(discount, settings.decimals), note, unit_price: newPrice, price_override: changed && newPrice !== item.list_price });
+  };
   return (
     <Modal
       title={item.name}
@@ -337,6 +354,10 @@ function LineModal({ item, onClose, onSave, onRemove }) {
       <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid2">
         <Field label={t('pos.qty')}><input autoFocus inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} onFocus={(e) => e.target.select()} /></Field>
         <Field label={t('pos.lineDiscount')}><input inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" /></Field>
+        <Field label={t('pos.price')} hint={item.list_price != null && toMinor(price, settings.decimals) !== item.list_price ? t('pos.priceChanged') : ''}>
+          <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
+        </Field>
+        <span />
         <div className="span2"><Field label={t('pos.note')}><input value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
         <button hidden />
       </form>

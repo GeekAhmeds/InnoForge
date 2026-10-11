@@ -8,7 +8,7 @@ const { createLicenseStore } = require('./license.cjs');
 const { createUpdater } = require('./updater.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
@@ -126,7 +126,10 @@ ipcMain.handle('pos:license', () => ok({ ...license, required: licenseRequired()
 
 ipcMain.handle('pos:activate', (_e, key) => {
   const result = licenses.activate(key);
-  if (result.valid) license = result;
+  if (result.valid) {
+    license = result;
+    services.audit('license_activate', { userId: null, details: { customer: result.customer, expires: result.expires } });
+  }
   return result.valid ? ok({ ...result, required: licenseRequired() }) : fail(new PosError(`LICENSE_${result.reason}`));
 });
 
@@ -159,7 +162,7 @@ ipcMain.handle('pos:print', async (_e, { html, printer = '', silent = false } = 
 
 ipcMain.handle('pos:backup', async () => {
   try {
-    services.requireAdmin();
+    services.requirePerm('backup');
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: `innoforge-pos-backup-${stamp}.db`,
@@ -168,6 +171,7 @@ ipcMain.handle('pos:backup', async () => {
     if (canceled || !filePath) return ok(null);
     if (fs.existsSync(filePath)) fs.rmSync(filePath);
     db.exec(`VACUUM INTO '${filePath.replace(/'/g, "''")}'`);
+    services.audit('backup', { details: { file: path.basename(filePath) } });
     return ok(filePath);
   } catch (err) {
     return fail(err);
@@ -176,7 +180,7 @@ ipcMain.handle('pos:backup', async () => {
 
 ipcMain.handle('pos:restore', async () => {
   try {
-    services.requireAdmin();
+    services.requirePerm('backup');
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [{ name: 'Database', extensions: ['db'] }],
@@ -192,6 +196,7 @@ ipcMain.handle('pos:restore', async () => {
     } finally {
       probe.close();
     }
+    services.audit('restore', { details: { file: path.basename(filePaths[0]) } });
     db.close();
     for (const suffix of ['-wal', '-shm']) fs.rmSync(dbFile() + suffix, { force: true });
     fs.copyFileSync(filePaths[0], dbFile());

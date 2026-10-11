@@ -59,7 +59,7 @@ export default function Orders() {
 }
 
 function OrderModal({ id, onClose, onChanged }) {
-  const { t, tErr, notify, settings, printDoc, lang, isAdmin, shift } = useApp();
+  const { t, tErr, notify, settings, printDoc, lang, shift, withApproval } = useApp();
   const [order, , setOrder] = useLoad(() => api.orders.get(id), [id]);
   const [refundQty, setRefundQty] = useState({});
   const [reason, setReason] = useState('');
@@ -70,18 +70,18 @@ function OrderModal({ id, onClose, onChanged }) {
   async function doRefund() {
     try {
       const items = Object.entries(refundQty).map(([order_item_id, qty]) => ({ order_item_id: Number(order_item_id), qty: Number(qty) })).filter((i) => i.qty > 0);
-      const updated = await api.orders.refund({ orderId: order.id, items, reason });
+      const updated = await withApproval((approval) => api.orders.refund({ orderId: order.id, items, reason, approval }));
       setOrder(updated);
       setRefunding(false);
       setRefundQty({});
       notify(t('orders.refundDone'));
       onChanged();
     } catch (err) {
-      notify(tErr(err), 'error');
+      if (err.code !== 'CANCELLED') notify(tErr(err), 'error');
     }
   }
 
-  const canRefund = isAdmin && shift && order.refunded < order.total;
+  const canRefund = shift && order.refunded < order.total;
 
   return (
     <Modal

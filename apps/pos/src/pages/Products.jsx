@@ -4,7 +4,7 @@ import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 
 export default function Products() {
-  const { t, settings } = useApp();
+  const { t, settings, can } = useApp();
   const [tab, setTab] = useState('products');
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState(null);
@@ -50,7 +50,7 @@ export default function Products() {
                 <th>{bookstore ? t('products.isbn') : t('products.barcode')}</th>
                 <th>{t('products.category')}</th>
                 <th className="num">{t('products.price')}</th>
-                <th className="num">{t('products.cost')}</th>
+                {can('view_cost') && <th className="num">{t('products.cost')}</th>}
                 <th className="num">{t('products.stock')}</th>
                 <th />
               </tr>
@@ -66,7 +66,7 @@ export default function Products() {
                   <td className="mono">{p.barcode}</td>
                   <td>{p.category_name && <span className="dot" style={{ background: p.category_color }} />}{p.category_name}</td>
                   <td className="num">{m(p.price)}</td>
-                  <td className="num muted">{m(p.cost)}</td>
+                  {can('view_cost') && <td className="num muted">{m(p.cost)}</td>}
                   <td className={`num ${p.track_stock && p.stock <= p.min_stock ? 'warn' : ''}`}>{p.track_stock ? formatQty(p.stock) : '∞'}</td>
                   <td className="num">
                     {!!p.track_stock && <button className="ghost sm" onClick={(e) => { e.stopPropagation(); setAdjusting(p); }}>± {t('products.adjust')}</button>}

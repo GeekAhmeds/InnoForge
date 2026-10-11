@@ -15,6 +15,7 @@ export default function Reports() {
   const { t, settings } = useApp();
   const [range, setRange] = useState({ from: today(), to: today() });
   const [r] = useLoad(() => api.reports.summary(range), [range.from, range.to]);
+  const [com] = useLoad(() => api.commissions.report(range), [range.from, range.to]);
   const m = (v) => formatMoney(v, settings);
   const presets = [
     ['reports.today', today(), today()],
@@ -44,14 +45,14 @@ export default function Reports() {
             <Stat label={t('reports.net')} value={m(r.totals.net)} />
             <Stat label={t('reports.orders')} value={r.totals.orders} />
             <Stat label={t('reports.average')} value={m(r.totals.average)} />
-            <Stat label={t('reports.profit')} value={m(r.totals.profit)} />
+            {r.totals.profit != null && <Stat label={t('reports.profit')} value={m(r.totals.profit)} />}
             <Stat label={t('shift.refunds')} value={m(r.totals.refunds)} />
             <Stat label={t('reports.purchases')} value={m(r.totals.purchases)} />
             <Stat label={t('reports.expenses')} value={m(r.totals.expenses)} />
             <Stat label={t('reports.creditSales')} value={m(r.totals.creditSales)} />
             <Stat label={t('reports.collections')} value={m(r.totals.collections)} />
             <Stat label={t('customers.receivables')} value={m(r.totals.receivables)} />
-            <Stat label={t('reports.netProfit')} value={m(r.totals.netProfit)} strong />
+            {r.totals.netProfit != null && <Stat label={t('reports.netProfit')} value={m(r.totals.netProfit)} strong />}
           </div>
           <div className="report-grid">
             <BarList title={t('reports.byDay')} rows={r.byDay.map((x) => [x.day, x.total, x.orders])} m={m} />
@@ -64,6 +65,15 @@ export default function Reports() {
             <BarList title={t('reports.topCustomers')} rows={r.topCustomers.map((x) => [x.name, x.total, x.orders])} m={m} />
             <BarList title={t('reports.byCashier')} rows={r.byCashier.map((x) => [x.name, x.total, x.orders])} m={m} />
           </div>
+          {!!com?.length && (
+            <div className="card flush top-gap">
+              <h3 className="pad">💼 {t('reports.commissions')}</h3>
+              <table className="grid">
+                <thead><tr><th>{t('pos.salesperson')}</th><th className="num">{t('reports.orders')}</th><th className="num">{t('reports.netSales')}</th><th className="num">{t('users.commission')}</th><th className="num">{t('reports.commissionDue')}</th></tr></thead>
+                <tbody>{com.map((c) => <tr key={c.id}><td>{c.name}</td><td className="num">{c.orders}</td><td className="num">{m(c.net)}</td><td className="num">{c.rate}%</td><td className="num"><b>{m(c.commission)}</b></td></tr>)}</tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

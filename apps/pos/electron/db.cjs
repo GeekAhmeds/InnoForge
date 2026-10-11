@@ -252,6 +252,56 @@ const MIGRATIONS = [
   ALTER TABLE returns ADD COLUMN cash_amount INTEGER NOT NULL DEFAULT 0;
   UPDATE returns SET cash_amount = amount WHERE method = 'cash';
   `,
+  // v4: supervisor role, per-user permissions and commission, audit log, sales reps.
+  // Rebuilds tables whose CHECK constraints change, so it runs with foreign keys off.
+  {
+    fkOff: true,
+    sql: `
+    CREATE TABLE users_new (
+      id              INTEGER PRIMARY KEY,
+      name            TEXT NOT NULL,
+      username        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      pin_hash        TEXT NOT NULL,
+      role            TEXT NOT NULL CHECK (role IN ('admin', 'supervisor', 'cashier')),
+      permissions     TEXT NOT NULL DEFAULT '{}', -- JSON overrides of the role defaults
+      commission_rate REAL NOT NULL DEFAULT 0,    -- % of net sales
+      active          INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    INSERT INTO users_new (id, name, username, pin_hash, role, active, created_at)
+      SELECT id, name, username, pin_hash, role, active, created_at FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_new RENAME TO users;
+
+    -- Payment methods are validated in code so new ones (e.g. loyalty points) need no rebuild.
+    CREATE TABLE payments_new (
+      id         INTEGER PRIMARY KEY,
+      order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      method     TEXT NOT NULL,
+      amount     INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    INSERT INTO payments_new SELECT * FROM payments;
+    DROP TABLE payments;
+    ALTER TABLE payments_new RENAME TO payments;
+    CREATE INDEX idx_payments_order ON payments(order_id);
+
+    ALTER TABLE orders ADD COLUMN salesperson_id INTEGER REFERENCES users(id);
+
+    CREATE TABLE audit_log (
+      id          INTEGER PRIMARY KEY,
+      user_id     INTEGER REFERENCES users(id),
+      action      TEXT NOT NULL,
+      entity      TEXT NOT NULL DEFAULT '',
+      entity_id   INTEGER,
+      details     TEXT NOT NULL DEFAULT '',
+      approved_by INTEGER REFERENCES users(id),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+    CREATE INDEX idx_audit_created ON audit_log(created_at);
+    CREATE INDEX idx_audit_action ON audit_log(action);
+    `,
+  },
 ];
 
 function openDatabase(file) {
@@ -264,10 +314,19 @@ function openDatabase(file) {
 function migrate(db) {
   const { user_version: current } = db.prepare('PRAGMA user_version').get();
   for (let v = current; v < MIGRATIONS.length; v++) {
-    transaction(db, () => {
-      db.exec(MIGRATIONS[v]);
-      db.exec(`PRAGMA user_version = ${v + 1}`);
-    });
+    const m = typeof MIGRATIONS[v] === 'string' ? { sql: MIGRATIONS[v] } : MIGRATIONS[v];
+    // Table rebuilds follow SQLite's documented procedure: foreign keys off around the
+    // transaction, then verify nothing dangles before committing.
+    if (m.fkOff) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      transaction(db, () => {
+        db.exec(m.sql);
+        if (m.fkOff && db.prepare('PRAGMA foreign_key_check').all().length) throw new Error(`Migration ${v + 1} broke foreign keys`);
+        db.exec(`PRAGMA user_version = ${v + 1}`);
+      });
+    } finally {
+      if (m.fkOff) db.exec('PRAGMA foreign_keys = ON');
+    }
   }
 }
 

@@ -326,3 +326,14 @@ tr.dim td { opacity: .5; }
 .pay-summary .credit { background: #fff7ed; }
 .pay-summary .credit b { color: #b45309; }
 .badge.credit { background: #fff7ed; color: #b45309; }
+
+/* ---------- users & permissions ---------- */
+.grid3 .span3 { grid-column: 1 / -1; }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; }
+.perm { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+.perm input { width: 17px; height: 17px; accent-color: var(--brand); }
+.perm.custom { background: #fff7ed; }
+.rep-select { width: auto; padding: 5px 8px; font-size: 13px; }
+.audit-hot td { background: #fffbeb; }
+.audit-details { color: var(--muted); max-width: 420px; word-break: break-word; }
+.nowrap { white-space: nowrap; }

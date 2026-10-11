@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { I18nProvider, useI18n } from './i18n/index.jsx';
 import { api, licenseStatus, print } from './lib/api.js';
 import { AppContext, useToasts } from './components/ui.jsx';
@@ -14,6 +14,7 @@ import Activation from './pages/Activation.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Customers from './pages/Customers.jsx';
 import { UpdateBanner } from './components/Updates.jsx';
+import ApprovalModal from './components/Approval.jsx';
 import logoMark from './assets/logo-mark.png';
 
 export default function App() {
@@ -36,11 +37,11 @@ const NAV = [
   { id: 'pos', icon: '🛒' },
   { id: 'orders', icon: '🧾' },
   { id: 'customers', icon: '👥' },
-  { id: 'products', icon: '📦', admin: true },
-  { id: 'purchases', icon: '🚚', admin: true },
-  { id: 'reports', icon: '📊', admin: true },
+  { id: 'products', icon: '📦', perm: 'products' },
+  { id: 'purchases', icon: '🚚', perm: 'purchases' },
+  { id: 'reports', icon: '📊', perm: 'reports' },
   { id: 'shift', icon: '⏱' },
-  { id: 'settings', icon: '⚙', admin: true },
+  { id: 'settings', icon: '⚙', perm: ['settings', 'users', 'audit', 'backup'] },
 ];
 
 function Shell({ settings, reloadSettings, license, setLicense }) {
@@ -51,6 +52,36 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   const [page, setPage] = useState('pos');
 
   const reloadShift = useCallback(async () => setShift(await api.shifts.current()), []);
+  const [approvalReq, setApprovalReq] = useState(null);
+  const approvalResolve = useRef(null);
+
+  // Runs fn(approval); when the main process answers APPROVAL_REQUIRED, asks a supervisor
+  // for their PIN and retries with it. Cancelling rejects with code 'CANCELLED'.
+  const withApproval = useCallback(async (fn) => {
+    let approval = null;
+    let retry = null;
+    for (;;) {
+      try {
+        return await fn(approval);
+      } catch (err) {
+        const needs = err.code === 'APPROVAL_REQUIRED' || (approval && ['BAD_CREDENTIALS', 'APPROVER_NOT_ALLOWED'].includes(err.code));
+        if (!needs) throw err;
+        if (err.code !== 'APPROVAL_REQUIRED') retry = err.code;
+        const perm = err.code === 'APPROVAL_REQUIRED' ? err.message : approvalReq?.perm || 'discount';
+        approval = await new Promise((resolve) => {
+          approvalResolve.current = resolve;
+          setApprovalReq({ perm, retry });
+        });
+        setApprovalReq(null);
+        if (!approval) {
+          const cancelled = new Error('cancelled');
+          cancelled.code = 'CANCELLED';
+          throw cancelled;
+        }
+      }
+    }
+  }, [approvalReq]);
+  const can = useCallback((perm) => !!user?.perms?.[perm], [user]);
   useEffect(() => { if (user) reloadShift(); }, [user, reloadShift]);
 
   const printDoc = useCallback(async (html, printer = settings.printer_name) => {
@@ -65,8 +96,8 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
 
   const ctx = useMemo(() => ({
     settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
-    isAdmin: user?.role === 'admin',
-  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license]);
+    isAdmin: user?.role === 'admin', can, withApproval,
+  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval]);
 
   let content;
   if (!settings.setup_done) {
@@ -74,7 +105,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   } else if (!user) {
     content = <Login onLogin={(u) => { setUser(u); setPage('pos'); }} />;
   } else {
-    const nav = NAV.filter((n) => !n.admin || user.role === 'admin');
+    const nav = NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]));
     const Page = { pos: Pos, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
@@ -108,6 +139,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   return (
     <AppContext.Provider value={ctx}>
       {content}
+      {approvalReq && <ApprovalModal request={approvalReq} t={t} onDone={(a) => approvalResolve.current?.(a)} />}
       {toasts}
     </AppContext.Provider>
   );

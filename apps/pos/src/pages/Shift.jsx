@@ -6,7 +6,8 @@ import { Field, useApp, useLoad } from '../components/ui.jsx';
 import { ExpenseModal } from './Purchases.jsx';
 
 export default function Shift() {
-  const { t, tErr, notify, settings, shift, reloadShift, printDoc, lang, isAdmin, setPage } = useApp();
+  const { t, tErr, notify, settings, shift, reloadShift, printDoc, lang, can, setPage } = useApp();
+  const isAdmin = can('shifts_all');
   const [counted, setCounted] = useState('');
   const [notes, setNotes] = useState('');
   const [expense, setExpense] = useState(false);

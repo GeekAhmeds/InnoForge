@@ -57,7 +57,8 @@ export default function Customers() {
 }
 
 function CustomerModal({ customer, onClose, onSaved }) {
-  const { t, tErr, notify, settings, isAdmin } = useApp();
+  const { t, tErr, notify, settings, can } = useApp();
+  const isAdmin = can('customers_edit');
   const d = settings.decimals;
   const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '' });
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));

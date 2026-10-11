@@ -129,7 +129,7 @@ test('cashier cannot change settings or refund', () => {
   s.auth.logout();
   s.auth.login({ username: 'c1', pin: '5555' });
   assert.equal(tryCode(() => s.settings.save({ tax_rate: 5 })), 'FORBIDDEN');
-  assert.equal(tryCode(() => s.orders.refund({ orderId: 1, items: [] })), 'FORBIDDEN');
+  assert.equal(tryCode(() => s.orders.refund({ orderId: 1, items: [] })), 'APPROVAL_REQUIRED');
   assert.equal(tryCode(() => s.products.save({ name: 'x', price: 1 })), 'FORBIDDEN');
 });
 
@@ -182,7 +182,7 @@ test('expenses reduce drawer cash and net profit; cashier limited to drawer expe
   s.users.save({ name: 'C', username: 'c2', pin: '7777', role: 'cashier' });
   s.auth.logout();
   s.auth.login({ username: 'c2', pin: '7777' });
-  assert.equal(tryCode(() => s.expenses.create({ amount: 100, fromDrawer: false })), 'FORBIDDEN');
+  assert.equal(tryCode(() => s.expenses.create({ amount: 100, fromDrawer: false })), 'APPROVAL_REQUIRED');
   assert.ok(s.expenses.create({ amount: 100, fromDrawer: true }).id);
   assert.equal(tryCode(() => s.purchases.list({})), 'FORBIDDEN');
 });
@@ -246,4 +246,52 @@ test('cashier can add customers but not set credit limits', () => {
   const id = s.customers.save({ name: 'Walk-in Co', phone: '0111', credit_limit: 999999 });
   assert.equal(s.customers.get(id).credit_limit, 0);
   assert.equal(tryCode(() => s.customers.save({ name: 'Dup', phone: '0111' })), 'DUPLICATE_PHONE');
+});
+
+test('permissions: role defaults, overrides, supervisor approval for discounts and refunds, audit trail', async () => {
+  const { s, db } = setup();
+  const p = s.products.save({ name: 'Lamp', price: 10000, cost: 6000, track_stock: false });
+  s.users.save({ name: 'Sara', username: 'sup', pin: '2222', role: 'supervisor' });
+  s.users.save({ name: 'Omar', username: 'cash', pin: '3333', role: 'cashier', commission_rate: 2 });
+  s.shifts.open({});
+  s.auth.logout();
+  s.auth.login({ username: 'cash', pin: '3333' });
+  const me = s.auth.status().user;
+  assert.equal(me.perms.discount, true);
+  assert.equal(me.perms.max_discount, 10);
+  assert.equal(me.perms.view_cost, false);
+  assert.equal(s.products.list({})[0].cost, undefined); // cost hidden from cashiers
+  const items = [{ product_id: p, qty: 1 }];
+  // 10% is within the cashier's limit
+  s.orders.checkout({ items, discount: 1000, payments: [{ method: 'cash', amount: 9000 }] });
+  // 25% needs a supervisor (max 30%)
+  assert.equal(tryCode(() => s.orders.checkout({ items, discount: 2500, payments: [{ method: 'cash', amount: 7500 }] })), 'APPROVAL_REQUIRED');
+  assert.equal(tryCode(() => s.orders.checkout({ items, discount: 2500, payments: [{ method: 'cash', amount: 7500 }], approval: { username: 'sup', pin: '0000' } })), 'BAD_CREDENTIALS');
+  const o = s.orders.checkout({ items, discount: 2500, payments: [{ method: 'cash', amount: 7500 }], approval: { username: 'sup', pin: '2222' } });
+  // 50% is beyond even the supervisor
+  assert.equal(tryCode(() => s.orders.checkout({ items, discount: 5000, payments: [{ method: 'cash', amount: 5000 }], approval: { username: 'sup', pin: '2222' } })), 'APPROVER_NOT_ALLOWED');
+  // price change needs approval too
+  assert.equal(tryCode(() => s.orders.checkout({ items: [{ product_id: p, qty: 1, unit_price: 8000, price_override: true }], payments: [{ method: 'cash', amount: 8000 }] })), 'APPROVAL_REQUIRED');
+  // refunds: cashier needs approval, settings simply forbidden
+  assert.equal(tryCode(() => s.orders.refund({ orderId: o.id, items: [{ order_item_id: o.items[0].id, qty: 1 }] })), 'APPROVAL_REQUIRED');
+  s.orders.refund({ orderId: o.id, items: [{ order_item_id: o.items[0].id, qty: 1 }], approval: { username: 'sup', pin: '2222' } });
+  assert.equal(tryCode(() => s.settings.save({ tax_rate: 1 })), 'FORBIDDEN');
+  assert.equal(tryCode(() => s.auditLog.list({})), 'FORBIDDEN');
+  // admin grants this cashier a personal override
+  s.auth.logout();
+  assert.equal(tryCode(() => s.auth.login({ username: 'admin', pin: '9999' })), 'BAD_CREDENTIALS');
+  s.auth.login({ username: 'admin', pin: '1234' });
+  const cashId = db.prepare("SELECT id FROM users WHERE username = 'cash'").get().id;
+  s.users.save({ id: cashId, name: 'Omar', username: 'cash', role: 'cashier', overrides: { refund: true, max_discount: 30 }, commission_rate: 2 });
+  await new Promise(setImmediate); // failed-attempt entries are written after their rollback
+  const log = s.auditLog.list({});
+  const actions = log.map((l) => l.action);
+  for (const a of ['login', 'discount', 'refund', 'login_failed', 'approval_failed', 'user_update']) assert.ok(actions.includes(a), a);
+  assert.equal(log.find((l) => l.action === 'refund').approver_name, 'Sara');
+  const com = s.commissions.report({}).find((r) => r.name === 'Omar');
+  assert.equal(com.net, 9000 + 7500 - 7500);
+  assert.equal(com.commission, 180);
+  s.auth.logout();
+  s.auth.login({ username: 'cash', pin: '3333' });
+  assert.equal(s.auth.status().user.perms.max_discount, 30);
 });

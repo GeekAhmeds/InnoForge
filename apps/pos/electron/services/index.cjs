@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const { transaction } = require('../db.cjs');
 const { computeTotals } = require('./totals.cjs');
+const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = require('./permissions.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -69,9 +70,50 @@ function createServices(db) {
     return session.user;
   }
   function requireAdmin() {
-    const u = requireUser();
-    if (u.role !== 'admin') throw new PosError('FORBIDDEN');
-    return u;
+    return requirePerm('users').user;
+  }
+
+  const permsOf = (u) => effectivePermissions(u);
+  // Actions a supervisor can unlock on the spot with their PIN; the rest are simply forbidden.
+  const APPROVABLE = new Set(['discount', 'price_override', 'credit_sale', 'refund', 'void', 'expenses']);
+  const can = (perm, u = session.user) => !!permsOf(u)[perm];
+
+  /**
+   * Checks a permission for the logged-in user. If they lack it, another user's
+   * credentials ({ username, pin }) can approve the action, provided that user has
+   * both the permission and 'approve'. `extra(perms)` adds a condition such as a
+   * discount ceiling. Returns { user, approvedBy }.
+   */
+  function requirePerm(perm, approval = null, extra = null) {
+    const user = requireUser();
+    const ok = (u) => { const p = permsOf(u); return (!perm || p[perm]) && (!extra || extra(p)); };
+    if (ok(user)) return { user, approvedBy: null };
+    if (perm && !APPROVABLE.has(perm)) throw new PosError('FORBIDDEN');
+    if (!approval?.username) throw new PosError('APPROVAL_REQUIRED', perm || 'discount');
+    const approver = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(str(approval.username));
+    if (!approver || !verifyPin(approval.pin, approver.pin_hash)) {
+      audit('approval_failed', { details: { perm, approver: str(approval.username) } });
+      throw new PosError('BAD_CREDENTIALS');
+    }
+    if (approver.id === user.id || !permsOf(approver).approve || !ok(approver)) throw new PosError('APPROVER_NOT_ALLOWED');
+    return { user, approvedBy: plain(approver) };
+  }
+
+  /** Appends to the activity log; never lets logging break the action itself. */
+  function audit(action, { entity = '', entityId = null, details = '', approvedBy = null, userId } = {}) {
+    // Failures are usually followed by a rollback that would erase the entry, so write those
+    // once the current transaction has finished.
+    if (db.isTransaction && /_failed$/.test(action)) {
+      const uid = userId !== undefined ? userId : session.user?.id ?? null;
+      setImmediate(() => audit(action, { entity, entityId, details, approvedBy, userId: uid }));
+      return;
+    }
+    try {
+      db.prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, details, approved_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+        userId !== undefined ? userId : session.user?.id ?? null, action, entity, entityId,
+        typeof details === 'string' ? details : JSON.stringify(details), approvedBy?.id ?? approvedBy ?? null,
+      );
+    } catch { /* logging is best-effort */ }
   }
 
   // ---------- settings ----------
@@ -106,7 +148,8 @@ function createServices(db) {
       return getSettings();
     },
     save(patch) {
-      requireAdmin();
+      requirePerm('settings');
+      audit('settings_change', { details: { keys: Object.keys(patch || {}) } });
       if (patch && 'business_type' in patch && !['retail', 'bookstore', 'restaurant'].includes(patch.business_type)) {
         throw new PosError('INVALID_BUSINESS_TYPE');
       }
@@ -116,7 +159,10 @@ function createServices(db) {
   };
 
   // ---------- auth & users ----------
-  const publicUser = (u) => u && { id: u.id, name: u.name, username: u.username, role: u.role, active: !!u.active };
+  const publicUser = (u) => u && {
+    id: u.id, name: u.name, username: u.username, role: u.role, active: !!u.active,
+    commission_rate: u.commission_rate || 0, overrides: parseOverrides(u.permissions), perms: permsOf(u),
+  };
 
   function validatePin(pin) {
     if (!/^\d{4,8}$/.test(String(pin))) throw new PosError('INVALID_PIN');
@@ -147,33 +193,60 @@ function createServices(db) {
     loginUsers() {
       return plainAll(db.prepare('SELECT id, name, username, role FROM users WHERE active = 1 ORDER BY name').all());
     },
+    /** Users who can approve restricted actions (shown in the approval dialog). */
+    approvers() {
+      requireUser();
+      return db.prepare('SELECT * FROM users WHERE active = 1 ORDER BY name').all()
+        .filter((u) => u.id !== session.user.id && permsOf(u).approve)
+        .map((u) => ({ id: u.id, name: u.name, username: u.username, role: u.role }));
+    },
+    /** People sales can be credited to (for commissions). */
+    salespeople() {
+      requireUser();
+      return plainAll(db.prepare('SELECT id, name, commission_rate FROM users WHERE active = 1 ORDER BY name').all());
+    },
     login({ username, pin }) {
       const u = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(str(username));
-      if (!u || !verifyPin(pin, u.pin_hash)) throw new PosError('BAD_CREDENTIALS');
+      if (!u || !verifyPin(pin, u.pin_hash)) {
+        audit('login_failed', { userId: u?.id ?? null, details: { username: str(username) } });
+        throw new PosError('BAD_CREDENTIALS');
+      }
       session.user = plain(u);
+      audit('login');
       return publicUser(session.user);
     },
     logout() {
+      if (session.user) audit('logout');
       session.user = null;
       return true;
+    },
+    /** Role defaults for the permissions screen. */
+    permissionCatalog() {
+      return { permissions: PERMISSIONS, roles: ROLE_DEFAULTS };
     },
   };
 
   const users = {
     list() {
-      requireAdmin();
+      requirePerm('users');
       return db.prepare('SELECT * FROM users ORDER BY name').all().map(publicUser);
     },
     save(u = {}) {
-      const me = requireAdmin();
-      const role = u.role === 'admin' ? 'admin' : 'cashier';
+      const me = requirePerm('users').user;
+      const role = ['admin', 'supervisor'].includes(u.role) ? u.role : 'cashier';
       if (!str(u.name) || !str(u.username)) throw new PosError('NAME_REQUIRED');
+      // Only admins can create or edit admins.
+      const target = u.id ? db.prepare('SELECT role FROM users WHERE id = ?').get(u.id) : null;
+      if ((role === 'admin' || target?.role === 'admin') && me.role !== 'admin') throw new PosError('FORBIDDEN');
+      const overrides = JSON.stringify(parseOverrides(u.overrides || {}));
+      const commission = Math.min(100, Math.max(0, num(u.commission_rate)));
       return transaction(db, () => {
         if (u.id) {
-          if (u.id === me.id && (role !== 'admin' || u.active === false)) throw new PosError('CANNOT_DEMOTE_SELF');
-          db.prepare('UPDATE users SET name = ?, username = ?, role = ?, active = ? WHERE id = ?').run(
-            str(u.name), str(u.username), role, u.active === false ? 0 : 1, u.id,
+          if (u.id === me.id && (role !== me.role || u.active === false)) throw new PosError('CANNOT_DEMOTE_SELF');
+          db.prepare('UPDATE users SET name = ?, username = ?, role = ?, active = ?, permissions = ?, commission_rate = ? WHERE id = ?').run(
+            str(u.name), str(u.username), role, u.active === false ? 0 : 1, overrides, commission, u.id,
           );
+          audit('user_update', { entity: 'user', entityId: u.id, details: { role, active: u.active !== false, overrides: JSON.parse(overrides), pinChanged: !!u.pin } });
           if (u.pin) {
             validatePin(u.pin);
             db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hashPin(u.pin), u.id);
@@ -181,11 +254,13 @@ function createServices(db) {
           return u.id;
         }
         validatePin(u.pin);
-        return Number(
-          db.prepare('INSERT INTO users (name, username, pin_hash, role) VALUES (?, ?, ?, ?)').run(
-            str(u.name), str(u.username), hashPin(u.pin), role,
+        const id = Number(
+          db.prepare('INSERT INTO users (name, username, pin_hash, role, permissions, commission_rate) VALUES (?, ?, ?, ?, ?, ?)').run(
+            str(u.name), str(u.username), hashPin(u.pin), role, overrides, commission,
           ).lastInsertRowid,
         );
+        audit('user_create', { entity: 'user', entityId: id, details: { role } });
+        return id;
       });
     },
   };
@@ -197,7 +272,7 @@ function createServices(db) {
       return plainAll(db.prepare('SELECT * FROM categories ORDER BY sort, name').all());
     },
     save(c = {}) {
-      requireAdmin();
+      requirePerm('products');
       if (!str(c.name)) throw new PosError('NAME_REQUIRED');
       if (c.id) {
         db.prepare('UPDATE categories SET name = ?, color = ?, sort = ? WHERE id = ?').run(str(c.name), str(c.color) || '#0a43c9', int(c.sort), c.id);
@@ -206,8 +281,9 @@ function createServices(db) {
       return Number(db.prepare('INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)').run(str(c.name), str(c.color) || '#0a43c9', int(c.sort)).lastInsertRowid);
     },
     remove(id) {
-      requireAdmin();
+      requirePerm('products');
       db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+      audit('category_delete', { entity: 'category', entityId: id });
       return true;
     },
   };
@@ -228,14 +304,15 @@ function createServices(db) {
         params.push(q, q, q);
       }
       const sql = `${PRODUCT_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.name LIMIT 500`;
-      return plainAll(db.prepare(sql).all(...params));
+      const rows = plainAll(db.prepare(sql).all(...params));
+      return can('view_cost') ? rows : rows.map(({ cost, ...r }) => r);
     },
     byBarcode(barcode) {
       requireUser();
       return plain(db.prepare(`${PRODUCT_SELECT} WHERE p.barcode = ? AND p.active = 1`).get(str(barcode))) || null;
     },
     save(p = {}) {
-      requireAdmin();
+      requirePerm('products');
       if (!str(p.name)) throw new PosError('NAME_REQUIRED');
       const price = int(p.price, -1);
       if (price < 0) throw new PosError('INVALID_PRICE');
@@ -260,7 +337,11 @@ function createServices(db) {
       const keys = Object.keys(fields);
       return transaction(db, () => {
         if (p.id) {
+          const before = db.prepare('SELECT price, cost, active FROM products WHERE id = ?').get(p.id);
           db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), p.id);
+          const changes = {};
+          for (const k of ['price', 'cost', 'active']) if (before && before[k] !== fields[k]) changes[k] = [before[k], fields[k]];
+          audit(changes.price ? 'product_price_change' : 'product_update', { entity: 'product', entityId: p.id, details: { name: fields.name, ...changes } });
           return p.id;
         }
         const id = Number(
@@ -269,20 +350,24 @@ function createServices(db) {
         );
         const initial = num(p.stock);
         if (initial) moveStock(id, initial, 'purchase', null, session.user.id);
+        audit('product_create', { entity: 'product', entityId: id, details: { name: fields.name, price: fields.price } });
         return id;
       });
     },
     remove(id) {
-      requireAdmin();
+      requirePerm('products');
       const used = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(id);
+      const name = db.prepare('SELECT name FROM products WHERE id = ?').get(id)?.name;
       if (used) db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(id);
       else db.prepare('DELETE FROM products WHERE id = ?').run(id);
+      audit(used ? 'product_deactivate' : 'product_delete', { entity: 'product', entityId: id, details: { name } });
       return true;
     },
     adjustStock({ productId, qty, reason = 'adjust' }) {
-      const u = requireAdmin();
+      const u = requirePerm('products').user;
       if (!['adjust', 'purchase'].includes(reason)) throw new PosError('INVALID_REASON');
       transaction(db, () => moveStock(productId, num(qty), reason, null, u.id));
+      audit('stock_adjust', { entity: 'product', entityId: productId, details: { qty: num(qty), reason, name: db.prepare('SELECT name FROM products WHERE id = ?').get(productId)?.name } });
       return plain(db.prepare('SELECT stock FROM products WHERE id = ?').get(productId));
     },
     lowStock() {
@@ -308,7 +393,7 @@ function createServices(db) {
         WHERE t.active = 1 ORDER BY t.area, CAST(t.name AS INTEGER), t.name`).all());
     },
     save(t = {}) {
-      requireAdmin();
+      requirePerm('settings');
       if (!str(t.name)) throw new PosError('NAME_REQUIRED');
       if (t.id) {
         db.prepare('UPDATE dining_tables SET name = ?, area = ?, seats = ? WHERE id = ?').run(str(t.name), str(t.area), int(t.seats, 4), t.id);
@@ -317,7 +402,7 @@ function createServices(db) {
       return Number(db.prepare('INSERT INTO dining_tables (name, area, seats) VALUES (?, ?, ?)').run(str(t.name), str(t.area), int(t.seats, 4)).lastInsertRowid);
     },
     remove(id) {
-      requireAdmin();
+      requirePerm('settings');
       if (db.prepare("SELECT 1 FROM orders WHERE table_id = ? AND status = 'open'").get(id)) throw new PosError('TABLE_BUSY');
       db.prepare('UPDATE dining_tables SET active = 0 WHERE id = ?').run(id);
       return true;
@@ -355,6 +440,7 @@ function createServices(db) {
       const u = requireUser();
       if (currentShift()) throw new PosError('SHIFT_ALREADY_OPEN');
       const id = Number(db.prepare('INSERT INTO shifts (user_id, opening_cash) VALUES (?, ?)').run(u.id, Math.max(0, int(openingCash))).lastInsertRowid);
+      audit('shift_open', { entity: 'shift', entityId: id, details: { opening_cash: Math.max(0, int(openingCash)) } });
       return plain(db.prepare('SELECT * FROM shifts WHERE id = ?').get(id));
     },
     close({ countedCash = 0, notes = '' } = {}) {
@@ -363,6 +449,7 @@ function createServices(db) {
       if (!shift) throw new PosError('NO_OPEN_SHIFT');
       return transaction(db, () => {
         const { expectedCash } = shiftSummary(shift.id);
+        audit('shift_close', { entity: 'shift', entityId: shift.id, details: { expected: expectedCash, counted: int(countedCash), difference: int(countedCash) - expectedCash } });
         db.prepare("UPDATE shifts SET closed_at = datetime('now', 'localtime'), counted_cash = ?, expected_cash = ?, notes = ? WHERE id = ?")
           .run(int(countedCash), expectedCash, str(notes), shift.id);
         return shiftSummary(shift.id);
@@ -373,7 +460,7 @@ function createServices(db) {
       return shiftSummary(id || currentShift()?.id);
     },
     list({ limit = 50 } = {}) {
-      requireAdmin();
+      requirePerm('shifts_all');
       return plainAll(db.prepare('SELECT s.*, u.name AS user_name FROM shifts s JOIN users u ON u.id = s.user_id ORDER BY s.id DESC LIMIT ?').all(int(limit, 50)));
     },
   };
@@ -403,11 +490,15 @@ function createServices(db) {
       if (!(qty > 0)) throw new PosError('INVALID_QTY');
       const p = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
       if (!p) throw new PosError('PRODUCT_NOT_FOUND');
+      // The cart may only change a price when the line is explicitly flagged; checkout authorizes it.
+      const overridePrice = it.price_override && int(it.unit_price, -1) >= 0 && int(it.unit_price) !== p.price ? int(it.unit_price) : null;
       return {
         id: it.id || null,
         product_id: p.id,
         name: p.name,
-        unit_price: p.price,
+        list_price: p.price,
+        price_override: overridePrice != null,
+        unit_price: overridePrice ?? p.price,
         unit_cost: p.cost,
         qty,
         discount: Math.max(0, int(it.discount)),
@@ -426,6 +517,31 @@ function createServices(db) {
     return { settings: s, orderType, ...totals };
   }
 
+  /**
+   * Checks the cashier may give this cart's discounts / price changes, asking for a
+   * supervisor's approval when they exceed their own limits. Logs what was granted.
+   */
+  function authorizeCart(priced, approval, { credit = 0 } = {}) {
+    const gross = priced.lines.reduce((sum, l) => sum + Math.round(l.unit_price * l.qty), 0);
+    const discount = priced.lines.reduce((sum, l) => sum + Math.min(l.discount, Math.round(l.unit_price * l.qty)), 0) + priced.discount;
+    const pct = gross > 0 ? (discount / gross) * 100 : 0;
+    const granted = [];
+    if (discount > 0) {
+      const r = requirePerm('discount', approval, (p) => pct <= (p.max_discount ?? 0) + 1e-9);
+      granted.push({ action: 'discount', approvedBy: r.approvedBy, details: { amount: discount, pct: Math.round(pct * 10) / 10 } });
+    }
+    const overrides = priced.lines.filter((l) => l.price_override);
+    if (overrides.length) {
+      const r = requirePerm('price_override', approval);
+      granted.push({ action: 'price_override', approvedBy: r.approvedBy, details: overrides.map((l) => ({ product: l.name, from: l.list_price, to: l.unit_price })) });
+    }
+    if (credit > 0) {
+      const r = requirePerm('credit_sale', approval);
+      granted.push({ action: 'credit_sale', approvedBy: r.approvedBy, details: { amount: credit } });
+    }
+    return granted;
+  }
+
   // Writes header + lines of an order inside the caller's transaction.
   function persistOrder(cart, priced, user, status) {
     const header = {
@@ -433,6 +549,7 @@ function createServices(db) {
       table_id: priced.orderType === 'dine_in' ? cart.table_id || null : null,
       user_id: user.id,
       customer_id: int(cart.customer_id) || null,
+      salesperson_id: int(cart.salesperson_id) || null,
       customer_name: str(cart.customer_name),
       customer_phone: str(cart.customer_phone),
       customer_address: str(cart.customer_address),
@@ -516,13 +633,17 @@ function createServices(db) {
         return { order: getOrder(id), items: pending };
       });
     },
-    voidOpen(id) {
-      const u = requireUser();
+    /** Cancels an open order; once items reached the kitchen it needs the 'void' permission. */
+    voidOpen(arg) {
+      requireUser();
+      const id = typeof arg === 'object' ? arg.id : arg;
       return transaction(db, () => {
         const order = getOrder(id);
         if (order.status !== 'open') throw new PosError('ORDER_NOT_OPEN');
-        if (u.role !== 'admin' && order.items.some((i) => i.kitchen_sent > 0)) throw new PosError('FORBIDDEN');
+        let approvedBy = null;
+        if (order.items.some((i) => i.kitchen_sent > 0)) approvedBy = requirePerm('void', arg?.approval).approvedBy;
         db.prepare("UPDATE orders SET status = 'void' WHERE id = ?").run(id);
+        audit('order_void', { entity: 'order', entityId: id, approvedBy, details: { total: order.total, items: order.items.length, table: order.table_name } });
         return true;
       });
     },
@@ -559,6 +680,7 @@ function createServices(db) {
           }
         }
         const change = Math.max(0, tendered - priced.total);
+        const granted = authorizeCart(priced, cart.approval, { credit });
 
         const orderId = persistOrder(cart, priced, u, 'completed');
         const invoiceNo = (db.prepare('SELECT MAX(invoice_no) AS n FROM orders').get().n || 0) + 1;
@@ -579,6 +701,7 @@ function createServices(db) {
         }
 
         for (const l of priced.lines) if (l.track_stock) moveStock(l.product_id, -l.qty, 'sale', orderId, u.id);
+        for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
         return getOrder(orderId);
       });
     },
@@ -599,8 +722,8 @@ function createServices(db) {
         ORDER BY o.id DESC LIMIT ?`).all(...params));
     },
     /** Returns items from a completed order; refunded in cash from the open shift. */
-    refund({ orderId, items = [], reason = '' } = {}) {
-      const u = requireAdmin();
+    refund({ orderId, items = [], reason = '', approval = null } = {}) {
+      const { user: u, approvedBy } = requirePerm('refund', approval);
       const shift = currentShift();
       if (!shift) throw new PosError('NO_OPEN_SHIFT');
       return transaction(db, () => {
@@ -646,6 +769,7 @@ function createServices(db) {
           if (p && p.track_stock) moveStock(l.line.product_id, l.qty, 'return', returnId, u.id);
         }
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
+        audit('refund', { entity: 'order', entityId: orderId, approvedBy, details: { invoice: order.invoice_no, amount, cash: cashOut, reason: str(reason), items: lines.map((l) => ({ name: l.line.name, qty: l.qty })) } });
         return getOrder(orderId);
       });
     },
@@ -675,7 +799,7 @@ function createServices(db) {
 
   const suppliers = {
     list({ search = '', includeInactive = false } = {}) {
-      requireAdmin();
+      requirePerm('purchases');
       const q = `%${str(search)}%`;
       return plainAll(db.prepare(`
         SELECT s.*, ${SUPPLIER_BALANCE} AS balance FROM suppliers s
@@ -683,7 +807,7 @@ function createServices(db) {
         ORDER BY s.name`).all(q, q));
     },
     save(s = {}) {
-      requireAdmin();
+      requirePerm('purchases');
       if (!str(s.name)) throw new PosError('NAME_REQUIRED');
       const vals = [str(s.name), str(s.phone), str(s.address), str(s.notes), s.active === false ? 0 : 1];
       if (s.id) {
@@ -694,7 +818,7 @@ function createServices(db) {
     },
     /** Purchases and payments in date order with a running balance (what we owe). */
     statement(id) {
-      requireAdmin();
+      requirePerm('purchases');
       const supplier = plain(db.prepare(`SELECT s.*, ${SUPPLIER_BALANCE} AS balance FROM suppliers s WHERE s.id = ?`).get(id));
       if (!supplier) throw new PosError('NOT_FOUND');
       const rows = plainAll(db.prepare(`
@@ -707,18 +831,19 @@ function createServices(db) {
       return { supplier, rows };
     },
     pay({ supplierId, amount, method = 'cash', fromDrawer = false, notes = '' } = {}) {
-      const u = requireAdmin();
+      const u = requirePerm('purchases').user;
       const value = int(amount);
       if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
       if (!db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
       transaction(db, () => insertSupplierPayment({ supplierId, amount: value, method, fromDrawer, notes }, u));
+      audit('supplier_payment', { entity: 'supplier', entityId: supplierId, details: { amount: value, method, fromDrawer } });
       return suppliers.statement(supplierId);
     },
   };
 
   const purchases = {
     list({ from, to, supplierId = null } = {}) {
-      requireAdmin();
+      requirePerm('purchases');
       const [f, t] = dateRange(from, to);
       const params = [f, t];
       let extra = '';
@@ -731,7 +856,7 @@ function createServices(db) {
         ORDER BY p.id DESC LIMIT 500`).all(...params));
     },
     get(id) {
-      requireAdmin();
+      requirePerm('purchases');
       const p = plain(db.prepare(`
         SELECT p.*, s.name AS supplier_name, u.name AS user_name FROM purchases p
         LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id WHERE p.id = ?`).get(id));
@@ -745,7 +870,7 @@ function createServices(db) {
      * Anything unpaid stays on the supplier's balance.
      */
     create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [] } = {}) {
-      const u = requireAdmin();
+      const u = requirePerm('purchases').user;
       if (!items.length) throw new PosError('EMPTY_CART');
       if (supplierId && !db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
       return transaction(db, () => {
@@ -783,6 +908,7 @@ function createServices(db) {
           if (up.product_id && price >= 0) db.prepare('UPDATE products SET price = ? WHERE id = ?').run(price, up.product_id);
         }
         if (paidNow > 0) insertSupplierPayment({ supplierId, purchaseId, amount: paidNow, method, fromDrawer }, u);
+        audit('purchase_create', { entity: 'purchase', entityId: purchaseId, details: { total, paid: paidNow, supplierId } });
         return purchases.get(purchaseId);
       });
     },
@@ -790,7 +916,7 @@ function createServices(db) {
 
   const expenses = {
     list({ from, to } = {}) {
-      requireAdmin();
+      requirePerm('expenses');
       const [f, t] = dateRange(from, to);
       return plainAll(db.prepare(`
         SELECT e.*, u.name AS user_name FROM expenses e JOIN users u ON u.id = e.user_id
@@ -801,22 +927,25 @@ function createServices(db) {
       return db.prepare("SELECT DISTINCT category FROM expenses WHERE category != '' ORDER BY category").all().map((r) => r.category);
     },
     /** Cashiers may record drawer expenses (e.g. paying a delivery); admins can record any. */
-    create({ category = '', amount, notes = '', fromDrawer = true } = {}) {
+    create({ category = '', amount, notes = '', fromDrawer = true, approval = null } = {}) {
       const u = requireUser();
       const value = int(amount);
       if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
-      if (u.role !== 'admin' && !fromDrawer) throw new PosError('FORBIDDEN');
+      const approvedBy = fromDrawer ? null : requirePerm('expenses', approval).approvedBy;
       const id = Number(db.prepare('INSERT INTO expenses (category, amount, notes, from_drawer, shift_id, user_id) VALUES (?, ?, ?, ?, ?, ?)')
         .run(str(category), value, str(notes), fromDrawer ? 1 : 0, drawerShift(fromDrawer), u.id).lastInsertRowid);
+      audit('expense_create', { entity: 'expense', entityId: id, approvedBy, details: { amount: value, category: str(category), fromDrawer } });
       return plain(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id));
     },
     remove(id) {
-      requireAdmin();
+      requirePerm('expenses');
       const e = db.prepare('SELECT shift_id FROM expenses WHERE id = ?').get(id);
       if (!e) throw new PosError('NOT_FOUND');
       // Removing a drawer expense from a closed shift would silently change its Z-report.
       if (e.shift_id && db.prepare('SELECT closed_at FROM shifts WHERE id = ?').get(e.shift_id)?.closed_at) throw new PosError('SHIFT_CLOSED');
+      const row = db.prepare('SELECT amount, category FROM expenses WHERE id = ?').get(id);
       db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+      audit('expense_delete', { entity: 'expense', entityId: id, details: { ...row } });
       return true;
     },
   };
@@ -862,9 +991,10 @@ function createServices(db) {
       if (phone && db.prepare('SELECT 1 FROM customers WHERE phone = ? AND id != ?').get(phone, c.id || 0)) throw new PosError('DUPLICATE_PHONE');
       const existing = c.id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(c.id) : null;
       if (c.id && !existing) throw new PosError('NOT_FOUND');
-      const admin = u.role === 'admin';
+      const admin = can('customers_edit', u);
       const limit = admin ? Math.max(0, int(c.credit_limit)) : existing?.credit_limit ?? 0;
       const active = admin ? (c.active === false ? 0 : 1) : existing?.active ?? 1;
+      if (existing && existing.credit_limit !== limit) audit('credit_limit_change', { entity: 'customer', entityId: c.id, details: { name: str(c.name), from: existing.credit_limit, to: limit } });
       const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active];
       if (c.id) {
         db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ? WHERE id = ?').run(...vals, c.id);
@@ -898,6 +1028,7 @@ function createServices(db) {
       if (!db.prepare('SELECT 1 FROM customers WHERE id = ?').get(customerId)) throw new PosError('NOT_FOUND');
       const shift = currentShift();
       if (method === 'cash' && !shift) throw new PosError('NO_OPEN_SHIFT');
+      audit('customer_collect', { entity: 'customer', entityId: customerId, details: { amount: value, method } });
       const id = Number(db.prepare('INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, notes) VALUES (?, ?, ?, ?, ?, ?)')
         .run(customerId, value, method, shift?.id ?? null, u.id, str(notes)).lastInsertRowid);
       return { payment: plain(db.prepare('SELECT p.*, u.name AS user_name FROM customer_payments p JOIN users u ON u.id = p.user_id WHERE p.id = ?').get(id)), customer: customers.get(customerId) };
@@ -907,7 +1038,7 @@ function createServices(db) {
   // ---------- reports ----------
   const reports = {
     summary({ from, to } = {}) {
-      requireAdmin();
+      requirePerm('reports');
       const [f, t] = dateRange(from, to);
       const range = "o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')";
       const totals = plain(db.prepare(`
@@ -930,14 +1061,15 @@ function createServices(db) {
           refunds,
           net: totals.gross - refunds,
           average: totals.orders ? Math.round(totals.gross / totals.orders) : 0,
-          profit,
+          profit: can('view_cost') ? profit : null,
           purchases: purchasesTotal,
           expenses: expensesTotal,
-          netProfit: profit - expensesTotal,
+          netProfit: can('view_cost') ? profit - expensesTotal : null,
           creditSales: db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders o WHERE " + range).get(f, t).t,
           collections: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method != 'return' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t,
           receivables: db.prepare(`SELECT COALESCE(SUM(b), 0) AS t FROM (SELECT ${CUSTOMER_BALANCE} AS b FROM customers c) WHERE b > 0`).get().t,
         },
+        ...(can('view_cost') ? {} : { hiddenProfit: true }),
         topCustomers: plainAll(db.prepare(`SELECT c.name, COUNT(*) AS orders, SUM(o.total) AS total FROM orders o JOIN customers c ON c.id = o.customer_id WHERE ${range} GROUP BY c.id ORDER BY total DESC LIMIT 10`).all(f, t)),
         expensesByCategory: plainAll(db.prepare("SELECT category, SUM(amount) AS total FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day') GROUP BY category ORDER BY total DESC").all(f, t)),
         byMethod: plainAll(db.prepare(`SELECT p.method, SUM(p.amount) AS amount, COUNT(DISTINCT p.order_id) AS orders FROM payments p JOIN orders o ON o.id = p.order_id WHERE ${range} GROUP BY p.method ORDER BY amount DESC`).all(f, t)),
@@ -958,7 +1090,45 @@ function createServices(db) {
     },
   };
 
-  return { session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports, requireAdmin };
+    // ---------- commissions ----------
+  const commissions = {
+    /** Net sales (after returns) per salesperson — the cashier unless another rep was picked. */
+    report({ from, to } = {}) {
+      requirePerm('reports');
+      const [f, t] = dateRange(from, to);
+      return plainAll(db.prepare(`
+        SELECT u.id, u.name, u.commission_rate AS rate, COUNT(*) AS orders,
+               SUM(o.total - o.refunded) AS net
+        FROM orders o JOIN users u ON u.id = COALESCE(o.salesperson_id, o.user_id)
+        WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')
+        GROUP BY u.id ORDER BY net DESC`).all(f, t)).map((r) => ({ ...r, commission: Math.round((r.net * r.rate) / 100) }));
+    },
+  };
+
+  const auditLog = {
+    list({ from, to, userId = null, action = '', limit = 500 } = {}) {
+      requirePerm('audit');
+      const [f, t] = dateRange(from, to);
+      const where = ["a.created_at >= ? AND a.created_at < date(?, '+1 day')"];
+      const params = [f, t];
+      if (userId) { where.push('a.user_id = ?'); params.push(userId); }
+      if (str(action)) { where.push('a.action = ?'); params.push(str(action)); }
+      params.push(int(limit, 500));
+      return plainAll(db.prepare(`
+        SELECT a.*, u.name AS user_name, ap.name AS approver_name FROM audit_log a
+        LEFT JOIN users u ON u.id = a.user_id LEFT JOIN users ap ON ap.id = a.approved_by
+        WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`).all(...params));
+    },
+    actions() {
+      requirePerm('audit');
+      return db.prepare('SELECT DISTINCT action FROM audit_log ORDER BY action').all().map((r) => r.action);
+    },
+  };
+
+  return {
+    session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
+    auditLog, commissions, requireAdmin, requirePerm, audit, can,
+  };
 }
 
 module.exports = { createServices, PosError, DEFAULT_SETTINGS, hashPin, verifyPin };

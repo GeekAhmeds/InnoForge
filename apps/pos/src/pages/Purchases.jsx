@@ -386,7 +386,7 @@ function ExpenseList() {
 }
 
 export function ExpenseModal({ onClose, onSaved }) {
-  const { t, tErr, notify, settings, shift, isAdmin } = useApp();
+  const { t, tErr, notify, settings, shift, withApproval } = useApp();
   const [f, setF] = useState({ category: '', amount: '', notes: '', fromDrawer: !!shift });
   const [cats, setCats] = useState([]);
   useEffect(() => { api.expenses.categories().then(setCats).catch(() => {}); }, []);
@@ -394,11 +394,11 @@ export function ExpenseModal({ onClose, onSaved }) {
   async function save(e) {
     e?.preventDefault();
     try {
-      await api.expenses.create({ ...f, amount: toMinor(f.amount, settings.decimals) });
+      await withApproval((approval) => api.expenses.create({ ...f, amount: toMinor(f.amount, settings.decimals), approval }));
       notify(t('common.saved'));
       onSaved();
     } catch (err) {
-      notify(tErr(err), 'error');
+      if (err.code !== 'CANCELLED') notify(tErr(err), 'error');
     }
   }
   return (
@@ -411,7 +411,7 @@ export function ExpenseModal({ onClose, onSaved }) {
           <datalist id="expense-cats">{cats.map((c) => <option key={c} value={c} />)}</datalist>
         </Field>
         <Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field>
-        {isAdmin && <Toggle checked={f.fromDrawer} onChange={set('fromDrawer')} label={t('expenses.fromDrawer')} />}
+        <Toggle checked={f.fromDrawer} onChange={set('fromDrawer')} label={t('expenses.fromDrawer')} />
         <button hidden />
       </form>
     </Modal>
