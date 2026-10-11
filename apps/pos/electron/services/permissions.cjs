@@ -15,6 +15,7 @@ const PERMISSIONS = [
   'products',        // manage products, categories, stock
   'purchases',       // suppliers, purchase invoices, purchase returns, stock counts
   'expenses',        // record expenses outside the drawer, delete expenses
+  'treasury',        // cash boxes and bank accounts: balances, transfers, cheques
   'customers_edit',  // credit limits, price lists, deactivate customers
   'reports',         // reports & commissions
   'shifts_all',      // see every shift, not just the current one

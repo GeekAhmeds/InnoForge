@@ -726,3 +726,56 @@ test('restaurant: sizes and extras, recipes consume ingredients, delivery zones 
   s.orders.refund({ orderId: paid.id, items: [{ order_item_id: paid.items[0].id, qty: 1 }] });
   assert.deepEqual([stock(bread), stock(chicken), stock(cheese)], [99, 9.85, 4.95]);
 });
+
+test('treasury: cash box and bank, transfers, receipts into the bank, cheques both ways, shift deposit', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const box = s.treasury.saveAccount({ name: 'Main safe', kind: 'cash', opening_balance: 100000 });
+  const bank = s.treasury.saveAccount({ name: 'NBE current', kind: 'bank', bank_name: 'NBE', opening_balance: 500000 });
+  const bal = (id) => s.treasury.accounts().find((a) => a.id === id).balance;
+  s.treasury.transfer({ fromId: box, toId: bank, amount: 40000, notes: 'deposit' });
+  assert.deepEqual([bal(box), bal(bank)], [60000, 540000]);
+  assert.equal(tryCode(() => s.treasury.adjust({ accountId: bank, amount: -500 })), 'REASON_REQUIRED');
+  s.treasury.adjust({ accountId: bank, amount: -500, notes: 'bank fees' });
+  // a customer pays by bank transfer into the bank; a cheque clears into the bank, then bounces
+  const p = s.products.save({ name: 'Box', price: 10000, stock: 100 });
+  const cust = s.customers.save({ name: 'Delta' });
+  s.shifts.open({ openingCash: 5000 });
+  s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 5 }], payments: [] });
+  const r1 = s.customers.collect({ customerId: cust, amount: 20000, method: 'bank', accountId: bank });
+  assert.equal(bal(bank), 559500);
+  s.customers.collect({ customerId: cust, amount: 30000, method: 'cheque', cheque: { no: 'C1', due: '2026-12-01' } });
+  const chq = s.customers.cheques({})[0];
+  s.customers.clearCheque({ id: chq.id, accountId: bank });
+  assert.equal(bal(bank), 589500);
+  s.customers.bounceCheque({ id: chq.id, reason: 'no funds' });
+  assert.equal(bal(bank), 559500);
+  s.customers.voidReceipt({ receiptNo: r1.receipt.receipt_no, reason: 'wrong' });
+  assert.equal(bal(bank), 539500);
+  // supplier: paid from the safe, then by a cheque charged to the bank when cashed, another cancelled
+  const sup = s.suppliers.save({ name: 'Nile' });
+  s.purchases.create({ supplierId: sup, items: [{ product_id: p, qty: 10, unit_cost: 6000 }] }); // owes 600
+  s.suppliers.pay({ supplierId: sup, amount: 10000, method: 'cash', accountId: box });
+  assert.equal(bal(box), 50000);
+  s.suppliers.pay({ supplierId: sup, amount: 30000, method: 'cheque', cheque: { no: 'OUT-1', bank: 'NBE', due: '2026-11-15' }, accountId: bank });
+  s.suppliers.pay({ supplierId: sup, amount: 5000, method: 'cheque', cheque: { no: 'OUT-2' } });
+  const balanceOf = () => s.suppliers.list({}).find((x) => x.id === sup).balance;
+  assert.equal(balanceOf(), 60000 - 10000 - 30000 - 5000);
+  assert.equal(bal(bank), 539500); // not cashed yet
+  const out = s.treasury.issuedCheques({});
+  assert.equal(out.length, 2);
+  s.treasury.clearIssued({ id: out.find((c) => c.cheque_no === 'OUT-1').id });
+  assert.equal(bal(bank), 509500);
+  s.treasury.voidIssued({ id: out.find((c) => c.cheque_no === 'OUT-2').id, reason: 'lost' });
+  assert.equal(balanceOf(), 20000);
+  // expense from the bank; shift takings deposited into the safe
+  const e = s.expenses.create({ category: 'Rent', amount: 9500, fromDrawer: false, accountId: bank });
+  assert.equal(bal(bank), 500000);
+  s.expenses.remove(e.id);
+  assert.equal(bal(bank), 509500);
+  s.shifts.close({ countedCash: 5000, depositAccountId: box, depositAmount: 4000 });
+  assert.equal(bal(box), 54000);
+  const st = s.treasury.statement({ id: bank });
+  assert.equal(st.rows.at(-1).balance, 509500);
+  const ov = s.treasury.overview();
+  assert.deepEqual([ov.cash, ov.bank, ov.chequesOut.n], [54000, 509500, 0]);
+});

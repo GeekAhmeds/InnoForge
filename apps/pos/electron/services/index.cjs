@@ -670,7 +670,7 @@ function createServices(db) {
     const refunds = plain(db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, COALESCE(SUM(cash_amount), 0) AS cash FROM returns WHERE shift_id = ?').get(shiftId));
     const cashSales = byMethod.find((m) => m.method === 'cash')?.amount || 0;
     // Cash that left the drawer during the shift for suppliers or expenses.
-    const supplierCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
+    const supplierCash = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE shift_id = ? AND from_drawer = 1 AND status = 'posted'").get(shiftId).t;
     const expenseCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
     const creditSales = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE shift_id = ? AND status = 'completed'").get(shiftId).t;
     const collections = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM customer_payments WHERE shift_id = ? AND method NOT IN ('return', 'discount') AND status = 'posted' GROUP BY method").all(shiftId));
@@ -691,8 +691,8 @@ function createServices(db) {
       audit('shift_open', { entity: 'shift', entityId: id, details: { opening_cash: Math.max(0, int(openingCash)) } });
       return plain(db.prepare('SELECT * FROM shifts WHERE id = ?').get(id));
     },
-    close({ countedCash = 0, notes = '' } = {}) {
-      requireUser();
+    close({ countedCash = 0, notes = '', depositAccountId = null, depositAmount = 0 } = {}) {
+      const u = requireUser();
       const shift = currentShift();
       if (!shift) throw new PosError('NO_OPEN_SHIFT');
       return transaction(db, () => {
@@ -700,6 +700,12 @@ function createServices(db) {
         audit('shift_close', { entity: 'shift', entityId: shift.id, details: { expected: expectedCash, counted: int(countedCash), difference: int(countedCash) - expectedCash } });
         db.prepare("UPDATE shifts SET closed_at = datetime('now', 'localtime'), counted_cash = ?, expected_cash = ?, notes = ? WHERE id = ?")
           .run(int(countedCash), expectedCash, str(notes), shift.id);
+        // The drawer's takings handed over to a cash box (the float can stay in the drawer).
+        const deposit = Math.max(0, int(depositAmount));
+        if (deposit > 0 && int(depositAccountId)) {
+          moneyMove({ accountId: int(depositAccountId), amount: deposit, kind: 'shift_deposit', refType: 'shift', refId: shift.id, notes: `#${shift.id}` }, u);
+          db.prepare('UPDATE shifts SET deposited = ? WHERE id = ?').run(deposit, shift.id);
+        }
         return shiftSummary(shift.id);
       });
     },
@@ -1300,7 +1306,7 @@ function createServices(db) {
   const SUPPLIER_BALANCE = `(
     s.opening_balance +
     COALESCE((SELECT SUM(total) FROM purchases p WHERE p.supplier_id = s.id), 0) -
-    COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id = s.id), 0)
+    COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id = s.id AND sp.status = 'posted'), 0)
   )`;
 
   // Records cash leaving the business; drawer cash needs the open shift so the Z-report balances.
@@ -1311,11 +1317,21 @@ function createServices(db) {
     return shift.id;
   }
 
-  function insertSupplierPayment({ supplierId, purchaseId = null, amount, method = 'cash', fromDrawer = false, notes = '' }, user) {
-    if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+  /**
+   * Money paid to a supplier: from the till drawer, from a cash box / bank account (recorded in
+   * the treasury now), or by cheque (the bank account is charged when the cheque is cashed).
+   */
+  function insertSupplierPayment({ supplierId, purchaseId = null, amount, method = 'cash', fromDrawer = false, notes = '', accountId = null, cheque = null }, user) {
+    if (![...PAYMENT_METHODS, 'cheque'].includes(method)) throw new PosError('INVALID_PAYMENT');
     const drawer = fromDrawer && method === 'cash';
-    db.prepare('INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, from_drawer, shift_id, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(supplierId, purchaseId, amount, method, drawer ? 1 : 0, drawerShift(drawer), user.id, str(notes));
+    const chq = method === 'cheque' ? { no: str(cheque?.no), bank: str(cheque?.bank), due: str(cheque?.due) || null } : null;
+    if (chq && !chq.no) throw new PosError('CHEQUE_NO_REQUIRED');
+    const account = !drawer && int(accountId) ? int(accountId) : null;
+    const id = Number(db.prepare(`INSERT INTO supplier_payments (supplier_id, purchase_id, amount, method, from_drawer, shift_id, user_id, notes, account_id, cheque_no, bank, cheque_due, cheque_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(supplierId, purchaseId, amount, method, drawer ? 1 : 0, drawerShift(drawer), user.id, str(notes), account, chq?.no || '', chq?.bank || '', chq?.due || null, chq ? 'pending' : '').lastInsertRowid);
+    if (account && !chq) moneyMove({ accountId: account, amount: -amount, kind: 'supplier_payment', refType: 'supplier_payment', refId: id, notes: str(notes) }, user);
+    return id;
   }
 
   const suppliers = {
@@ -1345,18 +1361,18 @@ function createServices(db) {
       const rows = plainAll(db.prepare(`
         SELECT 'purchase' AS kind, id, created_at, ref_no AS ref, total AS debit, 0 AS credit, notes FROM purchases WHERE supplier_id = ?
         UNION ALL
-        SELECT 'payment' AS kind, id, created_at, method AS ref, 0 AS debit, amount AS credit, notes FROM supplier_payments WHERE supplier_id = ?
+        SELECT 'payment' AS kind, id, created_at, method AS ref, 0 AS debit, amount AS credit, CASE WHEN cheque_no != '' THEN cheque_no || ' ' || notes ELSE notes END AS notes FROM supplier_payments WHERE supplier_id = ? AND status = 'posted'
         ORDER BY created_at, kind DESC, id`).all(id, id));
       let balance = supplier.opening_balance || 0;
       for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
       return { supplier, rows, opening: supplier.opening_balance || 0 };
     },
-    pay({ supplierId, amount, method = 'cash', fromDrawer = false, notes = '' } = {}) {
+    pay({ supplierId, amount, method = 'cash', fromDrawer = false, notes = '', accountId = null, cheque = null } = {}) {
       const u = requirePerm('purchases').user;
       const value = int(amount);
       if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
       if (!db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
-      transaction(db, () => insertSupplierPayment({ supplierId, amount: value, method, fromDrawer, notes }, u));
+      transaction(db, () => insertSupplierPayment({ supplierId, amount: value, method, fromDrawer, notes, accountId, cheque }, u));
       audit('supplier_payment', { entity: 'supplier', entityId: supplierId, details: { amount: value, method, fromDrawer } });
       return suppliers.statement(supplierId);
     },
@@ -1371,7 +1387,7 @@ function createServices(db) {
       if (supplierId) { extra = 'AND p.supplier_id = ?'; params.push(supplierId); }
       return plainAll(db.prepare(`
         SELECT p.*, s.name AS supplier_name, u.name AS user_name,
-          COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.purchase_id = p.id AND sp.method != 'return'), 0) AS paid
+          COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.purchase_id = p.id AND sp.method != 'return' AND sp.status = 'posted'), 0) AS paid
         FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id
         WHERE p.created_at >= ? AND p.created_at < date(?, '+1 day') ${extra}
         ORDER BY p.id DESC LIMIT 500`).all(...params));
@@ -1391,7 +1407,7 @@ function createServices(db) {
      * Receives goods: adds stock, re-averages product cost and optionally pays now.
      * Anything unpaid stays on the supplier's balance.
      */
-    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [], poId = null } = {}) {
+    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [], poId = null, accountId = null, cheque = null } = {}) {
       const u = requirePerm('purchases').user;
       if (!items.length) throw new PosError('EMPTY_CART');
       if (supplierId && !db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
@@ -1442,7 +1458,7 @@ function createServices(db) {
           const price = int(up.price, -1);
           if (up.product_id && price >= 0) db.prepare('UPDATE products SET price = ? WHERE id = ?').run(price, up.product_id);
         }
-        if (paidNow > 0) insertSupplierPayment({ supplierId, purchaseId, amount: paidNow, method, fromDrawer }, u);
+        if (paidNow > 0) insertSupplierPayment({ supplierId, purchaseId, amount: paidNow, method, fromDrawer, accountId, cheque }, u);
         if (int(poId)) {
           db.prepare("UPDATE purchase_orders SET status = 'received', purchase_id = ? WHERE id = ? AND status IN ('draft', 'sent')").run(purchaseId, int(poId));
           db.prepare('UPDATE purchases SET po_id = ? WHERE id = ?').run(int(poId), purchaseId);
@@ -1466,13 +1482,18 @@ function createServices(db) {
       return db.prepare("SELECT DISTINCT category FROM expenses WHERE category != '' ORDER BY category").all().map((r) => r.category);
     },
     /** Cashiers may record drawer expenses (e.g. paying a delivery); admins can record any. */
-    create({ category = '', amount, notes = '', fromDrawer = true, approval = null } = {}) {
+    create({ category = '', amount, notes = '', fromDrawer = true, approval = null, accountId = null } = {}) {
       const u = requireUser();
       const value = int(amount);
       if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
       const approvedBy = fromDrawer ? null : requirePerm('expenses', approval).approvedBy;
-      const id = Number(db.prepare('INSERT INTO expenses (category, amount, notes, from_drawer, shift_id, user_id) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(str(category), value, str(notes), fromDrawer ? 1 : 0, drawerShift(fromDrawer), u.id).lastInsertRowid);
+      const account = !fromDrawer && int(accountId) ? int(accountId) : null;
+      const id = transaction(db, () => {
+        const eid = Number(db.prepare('INSERT INTO expenses (category, amount, notes, from_drawer, shift_id, user_id, account_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(str(category), value, str(notes), fromDrawer ? 1 : 0, drawerShift(fromDrawer), u.id, account).lastInsertRowid);
+        if (account) moneyMove({ accountId: account, amount: -value, kind: 'expense', refType: 'expense', refId: eid, notes: [str(category), str(notes)].filter(Boolean).join(' — ') }, u);
+        return eid;
+      });
       audit('expense_create', { entity: 'expense', entityId: id, approvedBy, details: { amount: value, category: str(category), fromDrawer } });
       return plain(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id));
     },
@@ -1483,6 +1504,7 @@ function createServices(db) {
       // Removing a drawer expense from a closed shift would silently change its Z-report.
       if (e.shift_id && db.prepare('SELECT closed_at FROM shifts WHERE id = ?').get(e.shift_id)?.closed_at) throw new PosError('SHIFT_CLOSED');
       const row = db.prepare('SELECT amount, category FROM expenses WHERE id = ?').get(id);
+      reverseMoves('expense', id, session.user);
       db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
       audit('expense_delete', { entity: 'expense', entityId: id, details: { ...row } });
       return true;
@@ -1661,7 +1683,7 @@ function createServices(db) {
      * `allocations` [{ order_id, amount }] pick the invoices it pays; otherwise the oldest are settled.
      * Paying more than is owed leaves an advance (credit balance).
      */
-    collect({ customerId, amount, method = 'cash', notes = '', discount = 0, allocations = null, cheque = null, collectorId = null, approval = null } = {}) {
+    collect({ customerId, amount, method = 'cash', notes = '', discount = 0, allocations = null, cheque = null, collectorId = null, approval = null, accountId = null } = {}) {
       const u = requireUser();
       const value = Math.max(0, int(amount));
       const disc = Math.max(0, int(discount));
@@ -1694,7 +1716,13 @@ function createServices(db) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
         const rows = [];
         if (value > 0) {
-          rows.push({ id: Number(ins.run(customerId, value, method, shift?.id ?? null, u.id, str(notes), receiptNo, chq?.no || '', chq?.bank || '', chq?.due || null, chq ? 'pending' : '', collector).lastInsertRowid), left: value });
+          const pid = Number(ins.run(customerId, value, method, shift?.id ?? null, u.id, str(notes), receiptNo, chq?.no || '', chq?.bank || '', chq?.due || null, chq ? 'pending' : '', collector).lastInsertRowid);
+          rows.push({ id: pid, left: value });
+          // Transfers / card / wallet money lands in the chosen bank account right away.
+          if (!chq && method !== 'cash' && int(accountId)) {
+            db.prepare('UPDATE customer_payments SET account_id = ? WHERE id = ?').run(int(accountId), pid);
+            moneyMove({ accountId: int(accountId), amount: value, kind: 'customer_receipt', refType: 'customer_payment', refId: pid, notes: `#${receiptNo}` }, u);
+          }
         }
         if (disc > 0) {
           rows.push({ id: Number(ins.run(customerId, disc, 'discount', shift?.id ?? null, u.id, str(notes), receiptNo, '', '', null, '', collector).lastInsertRowid), left: disc });
@@ -1755,6 +1783,7 @@ function createServices(db) {
         // Cash already counted in a closed shift cannot leave its Z-report.
         if (r.method === 'cash' && r.shift_id && db.prepare('SELECT closed_at FROM shifts WHERE id = ?').get(r.shift_id)?.closed_at) throw new PosError('SHIFT_CLOSED');
         db.prepare("UPDATE customer_payments SET status = 'void', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE receipt_no = ?").run(str(reason), u.id, r.receipt_no);
+        for (const { id } of db.prepare('SELECT id FROM customer_payments WHERE receipt_no = ?').all(r.receipt_no)) reverseMoves('customer_payment', id, u);
         audit('receipt_void', { entity: 'customer', entityId: r.customer_id, approvedBy, details: { receipt: r.receipt_no, amount: r.amount, discount: r.discount, reason: str(reason) } });
         return { ...getReceipt(r.receipt_no), customer: customers.get(r.customer_id) };
       });
@@ -1772,11 +1801,16 @@ function createServices(db) {
         WHERE ${where} ORDER BY COALESCE(p.cheque_due, p.created_at), p.id`).all(...params));
     },
     /** The bank paid a cheque. */
-    clearCheque(id) {
-      requirePerm('customers_edit');
+    clearCheque(arg) {
+      const u = requirePerm('customers_edit').user;
+      const id = typeof arg === 'object' ? arg.id : arg;
+      const accountId = typeof arg === 'object' ? int(arg.accountId) || null : null;
       const p = db.prepare("SELECT * FROM customer_payments WHERE id = ? AND method = 'cheque'").get(id);
       if (!p || p.status !== 'posted' || p.cheque_status !== 'pending') throw new PosError('INVALID_STATUS');
-      db.prepare("UPDATE customer_payments SET cheque_status = 'cleared' WHERE id = ?").run(id);
+      transaction(db, () => {
+        db.prepare("UPDATE customer_payments SET cheque_status = 'cleared', account_id = ? WHERE id = ?").run(accountId, id);
+        if (accountId) moneyMove({ accountId, amount: p.amount, kind: 'cheque_in', refType: 'customer_payment', refId: id, notes: p.cheque_no }, u);
+      });
       audit('cheque_cleared', { entity: 'customer', entityId: p.customer_id, details: { cheque: p.cheque_no, amount: p.amount, receipt: p.receipt_no } });
       return true;
     },
@@ -1787,6 +1821,7 @@ function createServices(db) {
       if (!p || p.status !== 'posted' || p.cheque_status === 'bounced') throw new PosError('INVALID_STATUS');
       transaction(db, () => {
         db.prepare("UPDATE customer_payments SET status = 'bounced', cheque_status = 'bounced', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE id = ?").run(str(reason), u.id, id);
+        reverseMoves('customer_payment', id, u);
         // A settlement discount given with this cheque goes with it.
         db.prepare("UPDATE customer_payments SET status = 'void', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE receipt_no = ? AND method = 'discount' AND status = 'posted'").run(str(reason), u.id, p.receipt_no);
       });
@@ -2705,9 +2740,137 @@ function createServices(db) {
     },
   };
 
+  // ---------- treasury: cash boxes and bank accounts ----------
+  function accountBalance(id) {
+    const a = db.prepare('SELECT opening_balance FROM money_accounts WHERE id = ?').get(id);
+    return (a?.opening_balance || 0) + db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM money_moves WHERE account_id = ?').get(id).t;
+  }
+
+  /** One ledger line. Positive = money in. */
+  function moneyMove({ accountId, amount, kind, refType = '', refId = null, notes = '', transferId = null }, user = session.user) {
+    if (!db.prepare('SELECT 1 FROM money_accounts WHERE id = ? AND active = 1').get(accountId)) throw new PosError('ACCOUNT_NOT_FOUND');
+    if (!int(amount)) return null;
+    return Number(db.prepare('INSERT INTO money_moves (account_id, amount, kind, ref_type, ref_id, transfer_id, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(accountId, int(amount), kind, refType, refId, transferId, str(notes), user?.id ?? null).lastInsertRowid);
+  }
+
+  /** Cancels the treasury effect of something that was voided (adds the opposite lines). */
+  function reverseMoves(refType, refId, user) {
+    const rows = db.prepare("SELECT * FROM money_moves WHERE ref_type = ? AND ref_id = ? AND kind NOT LIKE 'reverse%'").all(refType, refId);
+    const done = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM money_moves WHERE ref_type = ? AND ref_id = ?").get(refType, refId).t;
+    if (!rows.length || done === 0) return;
+    for (const m of rows) moneyMove({ accountId: m.account_id, amount: -m.amount, kind: 'reverse', refType, refId, notes: m.notes }, user);
+  }
+
+  const treasury = {
+    accounts({ includeInactive = false } = {}) {
+      requireUser();
+      const rows = plainAll(db.prepare(`SELECT * FROM money_accounts ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY kind, id`).all());
+      return can('treasury') ? rows.map((a) => ({ ...a, balance: accountBalance(a.id) })) : rows.map(({ opening_balance, ...a }) => a);
+    },
+    saveAccount(a = {}) {
+      requirePerm('treasury');
+      if (!str(a.name)) throw new PosError('NAME_REQUIRED');
+      const kind = a.kind === 'bank' ? 'bank' : 'cash';
+      const vals = [str(a.name), kind, str(a.bank_name), str(a.account_no), int(a.opening_balance), a.active === false ? 0 : 1];
+      audit('account_save', { entity: 'account', entityId: a.id ?? null, details: { name: vals[0] } });
+      if (a.id) {
+        db.prepare('UPDATE money_accounts SET name = ?, kind = ?, bank_name = ?, account_no = ?, opening_balance = ?, active = ? WHERE id = ?').run(...vals, a.id);
+        return a.id;
+      }
+      return Number(db.prepare('INSERT INTO money_accounts (name, kind, bank_name, account_no, opening_balance, active) VALUES (?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    /** Every movement of an account with a running balance. */
+    statement({ id, from = null, to = null } = {}) {
+      requirePerm('treasury');
+      const account = plain(db.prepare('SELECT * FROM money_accounts WHERE id = ?').get(id));
+      if (!account) throw new PosError('NOT_FOUND');
+      const rows = plainAll(db.prepare(`SELECT m.*, u.name AS user_name FROM money_moves m LEFT JOIN users u ON u.id = m.user_id WHERE m.account_id = ? ORDER BY m.created_at, m.id`).all(id));
+      let balance = account.opening_balance;
+      for (const r of rows) { balance += r.amount; r.balance = balance; }
+      const inRange = rows.filter((r) => (!from || r.created_at >= from) && (!to || r.created_at < `${to} 99`));
+      const opening = inRange.length ? inRange[0].balance - inRange[0].amount : balance;
+      return { account: { ...account, balance }, opening, rows: inRange };
+    },
+    /** Money moved between two accounts (e.g. cash box → bank deposit). */
+    transfer({ fromId, toId, amount, notes = '' } = {}) {
+      const u = requirePerm('treasury').user;
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (int(fromId) === int(toId)) throw new PosError('INVALID_STATUS');
+      return transaction(db, () => {
+        const out = moneyMove({ accountId: int(fromId), amount: -value, kind: 'transfer_out', notes }, u);
+        moneyMove({ accountId: int(toId), amount: value, kind: 'transfer_in', notes, transferId: out }, u);
+        db.prepare('UPDATE money_moves SET transfer_id = ? WHERE id = ?').run(out, out);
+        audit('account_transfer', { details: { amount: value, from: int(fromId), to: int(toId) } });
+        return true;
+      });
+    },
+    /** Money put in or taken out by hand (owner's capital, bank charges, withdrawals…). */
+    adjust({ accountId, amount, notes = '' } = {}) {
+      const u = requirePerm('treasury').user;
+      const value = int(amount);
+      if (!value) throw new PosError('INVALID_AMOUNT');
+      if (!str(notes)) throw new PosError('REASON_REQUIRED');
+      moneyMove({ accountId: int(accountId), amount: value, kind: value > 0 ? 'deposit' : 'withdraw', notes }, u);
+      audit('account_adjust', { entity: 'account', entityId: int(accountId), details: { amount: value, reason: str(notes) } });
+      return accountBalance(int(accountId));
+    },
+    /** Cheques we gave suppliers. */
+    issuedCheques({ status = 'pending' } = {}) {
+      requirePerm('treasury');
+      const params = [];
+      let where = "sp.method = 'cheque' AND sp.status = 'posted'";
+      if (status) { where += ' AND sp.cheque_status = ?'; params.push(status); }
+      return plainAll(db.prepare(`SELECT sp.*, s.name AS supplier_name, a.name AS account_name,
+          CAST(julianday(sp.cheque_due) - julianday(date('now', 'localtime')) AS INTEGER) AS days_left
+        FROM supplier_payments sp JOIN suppliers s ON s.id = sp.supplier_id LEFT JOIN money_accounts a ON a.id = sp.account_id
+        WHERE ${where} ORDER BY COALESCE(sp.cheque_due, sp.created_at), sp.id`).all(...params));
+    },
+    /** The bank paid our cheque: the account is charged now. */
+    clearIssued({ id, accountId } = {}) {
+      const u = requirePerm('treasury').user;
+      const p = db.prepare("SELECT * FROM supplier_payments WHERE id = ? AND method = 'cheque'").get(id);
+      if (!p || p.status !== 'posted' || p.cheque_status !== 'pending') throw new PosError('INVALID_STATUS');
+      const account = int(accountId) || p.account_id;
+      if (!account) throw new PosError('ACCOUNT_NOT_FOUND');
+      transaction(db, () => {
+        db.prepare("UPDATE supplier_payments SET cheque_status = 'cleared', account_id = ? WHERE id = ?").run(account, id);
+        moneyMove({ accountId: account, amount: -p.amount, kind: 'cheque_out', refType: 'supplier_payment', refId: id, notes: p.cheque_no }, u);
+      });
+      audit('cheque_out_cleared', { entity: 'supplier', entityId: p.supplier_id, details: { cheque: p.cheque_no, amount: p.amount } });
+      return true;
+    },
+    /** A cheque we gave was cancelled / returned: the supplier is owed the amount again. */
+    voidIssued({ id, reason = '' } = {}) {
+      const u = requirePerm('treasury').user;
+      if (!str(reason)) throw new PosError('REASON_REQUIRED');
+      const p = db.prepare("SELECT * FROM supplier_payments WHERE id = ? AND method = 'cheque'").get(id);
+      if (!p || p.status !== 'posted') throw new PosError('INVALID_STATUS');
+      transaction(db, () => {
+        db.prepare("UPDATE supplier_payments SET status = 'void', void_reason = ? WHERE id = ?").run(str(reason), id);
+        reverseMoves('supplier_payment', id, u);
+      });
+      audit('cheque_out_void', { entity: 'supplier', entityId: p.supplier_id, details: { cheque: p.cheque_no, amount: p.amount, reason: str(reason) } });
+      return true;
+    },
+    /** Totals for the treasury page: balances, cheques to collect and to pay. */
+    overview() {
+      requirePerm('treasury');
+      const accounts = treasury.accounts();
+      return {
+        accounts,
+        cash: accounts.filter((a) => a.kind === 'cash').reduce((sum, a) => sum + a.balance, 0),
+        bank: accounts.filter((a) => a.kind === 'bank').reduce((sum, a) => sum + a.balance, 0),
+        chequesIn: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t, COUNT(*) AS n FROM customer_payments WHERE method = 'cheque' AND status = 'posted' AND cheque_status = 'pending'").get(),
+        chequesOut: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t, COUNT(*) AS n FROM supplier_payments WHERE method = 'cheque' AND status = 'posted' AND cheque_status = 'pending'").get(),
+      };
+    },
+  };
+
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, requireAdmin, requirePerm, audit, can,
   };
 }
 

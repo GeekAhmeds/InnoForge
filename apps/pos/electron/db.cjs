@@ -667,6 +667,46 @@ const MIGRATIONS = [
   ALTER TABLE orders ADD COLUMN out_at TEXT;
   ALTER TABLE orders ADD COLUMN delivered_at TEXT;
   `,
+  // v14: treasury — cash boxes and bank accounts with a ledger of every movement;
+  // cheques we give suppliers (payable until the bank pays them).
+  `
+  CREATE TABLE money_accounts (
+    id              INTEGER PRIMARY KEY,
+    name            TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('cash', 'bank')),
+    bank_name       TEXT NOT NULL DEFAULT '',
+    account_no      TEXT NOT NULL DEFAULT '',
+    opening_balance INTEGER NOT NULL DEFAULT 0,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  -- Signed amounts: + money in, − money out. ref_type/ref_id point at what caused it.
+  CREATE TABLE money_moves (
+    id          INTEGER PRIMARY KEY,
+    account_id  INTEGER NOT NULL REFERENCES money_accounts(id),
+    amount      INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    ref_type    TEXT NOT NULL DEFAULT '',
+    ref_id      INTEGER,
+    transfer_id INTEGER,
+    notes       TEXT NOT NULL DEFAULT '',
+    user_id     INTEGER REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX idx_money_moves_account ON money_moves(account_id, created_at);
+  CREATE INDEX idx_money_moves_ref ON money_moves(ref_type, ref_id);
+
+  ALTER TABLE customer_payments ADD COLUMN account_id INTEGER REFERENCES money_accounts(id);
+  ALTER TABLE expenses ADD COLUMN account_id INTEGER REFERENCES money_accounts(id);
+  ALTER TABLE supplier_payments ADD COLUMN account_id INTEGER REFERENCES money_accounts(id);
+  ALTER TABLE supplier_payments ADD COLUMN status TEXT NOT NULL DEFAULT 'posted'; -- posted | void
+  ALTER TABLE supplier_payments ADD COLUMN cheque_no TEXT NOT NULL DEFAULT '';
+  ALTER TABLE supplier_payments ADD COLUMN bank TEXT NOT NULL DEFAULT '';
+  ALTER TABLE supplier_payments ADD COLUMN cheque_due TEXT;
+  ALTER TABLE supplier_payments ADD COLUMN cheque_status TEXT NOT NULL DEFAULT ''; -- pending | cleared
+  ALTER TABLE supplier_payments ADD COLUMN void_reason TEXT NOT NULL DEFAULT '';
+  ALTER TABLE shifts ADD COLUMN deposited INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function openDatabase(file) {

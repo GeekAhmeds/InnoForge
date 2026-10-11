@@ -4,6 +4,7 @@ import { formatMoney, fromMinor, toMinor } from '../lib/money.js';
 import { collectionHtml } from '../lib/receipt.js';
 import { openWhatsApp, receiptText } from '../lib/share.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from './ui.jsx';
+import { AccountSelect, PickAccount } from '../pages/Treasury.jsx';
 
 const METHODS = ['cash', 'card', 'wallet', 'bank', 'cheque'];
 
@@ -13,7 +14,7 @@ const METHODS = ['cash', 'card', 'wallet', 'bank', 'cheque'];
  * `orderId` opens it on one invoice (from the invoices page).
  */
 export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
-  const { t, tErr, notify, settings, printDoc, lang, withApproval, user } = useApp();
+  const { t, tErr, notify, settings, printDoc, lang, withApproval, user, can } = useApp();
   const d = settings.decimals;
   const m = (v) => formatMoney(v, settings);
   const [data] = useLoad(() => Promise.all([api.customers.get(customerId), api.customers.openInvoices(customerId), api.auth.salespeople()]), [customerId]);
@@ -27,7 +28,7 @@ export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
     const amount = target ? target.open : Math.max(0, customer.balance);
     setF({
       amount: amount ? fromMinor(amount, d) : '', method: 'cash', discount: '', notes: '',
-      chequeNo: '', bank: '', due: '', collectorId: user?.id || '',
+      chequeNo: '', bank: '', due: '', collectorId: user?.id || '', accountId: null,
       manual: !!target, picks: target ? { [target.order_id]: fromMinor(target.open, d) } : {},
       print: true, whatsapp: false,
     });
@@ -67,6 +68,7 @@ export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
       const res = await withApproval((approval) => api.customers.collect({
         customerId, amount: value, method: f.method, discount: disc, notes: f.notes, allocations, approval,
         collectorId: Number(f.collectorId) || null,
+        accountId: ['bank', 'card', 'wallet'].includes(f.method) ? f.accountId : null,
         cheque: f.method === 'cheque' ? { no: f.chequeNo, bank: f.bank, due: f.due } : null,
       }));
       notify(t('collect.saved', { n: res.receipt.receipt_no }));
@@ -113,7 +115,8 @@ export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
           <Field label={t('collect.bank')}><input value={f.bank} onChange={set('bank')} /></Field>
           <Field label={t('collect.chequeDue')}><input type="date" value={f.due} onChange={set('due')} /></Field>
         </>}
-        {f.method === 'bank' && <div className="span3"><Field label={t('collect.transferRef')}><input value={f.notes} onChange={set('notes')} /></Field></div>}
+        {f.method === 'bank' && <div className="span2"><Field label={t('collect.transferRef')}><input value={f.notes} onChange={set('notes')} /></Field></div>}
+        {['bank', 'card', 'wallet'].includes(f.method) && can('treasury') && <Field label={t('collect.intoAccount')}><AccountSelect kind="bank" value={f.accountId} onChange={(v) => setF({ ...f, accountId: v })} /></Field>}
       </div>
       {f.method !== 'bank' && <Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field>}
 
@@ -253,6 +256,7 @@ export function Cheques() {
   const { t, tErr, notify, settings, can, ask } = useApp();
   const [status, setStatus] = useState('pending');
   const [list, reload] = useLoad(() => api.customers.cheques({ status }), [status]);
+  const [clearing, setClearing] = useState(null);
   const m = (v) => formatMoney(v, settings);
   const run = async (fn) => { try { await fn(); reload(); } catch (err) { notify(tErr(err), 'error'); } };
   const total = (list || []).reduce((s, c) => s + c.amount, 0);
@@ -276,7 +280,7 @@ export function Cheques() {
               <td className="num"><b>{m(c.amount)}</b></td>
               <td className="num">
                 {c.cheque_status === 'pending' && can('customers_edit') && <>
-                  <button className="ghost sm" onClick={() => run(() => api.customers.clearCheque(c.id))}>✅ {t('cheques.clear')}</button>
+                  <button className="ghost sm" onClick={() => (can('treasury') ? setClearing(c) : run(() => api.customers.clearCheque(c.id)))}>✅ {t('cheques.clear')}</button>
                   <button className="danger-ghost sm" onClick={async () => { const reason = await ask(t('cheques.bounceReason')); if (reason != null) run(() => api.customers.bounceCheque({ id: c.id, reason })); }}>↩ {t('cheques.bounce')}</button>
                 </>}
                 {c.cheque_status !== 'pending' && <span className={`badge ${c.cheque_status === 'bounced' ? 'credit' : ''}`}>{t(`cheques.status.${c.cheque_status}`)}</span>}
@@ -286,6 +290,8 @@ export function Cheques() {
         </table>
         {list && !list.length && <Empty>{t('cheques.none')}</Empty>}
       </div>
+      {clearing && <PickAccount title={`✅ ${clearing.cheque_no}`} kind="bank" optional onClose={() => setClearing(null)}
+        onPick={(accountId) => { run(() => api.customers.clearCheque({ id: clearing.id, accountId })); setClearing(null); }} />}
     </>
   );
 }

@@ -488,3 +488,9 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid 
 .sidebar nav button { flex-shrink: 0; padding: 7px 4px; }
 .sidebar nav button .ico { font-size: 20px; }
 .sidebar-foot { flex-shrink: 0; }
+
+/* Treasury */
+.acct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.card.acct { margin: 0; display: flex; flex-direction: column; gap: 6px; border-top: 4px solid var(--good); }
+.card.acct.bank { border-top-color: var(--brand); }
+.acct-balance { font-size: 26px; font-weight: 800; direction: ltr; text-align: end; }

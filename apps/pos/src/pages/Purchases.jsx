@@ -6,6 +6,7 @@ import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { today } from './Orders.jsx';
 import { openWhatsApp } from '../lib/share.js';
 import { poHtml } from '../lib/receipt.js';
+import { AccountSelect } from './Treasury.jsx';
 
 export default function Purchases() {
   const { t } = useApp();
@@ -79,7 +80,7 @@ function PurchaseList() {
 }
 
 function PurchaseEditor({ onClose, onSaved, initial = null }) {
-  const { t, tErr, notify, settings, shift } = useApp();
+  const { t, tErr, notify, settings, shift, can } = useApp();
   const d = settings.decimals;
   const m = (v) => formatMoney(v, settings);
   const [suppliers, setSuppliers] = useState([]);
@@ -144,6 +145,8 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
         paid: toMinor(form.paid, d),
         method: form.method,
         fromDrawer: form.fromDrawer,
+        accountId: form.accountId || null,
+        cheque: form.method === 'cheque' ? { no: form.chequeNo, due: form.chequeDue } : null,
         items: lines.map((l) => ({ product_id: l.product_id, unit_id: Number(l.unit_id) || null, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d), discount_percent: Number(l.discount_percent) || 0, bonus_qty: Number(l.bonus_qty) || 0, batch_no: l.batch_no, expiry_date: l.expiry_date || null })),
         updatePrices: lines.filter((l) => toMinor(l.price, d) !== l.oldPrice).map((l) => ({ product_id: l.product_id, price: toMinor(l.price, d) })),
         poId: initial?.poId || null,
@@ -235,9 +238,16 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
         </Field>
         <Field label={t('purchases.method')}>
           <select value={form.method} onChange={set('method')} disabled={!form.supplierId}>
-            {['cash', 'card', 'wallet', 'bank', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
+            {['cash', 'bank', 'cheque', 'card', 'wallet', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
           </select>
         </Field>
+        {!!form.supplierId && !(form.method === 'cash' && form.fromDrawer) && can('treasury') && (
+          <Field label={t('treasury.account')}><AccountSelect kind={form.method === 'cash' ? 'cash' : ['bank', 'cheque'].includes(form.method) ? 'bank' : ''} value={form.accountId} onChange={(v) => setForm((f) => ({ ...f, accountId: v }))} /></Field>
+        )}
+        {form.method === 'cheque' && !!form.supplierId && <>
+          <Field label={t('collect.chequeNo')}><input dir="ltr" value={form.chequeNo || ''} onChange={set('chequeNo')} /></Field>
+          <Field label={t('collect.chequeDue')}><input type="date" value={form.chequeDue || ''} onChange={set('chequeDue')} /></Field>
+        </>}
       </div>
       {form.method === 'cash' && !!form.supplierId && (
         <Toggle checked={form.fromDrawer} onChange={set('fromDrawer')} label={shift ? t('purchases.fromDrawer') : `${t('purchases.fromDrawer')} — ${t('shift.none')}`} />
@@ -365,7 +375,7 @@ function SupplierModal({ supplier, onClose, onSaved }) {
 }
 
 function Statement({ id, onClose }) {
-  const { t, tErr, notify, settings, shift } = useApp();
+  const { t, tErr, notify, settings, shift, can } = useApp();
   const [data, , setData] = useLoad(() => api.suppliers.statement(id), [id]);
   const [pay, setPay] = useState(null);
   const m = (v) => formatMoney(v, settings);
@@ -373,7 +383,10 @@ function Statement({ id, onClose }) {
   async function submitPay(e) {
     e?.preventDefault();
     try {
-      setData(await api.suppliers.pay({ supplierId: id, amount: toMinor(pay.amount, settings.decimals), method: pay.method, fromDrawer: pay.fromDrawer, notes: pay.notes }));
+      setData(await api.suppliers.pay({
+        supplierId: id, amount: toMinor(pay.amount, settings.decimals), method: pay.method, fromDrawer: pay.fromDrawer, notes: pay.notes,
+        accountId: pay.accountId || null, cheque: pay.method === 'cheque' ? { no: pay.chequeNo, due: pay.due } : null,
+      }));
       setPay(null);
       notify(t('common.saved'));
     } catch (err) {
@@ -383,12 +396,17 @@ function Statement({ id, onClose }) {
   return (
     <Modal title={`${t('purchases.statement')} — ${data.supplier.name}`} onClose={onClose} width={760}
       footer={pay ? (
-        <form className="row grow" onSubmit={submitPay}>
+        <form className="row grow wrap" onSubmit={submitPay}>
           <input className="w-amount" autoFocus inputMode="decimal" placeholder={t('reports.amount')} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
           <select className="w-auto" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}>
-            {['cash', 'card', 'wallet', 'bank', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
+            {['cash', 'bank', 'cheque', 'card', 'wallet', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
           </select>
           {pay.method === 'cash' && shift && <Toggle checked={pay.fromDrawer} onChange={(v) => setPay({ ...pay, fromDrawer: v })} label={t('purchases.fromDrawer')} />}
+          {!(pay.method === 'cash' && pay.fromDrawer) && can('treasury') && <span className="w-auto"><AccountSelect kind={pay.method === 'cash' ? 'cash' : pay.method === 'cheque' || pay.method === 'bank' ? 'bank' : ''} value={pay.accountId} onChange={(v) => setPay({ ...pay, accountId: v })} /></span>}
+          {pay.method === 'cheque' && <>
+            <input className="w-amount" dir="ltr" placeholder={t('collect.chequeNo')} value={pay.chequeNo || ''} onChange={(e) => setPay({ ...pay, chequeNo: e.target.value })} />
+            <input className="w-auto" type="date" title={t('collect.chequeDue')} value={pay.due || ''} onChange={(e) => setPay({ ...pay, due: e.target.value })} />
+          </>}
           <span className="spacer" />
           <button type="button" onClick={() => setPay(null)}>{t('common.cancel')}</button>
           <button className="primary">{t('common.save')}</button>
@@ -652,8 +670,8 @@ function ExpenseList() {
 }
 
 export function ExpenseModal({ onClose, onSaved }) {
-  const { t, tErr, notify, settings, shift, withApproval } = useApp();
-  const [f, setF] = useState({ category: '', amount: '', notes: '', fromDrawer: !!shift });
+  const { t, tErr, notify, settings, shift, withApproval, can } = useApp();
+  const [f, setF] = useState({ category: '', amount: '', notes: '', fromDrawer: !!shift, accountId: null });
   const [cats, setCats] = useState([]);
   useEffect(() => { api.expenses.categories().then(setCats).catch(() => {}); }, []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
@@ -678,6 +696,7 @@ export function ExpenseModal({ onClose, onSaved }) {
         </Field>
         <Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field>
         <Toggle checked={f.fromDrawer} onChange={set('fromDrawer')} label={t('expenses.fromDrawer')} />
+        {!f.fromDrawer && can('treasury') && <Field label={t('treasury.paidFrom')}><AccountSelect value={f.accountId} onChange={(v) => setF((x) => ({ ...x, accountId: v }))} /></Field>}
         <button hidden />
       </form>
     </Modal>

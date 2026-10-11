@@ -4,12 +4,14 @@ import { formatMoney, toMinor } from '../lib/money.js';
 import { shiftHtml } from '../lib/receipt.js';
 import { Field, useApp, useLoad } from '../components/ui.jsx';
 import { ExpenseModal } from './Purchases.jsx';
+import { AccountSelect } from './Treasury.jsx';
 
 export default function Shift() {
   const { t, tErr, notify, settings, shift, reloadShift, printDoc, lang, can, setPage } = useApp();
   const isAdmin = can('shifts_all');
   const [counted, setCounted] = useState('');
   const [notes, setNotes] = useState('');
+  const [deposit, setDeposit] = useState({ accountId: null, amount: '' });
   const [expense, setExpense] = useState(false);
   const [summary, reloadSummary] = useLoad(() => (shift ? api.shifts.summary(shift.id) : Promise.resolve(null)), [shift?.id]);
   const [history] = useLoad(() => (isAdmin ? api.shifts.list({}) : Promise.resolve([])), [shift?.id]);
@@ -19,7 +21,7 @@ export default function Shift() {
     e.preventDefault();
     if (!window.confirm(t('common.areYouSure'))) return;
     try {
-      const result = await api.shifts.close({ countedCash: toMinor(counted, settings.decimals), notes });
+      const result = await api.shifts.close({ countedCash: toMinor(counted, settings.decimals), notes, depositAccountId: deposit.accountId, depositAmount: deposit.accountId ? toMinor(deposit.amount === '' ? counted : deposit.amount, settings.decimals) : 0 });
       await printDoc(shiftHtml(result, settings, t, lang));
       await reloadShift();
       setPage('pos');
@@ -66,6 +68,12 @@ export default function Shift() {
             <h3>{t('shift.close')}</h3>
             <Field label={t('shift.countedCash')}><input className="xl" required inputMode="decimal" value={counted} onChange={(e) => setCounted(e.target.value)} /></Field>
             {counted !== '' && <p className={diff < 0 ? 'warn' : diff > 0 ? 'good' : ''}>{t('shift.difference')}: <b>{m(diff)}</b></p>}
+            {can('treasury') && (
+              <div className="grid2">
+                <Field label={t('shift.depositTo')}><AccountSelect kind="cash" value={deposit.accountId} onChange={(v) => setDeposit({ ...deposit, accountId: v })} none={t('shift.noDeposit')} /></Field>
+                {deposit.accountId && <Field label={t('shift.depositAmount')} hint={t('shift.depositHint')}><input inputMode="decimal" value={deposit.amount} placeholder={counted || '0'} onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })} /></Field>}
+              </div>
+            )}
             <Field label={t('shift.notes')}><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
             <button className="danger lg">{t('shift.close')}</button>
           </form>
