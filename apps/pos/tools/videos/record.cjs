@@ -247,16 +247,10 @@ const VIDEOS = {
   },
   '04-restaurant': {
     edition: 'restaurant',
-    prep: async ({ w }) => { await setup(w, { type: 'مطعم', name: 'مطعم الفرح', cash: null }); await w.evaluate(() => window.posBridge.call('auth', 'logout')); },
+    prep: async ({ w, call }) => { await setup(w, { type: 'مطعم', name: 'مطعم الفرح', cash: null }); await call('shifts', 'open', { openingCash: 30000 }); await call('auth', 'logout'); },
     scene: async ({ w, d }) => {
       await d.card('المطاعم والكافيهات', 'طاولة ← مطبخ ← حساب', 'InnoForge POS');
       await login(w, d);
-      await w.waitForTimeout(800);
-      if (await w.locator('.center-screen.inner form').count()) {
-        await d.cap('افتح الوردية');
-        await d.type('.center-screen.inner input', '300');
-        await d.click('.center-screen.inner button.primary', 1200);
-      }
       await d.cap('شاشة الصالة: كل الطاولات وحالتها');
       await d.click('.sidebar nav button:has-text("الصالة")', 1200);
       await d.click('.floor-table >> nth=2', 1000);
@@ -267,10 +261,10 @@ const VIDEOS = {
       if (await tiles.count()) await d.click('.product >> nth=0', 450);
       await d.cap('«إرسال للمطبخ»: تذكرة لكل قسم وشاشة للشيف');
       await d.click('button:has-text("للمطبخ") >> nth=0', 1500);
-      await d.cap('لما الزبون يخلّص: الحساب والدفع');
-      await d.click('button.pay', 900);
-      await w.locator('.modal-foot .toggle input').uncheck();
-      await d.click('.modal-foot button.primary', 1600);
+      await d.cap('الطاولة بقت مشغولة: المبلغ والوقت ظاهرين', 0);
+      await d.point('.floor-table >> nth=2');
+      await d.sleep(2200);
+      await d.cap('ولما الزبون يخلّص: افتح الطاولة ← الحساب ← الدفع', 2600);
       await d.card('كل اللي المطعم محتاجه', 'صالة • مطبخ • أحجام وإضافات • ريسيبي • دليفري • شاشة مطبخ على تابلت', 'InnoForge POS');
     },
   },
