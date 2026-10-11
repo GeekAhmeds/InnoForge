@@ -31,6 +31,7 @@ Everything runs locally: data lives in a SQLite file on the machine, so you don'
 - Returns (partial or full) that restock items and refund proportionally.
 - Reports: sales, net, profit, and breakdowns by payment method, day, hour, category, product, cashier and order type.
 - **Purchasing**: suppliers, purchase invoices that receive stock and re-average cost, credit purchases, supplier statements and payments.
+- **Customers & credit sales**: customer accounts with credit limits, partly or fully on-account invoices, collections (cash goes to the drawer), A4 statements, payment receipts, and receivables in reports. Returns on credit sales reduce the balance first.
 - **Expenses** (rent, electricity, salaries…), from the cash drawer or outside it; shown in the shift and in net profit.
 - Users with PIN login and **Admin / Cashier** roles.
 - **Device licensing**: installed copies only run on the one computer they were activated for, for a period you choose.

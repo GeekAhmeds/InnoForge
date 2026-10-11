@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { activate, api, copyText } from '../lib/api.js';
 import { useI18n } from '../i18n/index.jsx';
 import Support from '../components/Support.jsx';
+import BrandHead from '../components/Brand.jsx';
 
 // Shown by installed builds until a license for this computer is entered.
 export default function Activation({ license, onActivated, settings, reloadSettings }) {
@@ -33,7 +34,7 @@ export default function Activation({ license, onActivated, settings, reloadSetti
     <div className="center-screen">
       <form className="card activation" onSubmit={submit}>
         <div className="row between">
-          <h1>🔐 {t('license.title')}</h1>
+          <BrandHead title={t('license.title')} />
           <button type="button" className="ghost" onClick={toggleLang}>{settings.language === 'ar' ? 'English' : 'العربية'}</button>
         </div>
         <p className="muted">{t('license.intro')}</p>

@@ -200,10 +200,10 @@ function createServices(db) {
       requireAdmin();
       if (!str(c.name)) throw new PosError('NAME_REQUIRED');
       if (c.id) {
-        db.prepare('UPDATE categories SET name = ?, color = ?, sort = ? WHERE id = ?').run(str(c.name), str(c.color) || '#4f46e5', int(c.sort), c.id);
+        db.prepare('UPDATE categories SET name = ?, color = ?, sort = ? WHERE id = ?').run(str(c.name), str(c.color) || '#0a43c9', int(c.sort), c.id);
         return c.id;
       }
-      return Number(db.prepare('INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)').run(str(c.name), str(c.color) || '#4f46e5', int(c.sort)).lastInsertRowid);
+      return Number(db.prepare('INSERT INTO categories (name, color, sort) VALUES (?, ?, ?)').run(str(c.name), str(c.color) || '#0a43c9', int(c.sort)).lastInsertRowid);
     },
     remove(id) {
       requireAdmin();
@@ -334,13 +334,16 @@ function createServices(db) {
     if (!shift) throw new PosError('NOT_FOUND');
     const sales = plain(db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(discount), 0) AS discount, COALESCE(SUM(tax), 0) AS tax FROM orders WHERE shift_id = ? AND status = 'completed'").get(shiftId));
     const byMethod = plainAll(db.prepare("SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN orders o ON o.id = p.order_id WHERE o.shift_id = ? AND o.status = 'completed' GROUP BY p.method").all(shiftId));
-    const refunds = plain(db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, COALESCE(SUM(CASE WHEN method = \'cash\' THEN amount ELSE 0 END), 0) AS cash FROM returns WHERE shift_id = ?').get(shiftId));
+    const refunds = plain(db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total, COALESCE(SUM(cash_amount), 0) AS cash FROM returns WHERE shift_id = ?').get(shiftId));
     const cashSales = byMethod.find((m) => m.method === 'cash')?.amount || 0;
     // Cash that left the drawer during the shift for suppliers or expenses.
     const supplierCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
     const expenseCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
-    const expectedCash = shift.opening_cash + cashSales - refunds.cash - supplierCash - expenseCash;
-    return { shift, sales, byMethod, refunds, supplierCash, expenseCash, expectedCash };
+    const creditSales = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE shift_id = ? AND status = 'completed'").get(shiftId).t;
+    const collections = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM customer_payments WHERE shift_id = ? AND method != 'return' GROUP BY method").all(shiftId));
+    const customerCash = collections.find((c) => c.method === 'cash')?.amount || 0;
+    const expectedCash = shift.opening_cash + cashSales + customerCash - refunds.cash - supplierCash - expenseCash;
+    return { shift, sales, byMethod, refunds, supplierCash, expenseCash, creditSales, collections, customerCash, expectedCash };
   }
 
   const shifts = {
@@ -385,6 +388,7 @@ function createServices(db) {
     order.items = plainAll(db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id));
     order.payments = plainAll(db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id').all(id));
     order.returns = plainAll(db.prepare('SELECT r.*, u.name AS user_name FROM returns r JOIN users u ON u.id = r.user_id WHERE r.order_id = ? ORDER BY r.id').all(id));
+    order.customer_balance = order.customer_id ? customerBalance(order.customer_id) : null;
     return order;
   }
 
@@ -428,6 +432,7 @@ function createServices(db) {
       order_type: priced.orderType,
       table_id: priced.orderType === 'dine_in' ? cart.table_id || null : null,
       user_id: user.id,
+      customer_id: int(cart.customer_id) || null,
       customer_name: str(cart.customer_name),
       customer_phone: str(cart.customer_phone),
       customer_address: str(cart.customer_address),
@@ -538,17 +543,27 @@ function createServices(db) {
           .map((p) => ({ method: p.method, amount: int(p.amount) }))
           .filter((p) => p.amount > 0);
         if (payments.some((p) => !PAYMENT_METHODS.includes(p.method))) throw new PosError('INVALID_PAYMENT');
-        if (!payments.length && priced.total > 0) throw new PosError('PAYMENT_REQUIRED');
         const tendered = payments.reduce((s, p) => s + p.amount, 0);
-        if (tendered < priced.total) throw new PosError('INSUFFICIENT_PAYMENT');
         const nonCash = payments.filter((p) => p.method !== 'cash').reduce((s, p) => s + p.amount, 0);
         if (nonCash > priced.total) throw new PosError('NON_CASH_OVERPAY');
-        const change = tendered - priced.total;
+
+        // Anything not paid now goes on the customer's account (credit sale).
+        let credit = 0;
+        const customer = cart.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ? AND active = 1').get(cart.customer_id) : null;
+        if (cart.customer_id && !customer) throw new PosError('CUSTOMER_NOT_FOUND');
+        if (tendered < priced.total) {
+          if (!customer) throw new PosError(payments.length ? 'INSUFFICIENT_PAYMENT' : 'PAYMENT_REQUIRED');
+          credit = priced.total - tendered;
+          if (customer.credit_limit > 0 && customerBalance(customer.id) + credit > customer.credit_limit) {
+            throw new PosError('CREDIT_LIMIT_EXCEEDED');
+          }
+        }
+        const change = Math.max(0, tendered - priced.total);
 
         const orderId = persistOrder(cart, priced, u, 'completed');
         const invoiceNo = (db.prepare('SELECT MAX(invoice_no) AS n FROM orders').get().n || 0) + 1;
-        db.prepare("UPDATE orders SET status = 'completed', invoice_no = ?, shift_id = ?, user_id = ?, paid = ?, change_due = ?, completed_at = datetime('now', 'localtime') WHERE id = ?")
-          .run(invoiceNo, shift.id, u.id, tendered, change, orderId);
+        db.prepare("UPDATE orders SET status = 'completed', invoice_no = ?, shift_id = ?, user_id = ?, paid = ?, change_due = ?, credit = ?, completed_at = datetime('now', 'localtime') WHERE id = ?")
+          .run(invoiceNo, shift.id, u.id, tendered, change, credit, orderId);
 
         // Store net amounts per method: change always comes out of cash.
         let changeLeft = change;
@@ -573,12 +588,13 @@ function createServices(db) {
       const params = [f, t];
       let extra = '';
       if (str(search)) {
-        extra = 'AND (CAST(o.invoice_no AS TEXT) = ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ?)';
-        params.push(str(search), `%${str(search)}%`, `%${str(search)}%`);
+        extra = 'AND (CAST(o.invoice_no AS TEXT) = ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ? OR c.name LIKE ?)';
+        params.push(str(search), `%${str(search)}%`, `%${str(search)}%`, `%${str(search)}%`);
       }
       params.push(int(limit, 200));
       return plainAll(db.prepare(`
-        SELECT o.*, u.name AS user_name FROM orders o JOIN users u ON u.id = o.user_id
+        SELECT o.*, u.name AS user_name, COALESCE(c.name, o.customer_name) AS customer_display
+        FROM orders o JOIN users u ON u.id = o.user_id LEFT JOIN customers c ON c.id = o.customer_id
         WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day') ${extra}
         ORDER BY o.id DESC LIMIT ?`).all(...params));
     },
@@ -611,10 +627,18 @@ function createServices(db) {
         // Absorb rounding so a full return refunds exactly what was paid.
         if (fullyReturned || amount > remaining) amount = remaining;
 
+        // A credit sale is refunded against what the customer still owes first; only the rest is paid out in cash.
+        const owed = order.customer_id && order.credit > 0 ? Math.max(0, Math.min(order.credit, customerBalance(order.customer_id))) : 0;
+        const toAccount = Math.min(amount, owed);
+        const cashOut = amount - toAccount;
         const returnId = Number(
-          db.prepare("INSERT INTO returns (order_id, shift_id, user_id, amount, method, reason) VALUES (?, ?, ?, ?, 'cash', ?)")
-            .run(orderId, shift.id, u.id, amount, str(reason)).lastInsertRowid,
+          db.prepare('INSERT INTO returns (order_id, shift_id, user_id, amount, method, reason, cash_amount) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(orderId, shift.id, u.id, amount, cashOut ? 'cash' : 'account', str(reason), cashOut).lastInsertRowid,
         );
+        if (toAccount > 0) {
+          db.prepare("INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, order_id, notes) VALUES (?, ?, 'return', ?, ?, ?, ?)")
+            .run(order.customer_id, toAccount, shift.id, u.id, orderId, str(reason));
+        }
         for (const l of lines) {
           db.prepare('INSERT INTO return_items (return_id, order_item_id, qty, amount) VALUES (?, ?, ?, ?)').run(returnId, l.line.id, l.qty, l.amount);
           db.prepare('UPDATE order_items SET returned_qty = returned_qty + ? WHERE id = ?').run(l.qty, l.line.id);
@@ -797,6 +821,89 @@ function createServices(db) {
     },
   };
 
+
+  // ---------- customers & credit sales ----------
+  function customerBalance(id) {
+    const sold = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE customer_id = ? AND status = 'completed'").get(id).t;
+    const paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ?').get(id).t;
+    return sold - paid;
+  }
+  const CUSTOMER_BALANCE = `(
+    COALESCE((SELECT SUM(credit) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed'), 0) -
+    COALESCE((SELECT SUM(amount) FROM customer_payments cp WHERE cp.customer_id = c.id), 0)
+  )`;
+
+  const customers = {
+    list({ search = '', includeInactive = false, owingOnly = false } = {}) {
+      requireUser();
+      const q = `%${str(search)}%`;
+      return plainAll(db.prepare(`
+        SELECT * FROM (
+          SELECT c.*, ${CUSTOMER_BALANCE} AS balance,
+            (SELECT MAX(completed_at) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed') AS last_purchase,
+            (SELECT COALESCE(SUM(total), 0) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed') AS total_sales
+          FROM customers c
+          WHERE (c.name LIKE ? OR c.phone LIKE ?) ${includeInactive ? '' : 'AND c.active = 1'}
+        ) ${owingOnly ? 'WHERE balance > 0' : ''}
+        ORDER BY name LIMIT 500`).all(q, q));
+    },
+    get(id) {
+      requireUser();
+      const c = plain(db.prepare('SELECT * FROM customers WHERE id = ?').get(id));
+      if (!c) throw new PosError('NOT_FOUND');
+      c.balance = customerBalance(id);
+      return c;
+    },
+    /** Cashiers can add/edit contact details; only admins set credit limits or deactivate. */
+    save(c = {}) {
+      const u = requireUser();
+      if (!str(c.name)) throw new PosError('NAME_REQUIRED');
+      const phone = str(c.phone);
+      if (phone && db.prepare('SELECT 1 FROM customers WHERE phone = ? AND id != ?').get(phone, c.id || 0)) throw new PosError('DUPLICATE_PHONE');
+      const existing = c.id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(c.id) : null;
+      if (c.id && !existing) throw new PosError('NOT_FOUND');
+      const admin = u.role === 'admin';
+      const limit = admin ? Math.max(0, int(c.credit_limit)) : existing?.credit_limit ?? 0;
+      const active = admin ? (c.active === false ? 0 : 1) : existing?.active ?? 1;
+      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active];
+      if (c.id) {
+        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ? WHERE id = ?').run(...vals, c.id);
+        return c.id;
+      }
+      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    /** Invoices, collections and returns in date order with a running balance (what the customer owes). */
+    statement({ id, from = null, to = null } = {}) {
+      requireUser();
+      const customer = customers.get(id);
+      const rows = plainAll(db.prepare(`
+        SELECT 'sale' AS kind, id, invoice_no AS ref, completed_at AS created_at, total, credit AS debit, 0 AS credit, '' AS notes
+          FROM orders WHERE customer_id = ? AND status = 'completed'
+        UNION ALL
+        SELECT CASE method WHEN 'return' THEN 'return' ELSE 'payment' END AS kind, id, method AS ref, created_at, amount AS total, 0 AS debit, amount AS credit, notes
+          FROM customer_payments WHERE customer_id = ?
+        ORDER BY created_at, kind DESC, id`).all(id, id));
+      let balance = 0;
+      for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
+      const inRange = rows.filter((r) => (!from || r.created_at >= from) && (!to || r.created_at < `${to} 99`));
+      const opening = inRange.length ? inRange[0].balance - inRange[0].debit + inRange[0].credit : balance;
+      return { customer, opening, rows: inRange, balance };
+    },
+    /** Receives money from a customer. Cash goes into the open shift's drawer. */
+    collect({ customerId, amount, method = 'cash', notes = '' } = {}) {
+      const u = requireUser();
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+      if (!db.prepare('SELECT 1 FROM customers WHERE id = ?').get(customerId)) throw new PosError('NOT_FOUND');
+      const shift = currentShift();
+      if (method === 'cash' && !shift) throw new PosError('NO_OPEN_SHIFT');
+      const id = Number(db.prepare('INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, notes) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(customerId, value, method, shift?.id ?? null, u.id, str(notes)).lastInsertRowid);
+      return { payment: plain(db.prepare('SELECT p.*, u.name AS user_name FROM customer_payments p JOIN users u ON u.id = p.user_id WHERE p.id = ?').get(id)), customer: customers.get(customerId) };
+    },
+  };
+
   // ---------- reports ----------
   const reports = {
     summary({ from, to } = {}) {
@@ -827,7 +934,11 @@ function createServices(db) {
           purchases: purchasesTotal,
           expenses: expensesTotal,
           netProfit: profit - expensesTotal,
+          creditSales: db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders o WHERE " + range).get(f, t).t,
+          collections: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method != 'return' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t,
+          receivables: db.prepare(`SELECT COALESCE(SUM(b), 0) AS t FROM (SELECT ${CUSTOMER_BALANCE} AS b FROM customers c) WHERE b > 0`).get().t,
         },
+        topCustomers: plainAll(db.prepare(`SELECT c.name, COUNT(*) AS orders, SUM(o.total) AS total FROM orders o JOIN customers c ON c.id = o.customer_id WHERE ${range} GROUP BY c.id ORDER BY total DESC LIMIT 10`).all(f, t)),
         expensesByCategory: plainAll(db.prepare("SELECT category, SUM(amount) AS total FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day') GROUP BY category ORDER BY total DESC").all(f, t)),
         byMethod: plainAll(db.prepare(`SELECT p.method, SUM(p.amount) AS amount, COUNT(DISTINCT p.order_id) AS orders FROM payments p JOIN orders o ON o.id = p.order_id WHERE ${range} GROUP BY p.method ORDER BY amount DESC`).all(f, t)),
         byDay: plainAll(db.prepare(`SELECT date(o.completed_at) AS day, COUNT(*) AS orders, SUM(o.total) AS total FROM orders o WHERE ${range} GROUP BY day ORDER BY day`).all(f, t)),
@@ -847,7 +958,7 @@ function createServices(db) {
     },
   };
 
-  return { session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, reports, requireAdmin };
+  return { session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports, requireAdmin };
 }
 
 module.exports = { createServices, PosError, DEFAULT_SETTINGS, hashPin, verifyPin };

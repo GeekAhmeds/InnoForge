@@ -48,6 +48,9 @@ export default function Reports() {
             <Stat label={t('shift.refunds')} value={m(r.totals.refunds)} />
             <Stat label={t('reports.purchases')} value={m(r.totals.purchases)} />
             <Stat label={t('reports.expenses')} value={m(r.totals.expenses)} />
+            <Stat label={t('reports.creditSales')} value={m(r.totals.creditSales)} />
+            <Stat label={t('reports.collections')} value={m(r.totals.collections)} />
+            <Stat label={t('customers.receivables')} value={m(r.totals.receivables)} />
             <Stat label={t('reports.netProfit')} value={m(r.totals.netProfit)} strong />
           </div>
           <div className="report-grid">
@@ -58,6 +61,7 @@ export default function Reports() {
             {settings.business_type === 'restaurant' && <BarList title={t('reports.byType')} rows={r.byType.map((x) => [t(`order.${x.order_type}`), x.total, x.orders])} m={m} />}
             <BarList title={t('reports.byHour')} rows={r.byHour.map((x) => [`${String(x.hour).padStart(2, '0')}:00`, x.total, x.orders])} m={m} />
             <BarList title={t('reports.expensesByCategory')} rows={r.expensesByCategory.map((x) => [x.category || '—', x.total])} m={m} />
+            <BarList title={t('reports.topCustomers')} rows={r.topCustomers.map((x) => [x.name, x.total, x.orders])} m={m} />
             <BarList title={t('reports.byCashier')} rows={r.byCashier.map((x) => [x.name, x.total, x.orders])} m={m} />
           </div>
         </>

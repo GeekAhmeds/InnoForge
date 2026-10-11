@@ -40,7 +40,7 @@ export default function Orders() {
                 <td><b>{o.invoice_no}</b></td>
                 <td>{o.completed_at}</td>
                 <td>{t(`order.${o.order_type}`)}</td>
-                <td>{o.customer_name}</td>
+                <td>{o.customer_display}{o.credit > 0 && <small className="badge credit">{t('pay.onAccount')} {m(o.credit)}</small>}</td>
                 <td>{o.user_name}</td>
                 <td className="num">{m(o.total)}</td>
                 <td className="num">{o.refunded ? m(o.refunded) : ''}</td>
@@ -148,6 +148,7 @@ function OrderModal({ id, onClose, onChanged }) {
         {!!order.tax && <div className="trow"><span>{t('pos.tax')}</span><span>{m(order.tax)}</span></div>}
         <div className="trow big"><span>{t('pos.total')}</span><span>{m(order.total)}</span></div>
         {order.payments.map((p) => <div className="trow" key={p.id}><span>{t(`pay.${p.method}`)}</span><span>{m(p.amount)}</span></div>)}
+        {!!order.credit && <div className="trow"><span>{t('pay.onAccount')}</span><span>{m(order.credit)}</span></div>}
         {!!order.refunded && <div className="trow warn"><span>{t('orders.refunded')}</span><span>{m(order.refunded)}</span></div>}
       </div>
       {order.returns.map((r) => (

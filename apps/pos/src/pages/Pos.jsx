@@ -6,13 +6,13 @@ import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
   id: null, order_type: orderType, table_id: null, table_name: '', items: [], discount: 0,
-  customer_name: '', customer_phone: '', customer_address: '', note: '',
+  customer_id: null, customer_name: '', customer_phone: '', customer_address: '', note: '',
 });
 
 // Converts a stored open order back into an editable cart.
 const cartFromOrder = (o) => ({
   id: o.id, order_type: o.order_type, table_id: o.table_id, table_name: o.table_name || '',
-  discount: o.discount, customer_name: o.customer_name, customer_phone: o.customer_phone,
+  discount: o.discount, customer_id: o.customer_id, customer_name: o.customer_name, customer_phone: o.customer_phone,
   customer_address: o.customer_address, note: o.note,
   items: o.items.map((i) => ({ id: i.id, product_id: i.product_id, name: i.name, unit_price: i.unit_price, qty: i.qty, discount: i.discount, note: i.note, kitchen_sent: i.kitchen_sent })),
 });
@@ -106,11 +106,12 @@ export default function Pos() {
     }
   });
 
-  const openPay = () => {
+  const openPay = () => run(async () => {
     if (!cart.items.length || !quote) return;
     if (cart.order_type === 'dine_in' && !cart.table_id) return setModal({ kind: 'tables' });
-    setModal({ kind: 'pay' });
-  };
+    const customer = cart.customer_id ? await api.customers.get(cart.customer_id) : null;
+    setModal({ kind: 'pay', customer });
+  });
 
   useEffect(() => {
     const onKey = (e) => {
@@ -179,7 +180,7 @@ export default function Pos() {
               {cart.table_id ? `${t('pos.table')} ${cart.table_name}` : t('pos.chooseTable')}
             </button>
           )}
-          <button className="ghost" onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
+          <button className={cart.customer_id ? 'customer-chip' : 'ghost'} onClick={() => setModal({ kind: 'customer' })}>👤 {cart.customer_name || t('pos.customer')}</button>
         </div>
 
         <div className="cart-lines">
@@ -272,6 +273,7 @@ export default function Pos() {
       {modal?.kind === 'pay' && quote && (
         <PayModal
           total={quote.total}
+          customer={modal.customer}
           onClose={() => { setModal(null); focusSearch(); }}
           onPay={(payments, printReceipt) => run(async () => {
             const order = await api.orders.checkout({ ...cart, payments });
@@ -371,17 +373,65 @@ function DiscountModal({ subtotal, current, onClose, onSave }) {
 }
 
 function CustomerModal({ cart, onClose, onSave }) {
-  const { t } = useApp();
-  const [f, setF] = useState({ customer_name: cart.customer_name, customer_phone: cart.customer_phone, customer_address: cart.customer_address, note: cart.note });
+  const { t, tErr, notify, settings } = useApp();
+  const [f, setF] = useState({
+    customer_id: cart.customer_id, customer_name: cart.customer_name, customer_phone: cart.customer_phone,
+    customer_address: cart.customer_address, note: cart.note,
+  });
+  const [search, setSearch] = useState('');
+  const [list, setList] = useState([]);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const m = (v) => formatMoney(v, settings);
+
+  useEffect(() => {
+    const h = setTimeout(() => api.customers.list({ search }).then((r) => setList(r.slice(0, 8))).catch(() => {}), 120);
+    return () => clearTimeout(h);
+  }, [search]);
+
+  const pick = (c) => setF((x) => ({ ...x, customer_id: c.id, customer_name: c.name, customer_phone: c.phone, customer_address: c.address }));
+
+  // Saves the typed details as a new customer account so the sale can go on credit.
+  async function createAccount() {
+    try {
+      const id = await api.customers.save({ name: f.customer_name, phone: f.customer_phone, address: f.customer_address });
+      setF((x) => ({ ...x, customer_id: id }));
+      notify(t('customers.created'));
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  }
+
   return (
-    <Modal title={t('pos.customer')} onClose={onClose} footer={<><span className="spacer" /><button className="primary" onClick={() => onSave(f)}>{t('common.save')}</button></>}>
-      <div className="grid2">
-        <Field label={t('pos.customerName')}><input autoFocus value={f.customer_name} onChange={set('customer_name')} /></Field>
+    <Modal title={t('pos.customer')} onClose={onClose} width={640}
+      footer={<>
+        {f.customer_id && <button className="danger-ghost" onClick={() => setF((x) => ({ ...x, customer_id: null }))}>{t('customers.unlink')}</button>}
+        <span className="spacer" />
+        <button className="primary" onClick={() => onSave(f)}>{t('common.save')}</button>
+      </>}>
+      {f.customer_id ? (
+        <div className="linked-customer">✓ {t('customers.linked')}: <b>{f.customer_name}</b> {f.customer_phone && <span className="mono" dir="ltr">{f.customer_phone}</span>}</div>
+      ) : (
+        <>
+          <input autoFocus placeholder={t('customers.searchHint')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="customer-results">
+            {list.map((c) => (
+              <button key={c.id} type="button" onClick={() => pick(c)}>
+                <span><b>{c.name}</b> <small className="muted" dir="ltr">{c.phone}</small></span>
+                {c.balance > 0 && <small className="warn">{t('customers.owes')} {m(c.balance)}</small>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="grid2 top-gap">
+        <Field label={t('pos.customerName')}><input value={f.customer_name} onChange={set('customer_name')} /></Field>
         <Field label={t('pos.customerPhone')}><input value={f.customer_phone} onChange={set('customer_phone')} /></Field>
         <div className="span2"><Field label={t('pos.customerAddress')}><input value={f.customer_address} onChange={set('customer_address')} /></Field></div>
         <div className="span2"><Field label={t('pos.note')}><input value={f.note} onChange={set('note')} /></Field></div>
       </div>
+      {!f.customer_id && f.customer_name.trim() && (
+        <button type="button" onClick={createAccount}>+ {t('customers.saveAsAccount')}</button>
+      )}
     </Modal>
   );
 }
@@ -438,7 +488,7 @@ function HeldModal({ onClose, onPick }) {
 
 const METHODS = ['cash', 'card', 'wallet'];
 
-function PayModal({ total, onClose, onPay }) {
+function PayModal({ total, customer, onClose, onPay }) {
   const { t, settings } = useApp();
   const d = settings.decimals;
   const [amounts, setAmounts] = useState({ cash: fromMinor(total, d), card: '', wallet: '' });
@@ -451,6 +501,11 @@ function PayModal({ total, onClose, onPay }) {
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const m = (v) => formatMoney(v, settings);
+  // With a customer account, whatever is not paid now goes on their balance.
+  const onAccount = customer ? remaining : 0;
+  const newBalance = customer ? customer.balance + onAccount : 0;
+  const overLimit = customer && customer.credit_limit > 0 && onAccount > 0 && newBalance > customer.credit_limit;
+  const canComplete = (paid >= total || (customer && !overLimit)) && !busy;
 
   // Quick cash buttons: exact, then the next round banknotes above the total.
   const unit = 10 ** d;
@@ -468,7 +523,7 @@ function PayModal({ total, onClose, onPay }) {
   };
 
   async function submit() {
-    if (busy || paid < total) return;
+    if (!canComplete) return;
     setBusy(true);
     await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt);
     setBusy(false);
@@ -483,10 +538,16 @@ function PayModal({ total, onClose, onPay }) {
         <Toggle checked={printReceipt} onChange={setPrintReceipt} label={t('pay.printReceipt')} />
         <span className="spacer" />
         <button onClick={onClose}>{t('common.cancel')}</button>
-        <button className="primary lg" disabled={busy || paid < total} onClick={submit}>{t('pay.complete')}</button>
+        <button className="primary lg" disabled={!canComplete} onClick={submit}>{onAccount ? t('pay.completeCredit') : t('pay.complete')}</button>
       </>}
     >
       <div className="pay-due"><span>{t('pay.due')}</span><b>{m(total)}</b></div>
+      {customer && (
+        <div className="pay-customer">
+          <span>👤 <b>{customer.name}</b> · {t('customers.balance')}: {m(customer.balance)}{customer.credit_limit > 0 ? ` / ${t('customers.limit')} ${m(customer.credit_limit)}` : ''}</span>
+          <button type="button" onClick={() => setAmounts({ cash: '', card: '', wallet: '' })}>{t('pay.allCredit')}</button>
+        </div>
+      )}
       <div className="seg full">
         {METHODS.map((k) => (
           <button key={k} className={active === k ? 'on' : ''} onClick={() => select(k)}>
@@ -516,9 +577,13 @@ function PayModal({ total, onClose, onPay }) {
       )}
       <div className="pay-summary">
         <div><span>{t('pay.paid')}</span><b>{m(paid)}</b></div>
-        <div className={remaining ? 'warn' : ''}><span>{t('pay.remaining')}</span><b>{m(remaining)}</b></div>
+        {customer && onAccount > 0
+          ? <div className={overLimit ? 'warn' : 'credit'}><span>{t('pay.onAccount')}</span><b>{m(onAccount)}</b></div>
+          : <div className={remaining ? 'warn' : ''}><span>{t('pay.remaining')}</span><b>{m(remaining)}</b></div>}
         <div className={change ? 'good' : ''}><span>{t('pay.change')}</span><b>{m(change)}</b></div>
       </div>
+      {overLimit && <p className="warn">{t('err.CREDIT_LIMIT_EXCEEDED')} ({t('customers.newBalance')}: {m(newBalance)})</p>}
+      {customer && onAccount > 0 && !overLimit && <p className="muted">{t('customers.newBalance')}: <b>{m(newBalance)}</b></p>}
     </Modal>
   );
 }

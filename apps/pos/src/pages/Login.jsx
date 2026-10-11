@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useApp } from '../components/ui.jsx';
+import BrandHead from '../components/Brand.jsx';
 
 export default function Login({ onLogin }) {
   const { t, tErr, notify, settings, reloadSettings } = useApp();
@@ -51,7 +52,7 @@ export default function Login({ onLogin }) {
     <div className="center-screen">
       <div className="card login">
         <div className="row between">
-          <h2>🔨 {settings.business_name}</h2>
+          <BrandHead title={settings.business_name} as="h2" />
           <button className="ghost" onClick={toggleLang}>{settings.language === 'ar' ? 'English' : 'العربية'}</button>
         </div>
         <p className="muted">{t('login.title')}</p>

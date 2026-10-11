@@ -213,7 +213,7 @@ function Categories({ categories, reload }) {
   }
   return (
     <div className="card">
-      <div className="row between"><h3>{t('products.categories')}</h3><button className="primary" onClick={() => setEditing({ name: '', color: '#4f46e5', sort: categories.length })}>+ {t('products.newCategory')}</button></div>
+      <div className="row between"><h3>{t('products.categories')}</h3><button className="primary" onClick={() => setEditing({ name: '', color: '#0a43c9', sort: categories.length })}>+ {t('products.newCategory')}</button></div>
       <div className="cat-list">
         {categories.map((c) => (
           <div key={c.id} className="cat-row">

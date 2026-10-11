@@ -12,7 +12,9 @@ import Shift from './pages/Shift.jsx';
 import Settings from './pages/Settings.jsx';
 import Activation from './pages/Activation.jsx';
 import Purchases from './pages/Purchases.jsx';
+import Customers from './pages/Customers.jsx';
 import { UpdateBanner } from './components/Updates.jsx';
+import logoMark from './assets/logo-mark.png';
 
 export default function App() {
   const [settings, setSettings] = useState(null);
@@ -33,6 +35,7 @@ export default function App() {
 const NAV = [
   { id: 'pos', icon: '🛒' },
   { id: 'orders', icon: '🧾' },
+  { id: 'customers', icon: '👥' },
   { id: 'products', icon: '📦', admin: true },
   { id: 'purchases', icon: '🚚', admin: true },
   { id: 'reports', icon: '📊', admin: true },
@@ -72,11 +75,11 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     content = <Login onLogin={(u) => { setUser(u); setPage('pos'); }} />;
   } else {
     const nav = NAV.filter((n) => !n.admin || user.role === 'admin');
-    const Page = { pos: Pos, orders: Orders, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { pos: Pos, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">
-          <div className="brand" title={settings.business_name}>🔨<span>{settings.business_name}</span></div>
+          <div className="brand" title={settings.business_name}><img src={logoMark} alt="" /><span>{settings.business_name}</span></div>
           <nav>
             {nav.map((n) => (
               <button key={n.id} className={page === n.id ? 'active' : ''} onClick={() => setPage(n.id)}>

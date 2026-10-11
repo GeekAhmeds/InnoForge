@@ -8,7 +8,7 @@ const { createLicenseStore } = require('./license.cjs');
 const { createUpdater } = require('./updater.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'reports'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));

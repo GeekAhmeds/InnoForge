@@ -51,6 +51,8 @@ export default function Shift() {
               <dt>{t('shift.refunds')}</dt><dd>{summary.refunds.count} — {m(summary.refunds.total)}</dd>
               {!!summary.supplierCash && <><dt>{t('shift.supplierCash')}</dt><dd>− {m(summary.supplierCash)}</dd></>}
               {!!summary.expenseCash && <><dt>{t('shift.expenseCash')}</dt><dd>− {m(summary.expenseCash)}</dd></>}
+              {!!summary.customerCash && <><dt>{t('shift.customerCash')}</dt><dd>+ {m(summary.customerCash)}</dd></>}
+              {!!summary.creditSales && <><dt>{t('shift.creditSales')}</dt><dd>{m(summary.creditSales)}</dd></>}
               <dt>{t('shift.expectedCash')}</dt><dd><b>{m(summary.expectedCash)}</b></dd>
             </dl>
             <div className="row">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../lib/api.js';
 import { seedSamples } from '../lib/samples.js';
 import { Field, Toggle, useApp } from '../components/ui.jsx';
+import BrandHead from '../components/Brand.jsx';
 
 const TYPES = [
   { id: 'retail', icon: '🏪' },
@@ -47,7 +48,7 @@ export default function Setup({ onDone }) {
     <div className="center-screen">
       <form className="card setup" onSubmit={submit}>
         <div className="row between">
-          <h1>🔨 {t('setup.title')}</h1>
+          <BrandHead title={t('setup.title')} />
           <div className="seg">
             <button type="button" className={form.language === 'ar' ? 'on' : ''} onClick={() => switchLang('ar')}>العربية</button>
             <button type="button" className={form.language === 'en' ? 'on' : ''} onClick={() => switchLang('en')}>English</button>

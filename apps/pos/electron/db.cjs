@@ -212,6 +212,46 @@ const MIGRATIONS = [
   );
   CREATE INDEX idx_expenses_created ON expenses(created_at);
   `,
+  // v3: customers and credit (on-account) sales.
+  `
+  CREATE TABLE customers (
+    id           INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL,
+    phone        TEXT NOT NULL DEFAULT '',
+    address      TEXT NOT NULL DEFAULT '',
+    tax_number   TEXT NOT NULL DEFAULT '',
+    notes        TEXT NOT NULL DEFAULT '',
+    credit_limit INTEGER NOT NULL DEFAULT 0, -- 0 = no limit
+    active       INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX idx_customers_name ON customers(name);
+  CREATE INDEX idx_customers_phone ON customers(phone);
+
+  -- credit = the part of a completed sale left on the customer's account.
+  ALTER TABLE orders ADD COLUMN customer_id INTEGER REFERENCES customers(id);
+  ALTER TABLE orders ADD COLUMN credit INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX idx_orders_customer ON orders(customer_id);
+
+  -- Money received from customers against their balance. method 'return' is a
+  -- credit note from a returned credit sale (no cash moves).
+  CREATE TABLE customer_payments (
+    id          INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    amount      INTEGER NOT NULL CHECK (amount > 0),
+    method      TEXT NOT NULL DEFAULT 'cash',
+    shift_id    INTEGER REFERENCES shifts(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    order_id    INTEGER REFERENCES orders(id),
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX idx_customer_payments_customer ON customer_payments(customer_id);
+
+  -- Part of a return actually paid out of the drawer (the rest may go to the customer's account).
+  ALTER TABLE returns ADD COLUMN cash_amount INTEGER NOT NULL DEFAULT 0;
+  UPDATE returns SET cash_amount = amount WHERE method = 'cash';
+  `,
 ];
 
 function openDatabase(file) {

@@ -67,7 +67,9 @@ export function receiptHtml(order, settings, t, lang) {
     ${line(t('pos.total'), m(order.total), 'big')}
     ${pays}
     ${changeRow}
+    ${order.credit ? line(t('pay.onAccount'), m(order.credit), 'big') : ''}
     ${order.refunded ? line(t('receipt.refunded'), m(order.refunded)) : ''}
+    ${order.customer_balance != null ? line(t('customers.currentBalance'), m(order.customer_balance)) : ''}
   </table>
   ${order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
   <hr>
@@ -107,10 +109,53 @@ export function shiftHtml(summary, settings, t, lang) {
     ${line(t('shift.refunds'), `${refunds.count} — ${m(refunds.total)}`)}
     ${summary.supplierCash ? line(t('shift.supplierCash'), '− ' + m(summary.supplierCash)) : ''}
     ${summary.expenseCash ? line(t('shift.expenseCash'), '− ' + m(summary.expenseCash)) : ''}
+    ${summary.customerCash ? line(t('shift.customerCash'), '+ ' + m(summary.customerCash)) : ''}
+    ${summary.creditSales ? line(t('shift.creditSales'), m(summary.creditSales)) : ''}
   </table><hr><table>
     ${line(t('shift.expectedCash'), m(expectedCash), 'big')}
     ${shift.counted_cash != null ? line(t('shift.countedCash'), m(shift.counted_cash)) : ''}
     ${shift.counted_cash != null ? line(t('shift.difference'), m(shift.counted_cash - expectedCash)) : ''}
   </table>
   ${shift.notes ? `<hr><div>${esc(shift.notes)}</div>` : ''}`);
+}
+
+export function collectionHtml(payment, customer, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
+  return page(settings, lang, `${header(settings, t)}
+  <hr><div class="c"><b>${t('customers.receipt')} #${payment.id}</b></div><hr>
+  <table>
+    ${line(t('receipt.date'), ltr(payment.created_at))}
+    ${line(t('pos.customer'), esc(customer.name))}
+    ${customer.phone ? line(t('settings.phone'), ltr(customer.phone)) : ''}
+    ${line(t(`pay.${payment.method}`), m(payment.amount), 'big')}
+    ${line(t('customers.balanceAfter'), m(customer.balance))}
+    ${line(t('receipt.cashier'), esc(payment.user_name))}
+  </table>
+  ${payment.notes ? `<hr><div>${esc(payment.notes)}</div>` : ''}
+  <hr><div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
+}
+
+// Account statement on A4/letter rather than the receipt roll.
+export function statementHtml(data, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  const { customer, rows, balance } = data;
+  const kind = (r) => (r.kind === 'sale' ? `${t('customers.invoice')} #${r.ref}` : r.kind === 'return' ? t('customers.returnCredit') : `${t('customers.payment')} — ${t(`pay.${r.ref}`)}`);
+  return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 14mm; }
+    body { font: 12px/1.5 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
+    h1 { font-size: 18px; margin: 0; } .muted { color: #555; }
+    .head { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #ccc; padding: 5px 6px; text-align: start; }
+    th { background: #eee; } .n { text-align: end; white-space: nowrap; } .total td { font-weight: bold; font-size: 14px; border-top: 2px solid #000; }
+  </style></head><body>
+  <div class="head"><div><h1>${esc(settings.business_name)}</h1><div class="muted">${esc(settings.address)} ${settings.phone ? ltr(settings.phone) : ''}</div></div>
+    <div><b>${t('purchases.statement')}</b><div class="muted">${ltr(new Date().toLocaleDateString('en-GB'))}</div></div></div>
+  <p><b>${esc(customer.name)}</b> ${customer.phone ? ' — ' + ltr(customer.phone) : ''} ${customer.address ? ' — ' + esc(customer.address) : ''} ${customer.tax_number ? `<br>${t('receipt.taxNumber')}: ${ltr(customer.tax_number)}` : ''}</p>
+  <table><thead><tr><th>${t('orders.date')}</th><th>${t('orders.type')}</th><th class="n">${t('customers.debit')}</th><th class="n">${t('customers.credit')}</th><th class="n">${t('customers.balance')}</th></tr></thead><tbody>
+  ${rows.map((r) => `<tr><td>${ltr(r.created_at)}</td><td>${kind(r)}${r.notes ? ` — ${esc(r.notes)}` : ''}</td><td class="n">${r.debit ? m(r.debit) : ''}</td><td class="n">${r.credit ? m(r.credit) : ''}</td><td class="n">${m(r.balance)}</td></tr>`).join('')}
+  <tr class="total"><td colspan="4">${t('customers.balance')}</td><td class="n">${m(balance)}</td></tr>
+  </tbody></table>
+  <p class="muted" style="margin-top:24px">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></p>
+  </body></html>`;
 }

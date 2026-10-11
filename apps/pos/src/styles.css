@@ -4,9 +4,12 @@
   --line: #e5e7eb;
   --text: #111827;
   --muted: #6b7280;
-  --brand: #4f46e5;
+  --brand: #0a43c9;
+  --brand-2: #0890c4;
+  --accent: #f7a531;
+  --ink: #05070d;
   --brand-ink: #ffffff;
-  --brand-soft: #eef2ff;
+  --brand-soft: #e8f0fd;
   --danger: #dc2626;
   --danger-soft: #fef2f2;
   --good: #059669;
@@ -44,7 +47,7 @@ button {
 button:hover:not(:disabled) { border-color: #c7cbd3; background: #fafafa; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
-button.primary:hover:not(:disabled) { background: #4338ca; }
+button.primary:hover:not(:disabled) { background: #0836a3; }
 button.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
 button.danger-ghost { color: var(--danger); border-color: transparent; background: transparent; }
 button.danger-ghost:hover:not(:disabled) { background: var(--danger-soft); }
@@ -273,9 +276,53 @@ tr.dim td { opacity: .5; }
 
 /* ---------- updates ---------- */
 .update-banner { display: flex; align-items: center; gap: 8px; background: var(--brand); color: #fff; padding: 8px 14px; font-weight: 600; }
-.update-banner .ghost { color: #e0e7ff; }
+.update-banner .ghost { color: #dbe7ff; }
 .update-banner .ghost:hover { background: rgb(255 255 255 / .12); color: #fff; }
 .update-banner .primary { background: #fff; color: var(--brand); border-color: #fff; }
 .small { font-size: 13px; }
 .main { display: flex; flex-direction: column; }
 .main > .pos { flex: 1; min-height: 0; }
+
+/* ---------- Inno Source identity ---------- */
+/* Dark canvas with the logo's blue → cyan → amber light, used behind the start-up screens. */
+.center-screen:not(.inner) {
+  background:
+    radial-gradient(60% 70% at 88% 8%, rgb(247 165 49 / .55), transparent 60%),
+    radial-gradient(55% 60% at 70% 35%, rgb(8 144 196 / .55), transparent 65%),
+    radial-gradient(70% 70% at 55% 85%, rgb(2 28 147 / .85), transparent 70%),
+    var(--ink);
+}
+.center-screen:not(.inner) .card { box-shadow: 0 30px 80px rgb(0 0 0 / .45); border-color: transparent; }
+.brand-head { display: flex; align-items: center; gap: 12px; }
+.brand-head h1, .brand-head h2 { margin: 0; }
+.logo-tile { width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0; display: grid; place-items: center;
+  background: radial-gradient(80% 80% at 85% 10%, rgb(247 165 49 / .9), transparent 55%), radial-gradient(90% 90% at 40% 80%, #021c93, #0890c4); }
+.logo-tile img { width: 72%; height: 72%; object-fit: contain; }
+.byline { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.byline b { color: var(--brand); }
+
+.sidebar {
+  background:
+    radial-gradient(120% 40% at 50% 105%, rgb(10 67 201 / .55), transparent 70%),
+    radial-gradient(90% 25% at 100% 100%, rgb(8 144 196 / .35), transparent 70%),
+    var(--ink);
+}
+.brand { gap: 6px; border-bottom-color: #141a2b; }
+.brand img { width: 40px; height: 40px; object-fit: contain; }
+.sidebar nav button.active { background: linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow: 0 6px 18px rgb(10 67 201 / .4); }
+.update-banner { background: linear-gradient(90deg, var(--brand), var(--brand-2)); }
+.update-banner .primary { color: var(--brand); }
+.stat.strong { background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
+.p-price { color: var(--brand); }
+.chips button.on { background: var(--ink); border-color: var(--ink); }
+.toast { background: var(--ink); }
+
+/* ---------- customers ---------- */
+.customer-chip { background: var(--brand-soft); color: var(--brand); border-color: transparent; font-weight: 600; }
+.customer-results { display: flex; flex-direction: column; margin-top: 6px; max-height: 240px; overflow: auto; }
+.customer-results button { display: flex; justify-content: space-between; align-items: center; border: 0; border-bottom: 1px solid #f1f2f4; border-radius: 0; text-align: start; }
+.linked-customer { background: var(--brand-soft); color: var(--brand); padding: 10px 12px; border-radius: 8px; }
+.pay-customer { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--brand-soft); border-radius: 9px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+.pay-summary .credit { background: #fff7ed; }
+.pay-summary .credit b { color: #b45309; }
+.badge.credit { background: #fff7ed; color: #b45309; }

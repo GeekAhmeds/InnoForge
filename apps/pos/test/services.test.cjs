@@ -195,3 +195,55 @@ test('drawer payments need an open shift; paying needs a supplier', () => {
   assert.equal(tryCode(() => s.purchases.create({ items: [{ product_id: p, qty: 1, unit_cost: 50 }], paid: 50 })), 'SUPPLIER_REQUIRED');
   assert.equal(s.purchases.create({ items: [{ product_id: p, qty: 1, unit_cost: 50 }] }).total, 50);
 });
+
+test('credit sale: needs a customer, respects credit limit, builds a statement and collections hit the drawer', () => {
+  const { s } = setup();
+  const p = s.products.save({ name: 'Box', price: 10000, track_stock: false });
+  s.shifts.open({ openingCash: 0 });
+  const items = [{ product_id: p, qty: 1 }];
+  assert.equal(tryCode(() => s.orders.checkout({ items, payments: [{ method: 'cash', amount: 4000 }] })), 'INSUFFICIENT_PAYMENT');
+  const cust = s.customers.save({ name: 'Nour Trading', phone: '0100', credit_limit: 20000 });
+  const o1 = s.orders.checkout({ items, customer_id: cust, payments: [{ method: 'cash', amount: 4000 }] });
+  assert.equal(o1.credit, 6000);
+  assert.equal(o1.customer_balance, 6000);
+  const o2 = s.orders.checkout({ items, customer_id: cust, payments: [] }); // fully on account
+  assert.equal(o2.credit, 10000);
+  assert.equal(tryCode(() => s.orders.checkout({ items, customer_id: cust, payments: [] })), 'CREDIT_LIMIT_EXCEEDED');
+  s.customers.collect({ customerId: cust, amount: 5000, method: 'cash' });
+  s.customers.collect({ customerId: cust, amount: 1000, method: 'card' });
+  const st = s.customers.statement({ id: cust });
+  assert.equal(st.balance, 10000);
+  assert.deepEqual(st.rows.map((r) => r.balance), [6000, 16000, 11000, 10000]);
+  assert.equal(s.customers.list({ owingOnly: true })[0].balance, 10000);
+  const sum = s.shifts.summary();
+  assert.equal(sum.creditSales, 16000);
+  assert.equal(sum.expectedCash, 4000 + 5000);
+  const r = s.reports.summary({});
+  assert.equal(r.totals.receivables, 10000);
+  assert.equal(r.topCustomers[0].name, 'Nour Trading');
+});
+
+test('returning a credit sale reduces the customer balance before paying cash', () => {
+  const { s } = setup();
+  const p = s.products.save({ name: 'Item', price: 5000, stock: 10 });
+  s.shifts.open({ openingCash: 0 });
+  const cust = s.customers.save({ name: 'C1' });
+  const o = s.orders.checkout({ items: [{ product_id: p, qty: 2 }], customer_id: cust, payments: [{ method: 'cash', amount: 2000 }] });
+  assert.equal(o.credit, 8000);
+  s.orders.refund({ orderId: o.id, items: [{ order_item_id: o.items[0].id, qty: 1 }] }); // 5000 back
+  assert.equal(s.customers.get(cust).balance, 3000);
+  assert.equal(s.shifts.summary().expectedCash, 2000); // nothing left the drawer
+  s.orders.refund({ orderId: o.id, items: [{ order_item_id: o.items[0].id, qty: 1 }] }); // 5000: 3000 account + 2000 cash
+  assert.equal(s.customers.get(cust).balance, 0);
+  assert.equal(s.shifts.summary().expectedCash, 0);
+});
+
+test('cashier can add customers but not set credit limits', () => {
+  const { s } = setup();
+  s.users.save({ name: 'K', username: 'k1', pin: '4444', role: 'cashier' });
+  s.auth.logout();
+  s.auth.login({ username: 'k1', pin: '4444' });
+  const id = s.customers.save({ name: 'Walk-in Co', phone: '0111', credit_limit: 999999 });
+  assert.equal(s.customers.get(id).credit_limit, 0);
+  assert.equal(tryCode(() => s.customers.save({ name: 'Dup', phone: '0111' })), 'DUPLICATE_PHONE');
+});
