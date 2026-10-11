@@ -10,6 +10,7 @@ const PERMISSIONS = [
   'credit_sale',     // sell on a customer's account
   'refund',          // returns from completed invoices
   'void',            // cancel open orders already sent to the kitchen
+  'open_drawer',     // open the cash drawer without a sale
   'view_cost',       // see cost prices and profit
   'products',        // manage products, categories, stock
   'purchases',       // suppliers, purchase invoices, purchase returns, stock counts

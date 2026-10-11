@@ -650,3 +650,35 @@ test('scale barcodes: weight and price labels find the product by PLU', () => {
   const o = s.orders.checkout({ items: [{ product_id: cheese, qty: s.products.byBarcode('2100123012507').scale.qty }], payments: [{ method: 'cash', amount: 40000 }] });
   assert.equal(o.total, 40000);
 });
+
+test('purchase orders from low stock, receiving them, dashboard, drawer permission', () => {
+  const { s, db } = setup({ tax_rate: 0 });
+  const sup = s.suppliers.save({ name: 'Nile Foods', phone: '01110000000' });
+  const rice = s.products.save({ name: 'Rice', price: 3000, cost: 2000, stock: 0, min_stock: 10 });
+  s.purchases.create({ supplierId: sup, items: [{ product_id: rice, qty: 4, unit_cost: 2000 }] }); // links the supplier, stock 4
+  s.products.save({ name: 'Salt', price: 500, stock: 50, min_stock: 5 });
+  const groups = s.purchaseOrders.suggest();
+  assert.equal(groups.length, 1);
+  assert.deepEqual([groups[0].supplier_id, groups[0].items[0].name, groups[0].items[0].qty], [sup, 'Rice', 16]);
+  const po = s.purchaseOrders.save({ supplier_id: sup, items: groups[0].items });
+  assert.equal(po.po_no, 1);
+  assert.equal(po.total, 32000);
+  s.purchaseOrders.setStatus({ id: po.id, status: 'sent' });
+  s.purchases.create({ supplierId: sup, poId: po.id, items: [{ product_id: rice, qty: 16, unit_cost: 2000 }] });
+  assert.equal(s.purchaseOrders.get(po.id).status, 'received');
+  assert.equal(tryCode(() => s.purchaseOrders.setStatus({ id: po.id, status: 'cancelled' })), 'INVALID_STATUS');
+  assert.equal(s.purchaseOrders.suggest().length, 0);
+  // dashboard
+  s.shifts.open({ openingCash: 1000 });
+  s.orders.checkout({ items: [{ product_id: rice, qty: 2 }], payments: [{ method: 'cash', amount: 6000 }] });
+  const d = s.reports.dashboard();
+  assert.deepEqual([d.today.total, d.today.orders, d.today.profit, d.shift.expectedCash], [6000, 1, 2000, 7000]);
+  assert.equal(d.lowStockCount, 0);
+  // opening the drawer without a sale: cashiers need a supervisor
+  s.users.save({ name: 'Cash', username: 'cash', pin: '1111', role: 'cashier' });
+  s.users.save({ name: 'Sup', username: 'sup', pin: '2222', role: 'supervisor' });
+  s.auth.logout(); s.auth.login({ username: 'cash', pin: '1111' });
+  assert.equal(tryCode(() => s.drawer.authorize({})), 'APPROVAL_REQUIRED');
+  assert.equal(s.drawer.authorize({ approval: { username: 'sup', pin: '2222' } }), true);
+  assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'drawer_open' AND approved_by IS NOT NULL").get());
+});

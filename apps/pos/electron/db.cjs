@@ -588,6 +588,28 @@ const MIGRATIONS = [
   ALTER TABLE products ADD COLUMN plu TEXT;
   CREATE INDEX idx_products_plu ON products(plu);
   `,
+  // v12: purchase orders sent to suppliers (from the low-stock list) before the goods arrive.
+  `
+  CREATE TABLE purchase_orders (
+    id          INTEGER PRIMARY KEY,
+    po_no       INTEGER NOT NULL UNIQUE,
+    supplier_id INTEGER REFERENCES suppliers(id),
+    status      TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'received', 'cancelled')),
+    notes       TEXT NOT NULL DEFAULT '',
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    purchase_id INTEGER REFERENCES purchases(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE purchase_order_items (
+    id         INTEGER PRIMARY KEY,
+    po_id      INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    unit_id    INTEGER REFERENCES product_units(id) ON DELETE SET NULL,
+    qty        REAL NOT NULL CHECK (qty > 0),
+    unit_cost  INTEGER NOT NULL DEFAULT 0
+  );
+  ALTER TABLE purchases ADD COLUMN po_id INTEGER REFERENCES purchase_orders(id);
+  `,
 ];
 
 function openDatabase(file) {

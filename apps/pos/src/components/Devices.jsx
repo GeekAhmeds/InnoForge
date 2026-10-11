@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, onSerialPorts, serialListOnly } from '../lib/api.js';
+import { api, onSerialPorts, openCustomerDisplay, openDrawer, serialListOnly } from '../lib/api.js';
 import { connectScale, disconnectScale, onScale, scaleSupported } from '../lib/scale.js';
 import { formatQty } from '../lib/money.js';
 import { Field, Toggle, useApp } from './ui.jsx';
@@ -16,7 +16,7 @@ export default function Devices() {
 
   const save = async () => {
     try {
-      const keys = ['scale_barcodes', 'scale_prefixes', 'scale_code_digits', 'scale_value', 'scale_value_decimals', 'scale_serial', 'scale_port', 'scale_baud', 'scale_request'];
+      const keys = ['cash_drawer', 'drawer_pin', 'customer_display', 'display_message', 'scale_barcodes', 'scale_prefixes', 'scale_code_digits', 'scale_value', 'scale_value_decimals', 'scale_serial', 'scale_port', 'scale_baud', 'scale_request'];
       await api.settings.save(Object.fromEntries(keys.map((k) => [k, f[k]])));
       await reloadSettings();
       notify(t('common.saved'));
@@ -40,6 +40,26 @@ export default function Devices() {
 
   return (
     <>
+      <div className="card">
+        <h3>💰 {t('drawer.title')}</h3>
+        <p className="muted small">{t('drawer.hint')}</p>
+        <Toggle checked={f.cash_drawer} onChange={set('cash_drawer')} label={t('drawer.enable')} />
+        {f.cash_drawer && (
+          <div className="row top-gap">
+            <Field label={t('drawer.pin')}><select value={f.drawer_pin} onChange={set('drawer_pin')}><option value={0}>{t('drawer.pin2')}</option><option value={1}>{t('drawer.pin5')}</option></select></Field>
+            <button type="button" onClick={async () => { try { await save(); await openDrawer({}); notify(t('drawer.sent')); } catch (err) { notify(tErr(err), 'error'); } }}>🔓 {t('drawer.test')}</button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>🖥 {t('display.title')}</h3>
+        <p className="muted small">{t('display.hint')}</p>
+        <Toggle checked={f.customer_display} onChange={set('customer_display')} label={t('display.enable')} />
+        <Field label={t('display.message')}><input value={f.display_message} placeholder={t('display.messagePh')} onChange={set('display_message')} /></Field>
+        <button type="button" onClick={() => openCustomerDisplay().catch((err) => notify(tErr(err), 'error'))}>🖥 {t('display.open')}</button>
+      </div>
+
       <div className="card">
         <h3>⚖ {t('devices.labelScale')}</h3>
         <p className="muted small">{t('devices.labelScaleHint')}</p>

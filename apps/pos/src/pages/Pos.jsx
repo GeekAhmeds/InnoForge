@@ -5,6 +5,8 @@ import { a4Html, checkHtml, receiptHtml } from '../lib/receipt.js';
 import { sellScreens } from '../lib/screens.js';
 import { printKitchenTickets } from '../components/Kitchen.jsx';
 import { connectScale, onScale, stableWeight } from '../lib/scale.js';
+import { openCustomerDisplay, openDrawer, sendDisplay } from '../lib/api.js';
+import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -27,7 +29,7 @@ const cartFromOrder = (o) => ({
 
 export default function Pos() {
   const app = useApp();
-  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval, pendingCart, setPendingCart, setPage, ask } = app;
+  const { settings, shift, t, tErr, notify, printDoc, lang, withApproval, pendingCart, setPendingCart, setPage, ask, user } = app;
   const floorOn = sellScreens(settings).includes('restaurant');
   const [lastSale, setLastSale] = useState(null);
   const [salespeople, setSalespeople] = useState([]);
@@ -46,6 +48,22 @@ export default function Pos() {
   // A quotation opened from the Customers page arrives as a pending cart.
   const [cart, setCart] = useState(() => (pendingCart ? { ...emptyCart(defaultType), ...pendingCart } : emptyCart(defaultType)));
   useEffect(() => { if (pendingCart) setPendingCart(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The cart being rung up is kept on disk, so a power cut or a crash does not lose it.
+  const draftKey = `cashier-${user?.id}`;
+  useEffect(() => {
+    if (pendingCart) return;
+    const saved = loadDraft(draftKey);
+    if (saved?.items?.length && window.confirm(t('pos.restoreDraft', { n: saved.items.length }))) setCart({ ...emptyCart(defaultType), ...saved });
+    else clearDraft(draftKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Held carts and table orders are already saved in the database.
+    if (cart.items.length && !cart.id) saveDraft(draftKey, cart); else clearDraft(draftKey);
+  }, [cart, draftKey]);
+
+  // Customer-facing screen.
+  useEffect(() => { if (settings.customer_display) openCustomerDisplay().catch(() => {}); }, [settings.customer_display]);
   const [quote, setQuote] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...}
   const searchRef = useRef(null);
@@ -66,6 +84,14 @@ export default function Pos() {
     api.orders.quote(cart).then((q) => live && setQuote(q)).catch((e) => notify(tErr(e), 'error'));
     return () => { live = false; };
   }, [cart, notify, tErr]);
+
+  useEffect(() => {
+    if (cart.items.length && quote) {
+      sendDisplay({ mode: 'cart', items: quote.lines.map((l) => ({ name: l.name, qty: formatQty(l.qty), total: l.line_total })), total: quote.total, discount: quote.discount + quote.lines.reduce((sum, l) => sum + (l.discount || 0), 0) });
+    } else if (!cart.items.length && lastSale) {
+      sendDisplay({ mode: 'paid', total: lastSale.total, paid: lastSale.paid, change: lastSale.change_due });
+    } else if (!cart.items.length) sendDisplay({ mode: 'idle' });
+  }, [cart.items.length, quote, lastSale]);
 
   // A scanned unit barcode (e.g. a carton) adds that unit; the server prices it.
   const addProduct = useCallback((p, qty = 1, unit = null, { separate = false } = {}) => {
@@ -122,7 +148,7 @@ export default function Pos() {
     }
   }
 
-  const reset = useCallback(() => { setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch]);
+  const reset = useCallback(() => { clearDraft(draftKey); setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch, draftKey]);
   // A new dine-in order needs a table; an existing one (e.g. a split bill) can be paid without.
   const needsTable = () => cart.order_type === 'dine_in' && !cart.table_id && !cart.id;
   // Table orders go back to the floor plan once saved, sent or paid.
@@ -225,6 +251,9 @@ export default function Pos() {
               onClick={() => !scale.connected && connectScale({ baud: settings.scale_baud, request: settings.scale_request }).catch((err) => notify(tErr(err), 'error'))}>
               ⚖ {scale.connected ? (scale.r ? `${formatQty(scale.r.weight)} kg` : '…') : t('devices.connect')}
             </button>
+          )}
+          {settings.cash_drawer && (
+            <button title={t('drawer.open')} onClick={() => run(() => withApproval((approval) => openDrawer({ manual: true, approval })))}>💰</button>
           )}
           {!restaurant && <button onClick={() => setModal({ kind: 'held' })}>⏸ {t('pos.held')}</button>}
           {restaurant && (floorOn
@@ -411,6 +440,7 @@ export default function Pos() {
               if (settings.invoice_format === 'a4') await printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name);
               else await printDoc(receiptHtml(order, settings, t, lang));
             }
+            if (settings.cash_drawer && payments.some((p) => p.method === 'cash')) openDrawer({}).catch((err) => notify(tErr(err), 'error'));
             if (order.kitchen_tickets?.length) await printKitchenTickets(order, order.kitchen_tickets, { settings, t, lang, printDoc });
             setLastSale(order);
             done(cart);

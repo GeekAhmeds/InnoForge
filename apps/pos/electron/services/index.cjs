@@ -52,6 +52,10 @@ const DEFAULT_SETTINGS = {
   scale_port: '',
   scale_baud: 9600,
   scale_request: '', // '' (scale streams) | 'W' | 'ENQ' | 'P' — sent to ask for a reading
+  cash_drawer: false, // open the drawer (through the receipt printer) on cash sales
+  drawer_pin: 0, // ESC/POS drawer connector: 0 = pin 2, 1 = pin 5
+  display_message: '', // customer display: line shown when idle (offers, welcome)
+  customer_display: false, // open the customer-facing screen with the cashier
 };
 
 class PosError extends Error {
@@ -104,7 +108,7 @@ function createServices(db) {
 
   const permsOf = (u) => effectivePermissions(u);
   // Actions a supervisor can unlock on the spot with their PIN; the rest are simply forbidden.
-  const APPROVABLE = new Set(['discount', 'price_override', 'credit_sale', 'refund', 'void', 'expenses']);
+  const APPROVABLE = new Set(['discount', 'price_override', 'credit_sale', 'refund', 'void', 'expenses', 'open_drawer']);
   const can = (perm, u = session.user) => !!permsOf(u)[perm];
 
   /**
@@ -1318,7 +1322,7 @@ function createServices(db) {
      * Receives goods: adds stock, re-averages product cost and optionally pays now.
      * Anything unpaid stays on the supplier's balance.
      */
-    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [] } = {}) {
+    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [], poId = null } = {}) {
       const u = requirePerm('purchases').user;
       if (!items.length) throw new PosError('EMPTY_CART');
       if (supplierId && !db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
@@ -1370,6 +1374,10 @@ function createServices(db) {
           if (up.product_id && price >= 0) db.prepare('UPDATE products SET price = ? WHERE id = ?').run(price, up.product_id);
         }
         if (paidNow > 0) insertSupplierPayment({ supplierId, purchaseId, amount: paidNow, method, fromDrawer }, u);
+        if (int(poId)) {
+          db.prepare("UPDATE purchase_orders SET status = 'received', purchase_id = ? WHERE id = ? AND status IN ('draft', 'sent')").run(purchaseId, int(poId));
+          db.prepare('UPDATE purchases SET po_id = ? WHERE id = ?').run(int(poId), purchaseId);
+        }
         audit('purchase_create', { entity: 'purchase', entityId: purchaseId, details: { total, paid: paidNow, supplierId } });
         return purchases.get(purchaseId);
       });
@@ -2028,6 +2036,7 @@ function createServices(db) {
   };
 
   customers.aging = aging;
+  reports.dashboard = dashboard;
   purchases.returnItems = returnPurchase;
   orders.findSerial = (serial) => findSerial(serial);
 
@@ -2381,9 +2390,135 @@ function createServices(db) {
     return kds.ensureKey();
   };
 
+  // ---------- purchase orders (what we ask suppliers to deliver) ----------
+  function getPo(id) {
+    const po = plain(db.prepare(`SELECT po.*, s.name AS supplier_name, s.phone AS supplier_phone, u.name AS user_name
+      FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id JOIN users u ON u.id = po.user_id WHERE po.id = ?`).get(id));
+    if (!po) throw new PosError('NOT_FOUND');
+    po.items = plainAll(db.prepare(`SELECT i.*, p.name, p.barcode, p.stock, p.min_stock, p.unit, pu.name AS unit_name, COALESCE(pu.factor, 1) AS unit_factor
+      FROM purchase_order_items i JOIN products p ON p.id = i.product_id LEFT JOIN product_units pu ON pu.id = i.unit_id WHERE i.po_id = ? ORDER BY i.id`).all(id));
+    po.total = po.items.reduce((sum, i) => sum + Math.round(i.qty * i.unit_cost), 0);
+    if (!can('view_cost')) { po.items = po.items.map(({ unit_cost, ...i }) => i); delete po.total; }
+    return po;
+  }
+
+  const purchaseOrders = {
+    list({ status = '' } = {}) {
+      requirePerm('purchases');
+      return plainAll(db.prepare(`SELECT po.*, s.name AS supplier_name,
+          (SELECT COUNT(*) FROM purchase_order_items i WHERE i.po_id = po.id) AS item_count,
+          (SELECT COALESCE(SUM(i.qty * i.unit_cost), 0) FROM purchase_order_items i WHERE i.po_id = po.id) AS total
+        FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+        ${status ? 'WHERE po.status = ?' : ''} ORDER BY po.id DESC LIMIT 300`).all(...(status ? [status] : [])));
+    },
+    get(id) {
+      requirePerm('purchases');
+      return getPo(id);
+    },
+    /**
+     * Products at or below their reorder level, grouped by supplier, with a suggested
+     * quantity that brings stock back to twice the reorder level.
+     */
+    suggest() {
+      requirePerm('purchases');
+      const rows = db.prepare(`SELECT p.id AS product_id, p.name, p.stock, p.min_stock, p.cost, p.unit, p.supplier_id, s.name AS supplier_name
+        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
+        WHERE p.active = 1 AND p.track_stock = 1 AND p.min_stock > 0 AND p.stock <= p.min_stock ORDER BY s.name, p.name`).all();
+      const groups = new Map();
+      for (const r of rows) {
+        const key = r.supplier_id || 0;
+        if (!groups.has(key)) groups.set(key, { supplier_id: r.supplier_id, supplier_name: r.supplier_name || '', items: [] });
+        groups.get(key).items.push({ product_id: r.product_id, name: r.name, stock: r.stock, min_stock: r.min_stock, unit: r.unit,
+          qty: Math.max(1, Math.ceil(r.min_stock * 2 - Math.max(0, r.stock))), unit_cost: can('view_cost') ? r.cost : 0 });
+      }
+      return [...groups.values()];
+    },
+    save(po = {}) {
+      const u = requirePerm('purchases').user;
+      const items = (po.items || []).map((i) => ({ product_id: int(i.product_id), unit_id: int(i.unit_id) || null, qty: num(i.qty), unit_cost: Math.max(0, int(i.unit_cost)) }))
+        .filter((i) => i.product_id && i.qty > 0);
+      if (!items.length) throw new PosError('EMPTY_CART');
+      return transaction(db, () => {
+        let id = int(po.id) || null;
+        if (id) {
+          const cur = db.prepare('SELECT status FROM purchase_orders WHERE id = ?').get(id);
+          if (!cur) throw new PosError('NOT_FOUND');
+          if (!['draft', 'sent'].includes(cur.status)) throw new PosError('INVALID_STATUS');
+          db.prepare('UPDATE purchase_orders SET supplier_id = ?, notes = ? WHERE id = ?').run(int(po.supplier_id) || null, str(po.notes), id);
+          db.prepare('DELETE FROM purchase_order_items WHERE po_id = ?').run(id);
+        } else {
+          const no = (db.prepare('SELECT MAX(po_no) AS n FROM purchase_orders').get().n || 0) + 1;
+          id = Number(db.prepare('INSERT INTO purchase_orders (po_no, supplier_id, notes, user_id) VALUES (?, ?, ?, ?)').run(no, int(po.supplier_id) || null, str(po.notes), u.id).lastInsertRowid);
+        }
+        const ins = db.prepare('INSERT INTO purchase_order_items (po_id, product_id, unit_id, qty, unit_cost) VALUES (?, ?, ?, ?, ?)');
+        for (const i of items) ins.run(id, i.product_id, i.unit_id, i.qty, i.unit_cost);
+        audit('po_save', { entity: 'purchase_order', entityId: id, details: { items: items.length } });
+        return getPo(id);
+      });
+    },
+    setStatus({ id, status } = {}) {
+      requirePerm('purchases');
+      if (!['draft', 'sent', 'cancelled'].includes(status)) throw new PosError('INVALID_STATUS');
+      const cur = db.prepare('SELECT status FROM purchase_orders WHERE id = ?').get(id);
+      if (!cur || cur.status === 'received') throw new PosError('INVALID_STATUS');
+      db.prepare('UPDATE purchase_orders SET status = ? WHERE id = ?').run(status, id);
+      return getPo(id);
+    },
+  };
+
+  // ---------- cash drawer ----------
+  const drawer = {
+    /** Opening the drawer without a sale needs 'open_drawer' (or a supervisor) and is logged. */
+    authorize({ approval = null } = {}) {
+      const { approvedBy } = requirePerm('open_drawer', approval);
+      audit('drawer_open', { approvedBy });
+      return true;
+    },
+  };
+
+  // ---------- owner dashboard ----------
+  function dashboard() {
+    requirePerm('reports');
+    const day = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return d.toLocaleDateString('en-CA'); };
+    const today = day(0);
+    const sales = (from, to) => plain(db.prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(credit), 0) AS credit
+      FROM orders WHERE status = 'completed' AND completed_at >= ? AND completed_at < date(?, '+1 day')`).get(from, to));
+    const profit = (from, to) => Math.round(db.prepare(`SELECT COALESCE(SUM(i.line_total * (i.qty - i.returned_qty) / i.qty - i.unit_cost * (i.qty - i.returned_qty)), 0) AS p
+      FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')`).get(from, to).p);
+    const refunds = (from, to) => db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM returns WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(from, to).t;
+    const showCost = can('view_cost');
+    const shift = currentShift();
+    const aging = db.prepare('SELECT id FROM customers WHERE active = 1').all().map((c) => openItems(c.id).open).flat();
+    const receivables = aging.reduce((sum, d) => sum + d.open, 0);
+    const overdue = aging.filter((d) => d.due_date < today);
+    const weekAhead = day(7);
+    return {
+      today: { ...sales(today, today), refunds: refunds(today, today), profit: showCost ? profit(today, today) : null },
+      yesterday: { ...sales(day(-1), day(-1)), profit: showCost ? profit(day(-1), day(-1)) : null },
+      month: { ...sales(today.slice(0, 8) + '01', today), profit: showCost ? profit(today.slice(0, 8) + '01', today) : null },
+      last7: plainAll(db.prepare(`SELECT date(completed_at) AS day, COALESCE(SUM(total), 0) AS total, COUNT(*) AS orders FROM orders
+        WHERE status = 'completed' AND completed_at >= date('now', 'localtime', '-6 days') GROUP BY day ORDER BY day`).all()),
+      byHour: plainAll(db.prepare(`SELECT CAST(strftime('%H', completed_at) AS INTEGER) AS hour, SUM(total) AS total FROM orders
+        WHERE status = 'completed' AND completed_at >= ? GROUP BY hour ORDER BY hour`).all(today)),
+      topProducts: plainAll(db.prepare(`SELECT i.name, SUM(i.qty - i.returned_qty) AS qty, SUM(i.line_total * (i.qty - i.returned_qty) / i.qty) AS total
+        FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'completed' AND o.completed_at >= ?
+        GROUP BY COALESCE(i.product_id, i.name) ORDER BY total DESC LIMIT 5`).all(today)),
+      shift: shift ? { id: shift.id, opened_at: shift.opened_at, expectedCash: shiftSummary(shift.id).expectedCash } : null,
+      lowStock: plainAll(db.prepare(`SELECT id, name, stock, min_stock, unit FROM products WHERE active = 1 AND track_stock = 1 AND min_stock > 0 AND stock <= min_stock ORDER BY stock - min_stock LIMIT 8`).all()),
+      lowStockCount: db.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND track_stock = 1 AND min_stock > 0 AND stock <= min_stock').get().n,
+      expiring: db.prepare("SELECT COUNT(*) AS n FROM batches WHERE qty > 0 AND expiry_date IS NOT NULL AND expiry_date <= date('now', 'localtime', '+30 days')").get().n,
+      receivables, overdueAmount: overdue.reduce((sum, d) => sum + d.open, 0), overdueCount: overdue.length,
+      chequesDue: plainAll(db.prepare(`SELECT p.id, p.amount, p.cheque_no, p.bank, p.cheque_due, c.name AS customer_name FROM customer_payments p JOIN customers c ON c.id = p.customer_id
+        WHERE p.method = 'cheque' AND p.status = 'posted' AND p.cheque_status = 'pending' AND p.cheque_due <= ? ORDER BY p.cheque_due LIMIT 8`).all(weekAhead)),
+      openOrders: db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'open'").get().n,
+      payables: db.prepare(`SELECT COALESCE(SUM(b), 0) AS t FROM (SELECT ${SUPPLIER_BALANCE} AS b FROM suppliers s) WHERE b > 0`).get().t,
+      hiddenProfit: !showCost,
+    };
+  }
+
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, requireAdmin, requirePerm, audit, can,
   };
 }
 

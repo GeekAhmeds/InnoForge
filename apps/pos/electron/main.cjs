@@ -8,9 +8,10 @@ const { createLicenseStore } = require('./license.cjs');
 const { createUpdater } = require('./updater.cjs');
 const excel = require('./excel.cjs');
 const { createKdsServer } = require('./kds-server.cjs');
+const { sendRaw, drawerKick } = require('./rawprint.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations', 'purchaseOrders'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
@@ -23,6 +24,9 @@ let license;
 let updater;
 let kdsServer;
 let serialListOnly = false;
+let customerWindow;
+// What the customer-facing screen shows (sent by the till on every cart change).
+let customerState = { mode: 'idle' };
 let kdsWindow;
 
 const dbFile = () => path.join(app.getPath('userData'), 'innoforge-pos.db');
@@ -49,7 +53,7 @@ function boot() {
   });
   license = licenses.status();
   autoBackup('daily');
-  kdsServer = createKdsServer({ services });
+  kdsServer = createKdsServer({ services, customerState: () => customerState });
   kdsServer.start().catch((err) => console.error('kitchen screen server', err));
   updater = createUpdater({
     publicKeyPem: require('./license-public.cjs'),
@@ -109,7 +113,10 @@ function createWindow() {
   ses.setDevicePermissionHandler((details) => details.deviceType === 'serial');
 
   // The kitchen screen belongs to the till: closing the till closes it too.
-  mainWindow.on('closed', () => { if (kdsWindow && !kdsWindow.isDestroyed()) kdsWindow.close(); });
+  mainWindow.on('closed', () => {
+    if (kdsWindow && !kdsWindow.isDestroyed()) kdsWindow.close();
+    if (customerWindow && !customerWindow.isDestroyed()) customerWindow.close();
+  });
 
   // Everything is local: block navigation away from the app and open links externally.
   mainWindow.webContents.on('will-navigate', (e, url) => {
@@ -149,6 +156,45 @@ ipcMain.handle('pos:call', (_e, ns, method, arg) => {
   } catch (err) {
     return fail(err);
   }
+});
+
+// Cash drawer wired to the receipt printer: an ESC/POS pulse sent as a raw print job.
+// manual = the "open drawer" button (needs the open_drawer permission and is logged).
+ipcMain.handle('pos:openDrawer', async (_e, { manual = false, approval = null } = {}) => {
+  try {
+    if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
+    if (manual) services.drawer.authorize({ approval });
+    const s = services.settings.get();
+    let printer = s.printer_name;
+    if (!printer) printer = (await mainWindow.webContents.getPrintersAsync()).find((p) => p.isDefault)?.name || '';
+    await sendRaw(printer, drawerKick(s.drawer_pin));
+    return ok(true);
+  } catch (err) {
+    return fail(err instanceof PosError ? err : new PosError('DRAWER_FAILED', err.message));
+  }
+});
+
+ipcMain.handle('pos:display', (_e, state) => { customerState = state && typeof state === 'object' ? state : { mode: 'idle' }; return ok(true); });
+
+ipcMain.handle('pos:openCustomerDisplay', () => {
+  if (!licenseOk()) return fail(new PosError('LICENSE_REQUIRED'));
+  const info = kdsServer.info();
+  if (!info.running) return fail(new PosError('KDS_NOT_RUNNING', info.error || ''));
+  const url = info.localUrl.replace('/kds?', '/customer?');
+  if (customerWindow && !customerWindow.isDestroyed()) { customerWindow.focus(); return ok(true); }
+  const { screen } = require('electron');
+  const other = screen.getAllDisplays().find((d) => d.id !== screen.getPrimaryDisplay().id);
+  customerWindow = new BrowserWindow({
+    width: 1024, height: 700, backgroundColor: '#0b1220', title: 'InnoForge — Customer', autoHideMenuBar: true,
+    ...(other ? { x: other.bounds.x, y: other.bounds.y } : {}),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: !app.isPackaged },
+  });
+  customerWindow.removeMenu();
+  customerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  customerWindow.on('closed', () => { customerWindow = null; });
+  if (other) customerWindow.once('ready-to-show', () => customerWindow.setFullScreen(true));
+  customerWindow.loadURL(url);
+  return ok(true);
 });
 
 ipcMain.handle('pos:serialListOnly', () => { serialListOnly = true; return ok(true); });

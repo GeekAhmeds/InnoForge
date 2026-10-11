@@ -14,6 +14,7 @@ import Activation from './pages/Activation.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Customers from './pages/Customers.jsx';
 import Floor from './pages/Floor.jsx';
+import Dashboard from './pages/Dashboard.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { UpdateBanner } from './components/Updates.jsx';
@@ -37,6 +38,7 @@ export default function App() {
 }
 
 const NAV = [
+  { id: 'dashboard', icon: '📈', perm: 'reports' },
   { id: 'orders', icon: '🧾' },
   { id: 'customers', icon: '👥' },
   { id: 'products', icon: '📦', perm: 'products' },
@@ -116,7 +118,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     const screens = sellScreens(settings);
     const sellNav = screens.map((id) => SCREENS.find((x) => x.id === id)).map((x) => ({ id: x.page, icon: x.icon, label: screens.length > 1 ? `nav.${x.page === 'pos' ? 'cashier' : x.page}` : 'nav.pos' }));
     const nav = [...sellNav, ...NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]))];
-    const Page = { pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { dashboard: Dashboard, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

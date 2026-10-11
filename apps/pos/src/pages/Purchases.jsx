@@ -4,6 +4,8 @@ import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { today } from './Orders.jsx';
+import { openWhatsApp } from '../lib/share.js';
+import { poHtml } from '../lib/receipt.js';
 
 export default function Purchases() {
   const { t } = useApp();
@@ -13,13 +15,14 @@ export default function Purchases() {
       <div className="page-head">
         <h2>🚚 {t('nav.purchases')}</h2>
         <div className="seg">
-          {['purchases', 'suppliers', 'rebates', 'expenses'].map((x) => (
+          {['purchases', 'orders', 'suppliers', 'rebates', 'expenses'].map((x) => (
             <button key={x} className={tab === x ? 'on' : ''} onClick={() => setTab(x)}>{t(`purchases.tab.${x}`)}</button>
           ))}
         </div>
       </div>
       {tab === 'purchases' && <PurchaseList />}
       {tab === 'suppliers' && <SupplierList />}
+      {tab === 'orders' && <PurchaseOrders />}
       {tab === 'rebates' && <Rebates />}
       {tab === 'expenses' && <ExpenseList />}
     </div>
@@ -75,7 +78,7 @@ function PurchaseList() {
   );
 }
 
-function PurchaseEditor({ onClose, onSaved }) {
+function PurchaseEditor({ onClose, onSaved, initial = null }) {
   const { t, tErr, notify, settings, shift } = useApp();
   const d = settings.decimals;
   const m = (v) => formatMoney(v, settings);
@@ -87,6 +90,23 @@ function PurchaseEditor({ onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { api.suppliers.list({}).then(setSuppliers); }, []);
+  // Receiving a purchase order: start from its supplier and lines.
+  useEffect(() => {
+    if (!initial) return;
+    setForm((f) => ({ ...f, supplierId: initial.supplierId ? String(initial.supplierId) : '', notes: initial.notes || '' }));
+    (async () => {
+      const ls = [];
+      for (const it of initial.items) {
+        const p = await api.products.get(it.product_id);
+        const unit = p.units.find((u) => u.id === it.unit_id);
+        ls.push({
+          product_id: p.id, name: p.name, qty: String(it.qty), unit_cost: fromMinor(it.unit_cost ?? (p.cost ?? 0), d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
+          units: p.units || [], unit_id: unit ? String(unit.id) : '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
+        });
+      }
+      setLines(ls);
+    })().catch((err) => notify(tErr(err), 'error'));
+  }, [initial]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!search.trim()) { setMatches([]); return undefined; }
     const h = setTimeout(() => api.products.list({ search }).then((r) => setMatches(r.slice(0, 8))), 120);
@@ -126,6 +146,7 @@ function PurchaseEditor({ onClose, onSaved }) {
         fromDrawer: form.fromDrawer,
         items: lines.map((l) => ({ product_id: l.product_id, unit_id: Number(l.unit_id) || null, qty: Number(l.qty), unit_cost: toMinor(l.unit_cost, d), discount_percent: Number(l.discount_percent) || 0, bonus_qty: Number(l.bonus_qty) || 0, batch_no: l.batch_no, expiry_date: l.expiry_date || null })),
         updatePrices: lines.filter((l) => toMinor(l.price, d) !== l.oldPrice).map((l) => ({ product_id: l.product_id, price: toMinor(l.price, d) })),
+        poId: initial?.poId || null,
       });
       notify(t('common.saved'));
       onSaved();
@@ -394,6 +415,115 @@ function Statement({ id, onClose }) {
         </tbody>
       </table>
       {!data.rows.length && <Empty>{t('common.none')}</Empty>}
+    </Modal>
+  );
+}
+
+// ---------- purchase orders ----------
+function PurchaseOrders() {
+  const { t, tErr, notify, settings } = useApp();
+  const [status, setStatus] = useState('');
+  const [list, reload] = useLoad(() => api.purchaseOrders.list({ status }), [status]);
+  const [view, setView] = useState(null);
+  const [suggest, setSuggest] = useState(null);
+  const [receiving, setReceiving] = useState(null);
+  const m = (v) => formatMoney(v, settings);
+  const run = async (fn) => { try { await fn(); } catch (err) { notify(tErr(err), 'error'); } };
+  return (
+    <>
+      <div className="filters toolbar">
+        <div className="seg">{['', 'draft', 'sent', 'received', 'cancelled'].map((x) => <button key={x} className={status === x ? 'on' : ''} onClick={() => setStatus(x)}>{x ? t(`po.status.${x}`) : t('common.all')}</button>)}</div>
+        <span className="spacer" />
+        <button onClick={() => run(async () => setSuggest(await api.purchaseOrders.suggest()))}>📦 {t('po.fromLowStock')}</button>
+        <button className="primary" onClick={() => setView({ supplier_id: '', notes: '', items: [], status: 'draft' })}>+ {t('po.new')}</button>
+      </div>
+      <div className="card flush">
+        <table className="grid">
+          <thead><tr><th>#</th><th>{t('orders.date')}</th><th>{t('purchases.supplier')}</th><th className="num">{t('po.items')}</th><th className="num">{t('common.total')}</th><th>{t('orders.type')}</th></tr></thead>
+          <tbody>{(list || []).map((po) => (
+            <tr key={po.id} className="clickable" onClick={() => run(async () => setView(await api.purchaseOrders.get(po.id)))}>
+              <td><b>{po.po_no}</b></td><td>{po.created_at.slice(0, 10)}</td><td>{po.supplier_name || '—'}</td><td className="num">{po.item_count}</td>
+              <td className="num">{m(po.total)}</td><td><span className={`badge status-${po.status}`}>{t(`po.status.${po.status}`)}</span></td>
+            </tr>
+          ))}</tbody>
+        </table>
+        {list && !list.length && <Empty>{t('po.none')}</Empty>}
+      </div>
+      {suggest && (
+        <Modal title={`📦 ${t('po.fromLowStock')}`} onClose={() => setSuggest(null)} width={760}>
+          {!suggest.length && <Empty>{t('po.nothingLow')}</Empty>}
+          {suggest.map((g) => (
+            <div key={g.supplier_id || 0} className="card">
+              <div className="row between"><b>{g.supplier_name || t('po.noSupplier')}</b>
+                <button className="primary sm" onClick={() => run(async () => { const po = await api.purchaseOrders.save({ supplier_id: g.supplier_id, items: g.items }); setSuggest(null); reload(); setView(po); })}>+ {t('po.create')}</button>
+              </div>
+              <table className="grid compact"><tbody>{g.items.map((i) => <tr key={i.product_id}><td>{i.name}</td><td className="num warn">{formatQty(i.stock)}</td><td className="num muted">/ {formatQty(i.min_stock)}</td><td className="num">→ <b>{formatQty(i.qty)}</b></td></tr>)}</tbody></table>
+            </div>
+          ))}
+        </Modal>
+      )}
+      {view && <PoModal po={view} onClose={() => setView(null)} onChanged={(po) => { reload(); if (po) setView(po); }} onReceive={(po) => { setView(null); setReceiving({ supplierId: po.supplier_id, items: po.items, poId: po.id, notes: `${t('po.po')} #${po.po_no}` }); }} />}
+      {receiving && <PurchaseEditor initial={receiving} onClose={() => setReceiving(null)} onSaved={() => { setReceiving(null); reload(); }} />}
+    </>
+  );
+}
+
+function PoModal({ po, onClose, onChanged, onReceive }) {
+  const { t, tErr, notify, settings, printDoc, lang, can } = useApp();
+  const d = settings.decimals;
+  const [f, setF] = useState({ ...po, items: po.items.map((i) => ({ ...i, qty: String(i.qty), cost: i.unit_cost != null ? fromMinor(i.unit_cost, d) : '' })) });
+  const [suppliers] = useLoad(() => api.suppliers.list({}), []);
+  const [search, setSearch] = useState('');
+  const [matches, setMatches] = useState([]);
+  const editable = !po.id || ['draft', 'sent'].includes(po.status);
+  const m = (v) => formatMoney(v, settings);
+  useEffect(() => {
+    if (!search.trim()) { setMatches([]); return undefined; }
+    const h = setTimeout(() => api.products.list({ search }).then((r) => setMatches(r.slice(0, 8))), 120);
+    return () => clearTimeout(h);
+  }, [search]);
+  const run = async (fn) => { try { return await fn(); } catch (err) { notify(tErr(err), 'error'); return null; } };
+  const payload = () => ({ id: po.id, supplier_id: Number(f.supplier_id) || null, notes: f.notes, items: f.items.map((i) => ({ product_id: i.product_id, unit_id: i.unit_id, qty: Number(i.qty), unit_cost: i.cost === '' ? 0 : toMinor(i.cost, d) })) });
+  const save = () => run(async () => { const saved = await api.purchaseOrders.save(payload()); notify(t('common.saved')); onChanged(saved); return saved; });
+  const supplier = (suppliers || []).find((s) => s.id === Number(f.supplier_id));
+  const text = (x) => [`*${settings.business_name}*`, `${t('po.po')} #${x.po_no} — ${x.created_at.slice(0, 10)}`, '', ...x.items.map((i) => `• ${i.name} × ${formatQty(i.qty)}${i.unit_name ? ` ${i.unit_name}` : ''}`), '', x.notes || '', settings.phone ? `📞 ${settings.phone}` : ''].filter(Boolean).join('\n');
+  return (
+    <Modal title={po.id ? `${t('po.po')} #${po.po_no} — ${t(`po.status.${po.status}`)}` : t('po.new')} onClose={onClose} width={820}
+      footer={<>
+        {po.id && editable && <button className="danger-ghost" onClick={() => run(async () => { onChanged(await api.purchaseOrders.setStatus({ id: po.id, status: 'cancelled' })); })}>{t('po.cancel')}</button>}
+        <span className="spacer" />
+        {po.id && <button onClick={() => printDoc(poHtml(po, settings, t, lang), settings.a4_printer_name)}>📄 {t('a4.printA4')}</button>}
+        {po.id && supplier?.phone && <button onClick={() => run(async () => { openWhatsApp(supplier.phone, text(po)); if (po.status === 'draft') onChanged(await api.purchaseOrders.setStatus({ id: po.id, status: 'sent' })); })}>💬 {t('po.sendWhatsapp')}</button>}
+        {editable && <button onClick={save}>{t('common.save')}</button>}
+        {po.id && editable && can('purchases') && <button className="primary" onClick={() => run(async () => { const saved = await api.purchaseOrders.save(payload()); onReceive(saved); })}>📥 {t('po.receive')}</button>}
+      </>}>
+      <div className="grid2">
+        <Field label={t('purchases.supplier')}>
+          <select value={f.supplier_id || ''} disabled={!editable} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}>
+            <option value="">—</option>{(suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </Field>
+        <Field label={t('pos.note')}><input value={f.notes || ''} disabled={!editable} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+      </div>
+      {editable && (
+        <div className="search-add">
+          <input placeholder={t('purchases.addProduct')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          {!!matches.length && <div className="dropdown">{matches.map((p) => <button key={p.id} type="button" onClick={() => { setF({ ...f, items: [...f.items, { product_id: p.id, name: p.name, stock: p.stock, min_stock: p.min_stock, qty: '1', cost: p.cost != null ? fromMinor(p.cost, d) : '', unit_id: null }] }); setSearch(''); }}><span>{p.name}</span><small className="muted">{formatQty(p.stock)}</small></button>)}</div>}
+        </div>
+      )}
+      <table className="grid compact-inputs">
+        <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('products.stock')}</th><th>{t('pos.qty')}</th>{can('view_cost') && <th>{t('purchases.unitCost')}</th>}<th /></tr></thead>
+        <tbody>{f.items.map((i, idx) => (
+          <tr key={`${i.product_id}-${idx}`}>
+            <td>{i.name}{i.unit_name && <small className="muted"> ({i.unit_name})</small>}</td>
+            <td className="num muted">{formatQty(i.stock)}{i.min_stock ? ` / ${formatQty(i.min_stock)}` : ''}</td>
+            <td><input className="qty-input" disabled={!editable} inputMode="decimal" value={i.qty} onChange={(e) => setF({ ...f, items: f.items.map((x, j) => (j === idx ? { ...x, qty: e.target.value } : x)) })} /></td>
+            {can('view_cost') && <td><input className="qty-input" disabled={!editable} inputMode="decimal" value={i.cost} onChange={(e) => setF({ ...f, items: f.items.map((x, j) => (j === idx ? { ...x, cost: e.target.value } : x)) })} /></td>}
+            <td>{editable && <button className="danger-ghost sm" onClick={() => setF({ ...f, items: f.items.filter((_, j) => j !== idx) })}>✕</button>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      {po.total != null && <p className="muted">{t('common.total')}: <b>{m(po.total)}</b></p>}
     </Modal>
   );
 }

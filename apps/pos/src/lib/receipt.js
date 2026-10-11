@@ -295,3 +295,24 @@ export function a4Html(doc, kind, settings, t, lang) {
   <div class="foot">${settings.receipt_footer ? esc(settings.receipt_footer) + ' — ' : ''}InnoForge POS · <span dir="ltr">${VENDOR.websiteLabel}</span></div>
   </body></html>`;
 }
+
+/** A4 purchase order for a supplier (no prices unless the user may see costs). */
+export function poHtml(po, settings, t, lang) {
+  const showCost = po.total != null;
+  const m = (v) => formatMoney(v, settings);
+  return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 14mm; } body { font: 13px/1.5 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
+    h1 { font-size: 20px; margin: 0; } .muted { color: #555; } .head { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: start; } th { background: #eee; } .n { text-align: end; }
+  </style></head><body>
+  <div class="head"><div><h1>${esc(settings.business_name)}</h1><div class="muted">${esc(settings.address)} ${settings.phone ? ltr(settings.phone) : ''}</div></div>
+  <div><b>${t('po.po')} #${po.po_no}</b><div class="muted">${ltr(po.created_at.slice(0, 10))}</div></div></div>
+  <p>${t('purchases.supplier')}: <b>${esc(po.supplier_name || '—')}</b> ${po.supplier_phone ? ltr(po.supplier_phone) : ''}</p>
+  <table><thead><tr><th>#</th><th>${t('receipt.item')}</th><th class="n">${t('pos.qty')}</th>${showCost ? `<th class="n">${t('purchases.unitCost')}</th><th class="n">${t('common.total')}</th>` : ''}</tr></thead><tbody>
+  ${po.items.map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.name)}${i.unit_name ? ` (${esc(i.unit_name)})` : ''}</td><td class="n">${formatQty(i.qty)}</td>${showCost ? `<td class="n">${m(i.unit_cost)}</td><td class="n">${m(Math.round(i.qty * i.unit_cost))}</td>` : ''}</tr>`).join('')}
+  </tbody></table>
+  ${showCost ? `<p class="n"><b>${t('common.total')}: ${m(po.total)}</b></p>` : ''}
+  ${po.notes ? `<p>${esc(po.notes)}</p>` : ''}
+  <p class="muted" style="margin-top:30px">${t('collect.signature')}: ....................</p>
+  </body></html>`;
+}

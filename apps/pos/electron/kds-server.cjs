@@ -9,10 +9,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-function createKdsServer({ services }) {
+function createKdsServer({ services, customerState = () => ({ mode: 'idle' }) }) {
   let server = null;
   let status = { running: false, port: null, lan: false, error: null };
-  const page = () => fs.readFileSync(path.join(__dirname, 'kds.html'), 'utf8');
+  const page = (name = 'kds.html') => fs.readFileSync(path.join(__dirname, name), 'utf8');
 
   const keyOk = (given) => {
     const key = services.kds.ensureKey();
@@ -44,11 +44,16 @@ function createKdsServer({ services }) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://kds.local');
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/kds')) return send(res, 200, page(), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/customer') return send(res, 200, page('customer.html'), 'text/html; charset=utf-8');
     if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'not found' });
     if (!keyOk(url.searchParams.get('key'))) return send(res, 403, { error: 'bad key' });
     try {
       if (req.method === 'GET' && url.pathname === '/api/state') {
         return send(res, 200, services.kds.state({ stationId: url.searchParams.get('station') }));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/customer') {
+        const s = services.settings.get();
+        return send(res, 200, { ...customerState(), business_name: s.business_name, language: s.language, logo: s.business_logo, message: s.display_message, currency: s.currency_symbol, decimals: s.decimals });
       }
       if (req.method === 'POST' && url.pathname === '/api/bump') {
         const body = await readJson(req);

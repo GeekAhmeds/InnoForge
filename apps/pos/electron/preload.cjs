@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('posBridge', {
   kdsInfo: () => ipcRenderer.invoke('pos:kdsInfo'),
   openKds: (opts) => ipcRenderer.invoke('pos:openKds', opts),
   serialListOnly: () => ipcRenderer.invoke('pos:serialListOnly'),
+  openDrawer: (opts) => ipcRenderer.invoke('pos:openDrawer', opts),
+  display: (state) => ipcRenderer.invoke('pos:display', state),
+  openCustomerDisplay: () => ipcRenderer.invoke('pos:openCustomerDisplay'),
   onSerialPorts: (fn) => {
     const listener = (_e, ports) => fn(ports);
     ipcRenderer.on('pos:serial-ports', listener);

@@ -5,6 +5,7 @@ import { a4Html } from '../lib/receipt.js';
 import { invoiceText, openWhatsApp } from '../lib/share.js';
 import { Empty, Field, Toggle, useApp } from '../components/ui.jsx';
 import { NoShift } from './Pos.jsx';
+import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 
 // Trading (B2B) sales invoice: customer first, then a line grid with unit, quantity,
 // price, discount % and stock; due date, salesperson and partial payment on one screen.
@@ -20,7 +21,7 @@ const lineFromProduct = (p, unit = null) => {
 };
 
 export default function SalesInvoice() {
-  const { t, tErr, notify, settings, shift, printDoc, lang, withApproval, pendingCart, setPendingCart } = useApp();
+  const { t, tErr, notify, settings, shift, printDoc, lang, withApproval, pendingCart, setPendingCart, user } = useApp();
   const d = settings.decimals;
   const m = (v) => formatMoney(v, settings);
   const [customer, setCustomer] = useState(null);
@@ -39,6 +40,19 @@ export default function SalesInvoice() {
     api.priceLists.list().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => {});
     api.auth.salespeople().then(setPeople).catch(() => {});
   }, []);
+
+  // The invoice being typed is kept on disk until it is saved (power cut, crash, closing by mistake).
+  const draftKey = `invoice-${user?.id}`;
+  useEffect(() => {
+    if (pendingCart) return;
+    const saved = loadDraft(draftKey);
+    if (saved?.lines?.length && window.confirm(t('pos.restoreDraft', { n: saved.lines.length }))) {
+      setCustomer(saved.customer); setLines(saved.lines); setHead(saved.head);
+    } else clearDraft(draftKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (lines.length) saveDraft(draftKey, { customer, lines, head }); else clearDraft(draftKey);
+  }, [customer, lines, head, draftKey]);
 
   // A quotation converted to an invoice arrives as a pending cart.
   useEffect(() => {

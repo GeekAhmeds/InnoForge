@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InnoForge — Customer</title>
+<style>
+  :root { --brand: #0a43c9; --brand2: #0890c4; --accent: #f7a531; --good: #059669; --text: #0f172a; --muted: #64748b; --line: #e5e7eb; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 18px/1.4 Tahoma, "Segoe UI", Arial, sans-serif; color: var(--text); background: #f4f6fb; }
+  #root { height: 100%; }
+  .wrap { display: grid; grid-template-columns: 1.4fr 1fr; height: 100%; }
+  .list { padding: 24px; overflow: hidden; display: flex; flex-direction: column; }
+  .list h2 { margin: 0 0 12px; font-size: 20px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 10px 6px; border-bottom: 1px solid var(--line); font-size: 22px; }
+  td.n { text-align: end; white-space: nowrap; direction: ltr; }
+  td.q { color: var(--muted); width: 4em; }
+  tr.last td { background: #eef4ff; font-weight: bold; }
+  .side { background: linear-gradient(160deg, var(--brand), var(--brand2)); color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 28px; text-align: center; gap: 10px; }
+  .side .label { font-size: 22px; opacity: .85; }
+  .side .total { font-size: 76px; font-weight: bold; direction: ltr; line-height: 1.1; }
+  .side .sub { font-size: 20px; opacity: .9; direction: ltr; }
+  .change { margin-top: 18px; background: rgba(255,255,255,.15); border-radius: 16px; padding: 14px 22px; font-size: 28px; }
+  .idle { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: linear-gradient(160deg, var(--brand), var(--brand2)); color: #fff; text-align: center; padding: 30px; }
+  .idle img { max-width: 260px; max-height: 180px; background: #fff; border-radius: 18px; padding: 14px; }
+  .idle h1 { font-size: 46px; margin: 0; }
+  .idle p { font-size: 28px; margin: 0; opacity: .95; }
+  .thanks { font-size: 44px; font-weight: bold; }
+  .foot { position: fixed; bottom: 8px; inset-inline-start: 12px; font-size: 12px; color: rgba(255,255,255,.7); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="foot">InnoForge POS</div>
+<script>
+(() => {
+  const T = {
+    ar: { items: 'مشترياتك', total: 'الإجمالي', discount: 'خصم', paid: 'المدفوع', change: 'الباقي لحضرتك', thanks: 'شكراً لزيارتكم 🙏', welcome: 'أهلاً بيكم' },
+    en: { items: 'Your items', total: 'Total', discount: 'Discount', paid: 'Paid', change: 'Your change', thanks: 'Thank you for visiting 🙏', welcome: 'Welcome' },
+  };
+  const key = new URLSearchParams(location.search).get('key') || '';
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  let last = '';
+  function money(v, s) {
+    const d = Number(s.decimals ?? 2);
+    return `${(Number(v || 0) / 10 ** d).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })} ${s.currency || ''}`;
+  }
+  function render(s) {
+    const t = T[s.language === 'en' ? 'en' : 'ar'];
+    document.documentElement.dir = s.language === 'en' ? 'ltr' : 'rtl';
+    const root = document.getElementById('root');
+    if (s.mode === 'cart' && s.items?.length) {
+      const rows = s.items.slice(-12).map((i, idx, arr) => `<tr class="${idx === arr.length - 1 ? 'last' : ''}"><td>${esc(i.name)}</td><td class="q">× ${esc(i.qty)}</td><td class="n">${money(i.total, s)}</td></tr>`).join('');
+      root.innerHTML = `<div class="wrap"><div class="list"><h2>${t.items} (${s.items.length})</h2><table>${rows}</table></div>
+        <div class="side"><div class="label">${t.total}</div><div class="total">${money(s.total, s)}</div>
+        ${s.discount ? `<div class="sub">${t.discount}: ${money(s.discount, s)}</div>` : ''}</div></div>`;
+    } else if (s.mode === 'paid') {
+      root.innerHTML = `<div class="idle"><div class="thanks">${t.thanks}</div><div class="label">${t.total}: <b dir="ltr">${money(s.total, s)}</b></div>
+        ${s.paid ? `<div>${t.paid}: <b dir="ltr">${money(s.paid, s)}</b></div>` : ''}
+        ${s.change ? `<div class="change">${t.change}: <b dir="ltr">${money(s.change, s)}</b></div>` : ''}</div>`;
+    } else {
+      root.innerHTML = `<div class="idle">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : ''}<h1>${esc(s.business_name || t.welcome)}</h1>${s.message ? `<p>${esc(s.message)}</p>` : `<p>${t.welcome}</p>`}</div>`;
+    }
+  }
+  async function poll() {
+    try {
+      const res = await fetch(`/api/customer?key=${encodeURIComponent(key)}`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text !== last) { last = text; render(JSON.parse(text)); }
+      }
+    } catch { /* till restarting */ }
+  }
+  poll(); setInterval(poll, 600);
+})();
+</script>
+</body>
+</html>
