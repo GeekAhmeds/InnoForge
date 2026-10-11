@@ -36,7 +36,7 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | 15 | Barcode labels | ✅ | `components/Labels.jsx`, `lib/barcode.js` |
 | 16 | Excel import (products, customers, suppliers) and export | ✅ | `electron/excel.cjs`, `importer.*`, `ExcelImport.jsx` |
 | 17 | Egyptian e-invoice (ETA) | ⏳ | — needs ETA API credentials + USB e-signature token per company |
-| 18 | Several branches / devices on the same data | ⏳ | — needs a local server or sync service; only the kitchen screen uses the LAN today |
+| 18 | Several branches / devices on the same data | ✅ (live: one main computer; branches over a VPN) | `lan-server.cjs`, `remote.cjs`, `device.cjs`, `devices.*`, Settings → Network (`components/Network.jsx`) |
 | 19 | Send invoice / statement on WhatsApp | ✅ | `lib/share.js` |
 
 ## Added after the 19
@@ -106,4 +106,4 @@ Known limits (by design, for now):
 
 **ETA e-invoice (17).** Add per-company ETA settings (client id/secret, environment), product GS1/EGS codes and tax types, a document builder (ETA JSON v1.0), signing through the company's USB token (a small signer helper using the token's PKCS#11 driver), and a submission queue so selling stays offline: invoices queue locally and submit when online, with a status screen (submitted / valid / rejected + reasons) and retry.
 
-**Multi-branch / multi-device (18).** Option A (one site, several tills): one PC runs the database as a small LAN server (same services over HTTP with per-device keys); other tills become clients. Option B (several branches): each branch stays offline-first and syncs to a central server (append-only change log per table, branch id on every row, conflict rules: stock is per branch, master data from head office). Option A is the quicker first step.
+**Multi-device (18) — done as “one main computer”.** One PC (the main computer) keeps the database and serves it on the network (`electron/lan-server.cjs`, port 7790, access key); other PCs switch to client mode (`device.json` → `mode: client`) and send every service call to it (`remote.cjs`). Each connected PC has its own services instance on the main computer: its own logged-in user, open shift (`shifts.device_id`) and device settings (`device_settings`: printers, drawer, scale, selling warehouse…). Orders record `device_id`. The license limit `devices` counts the main computer too (basic 1, market 3, restaurant/trading 5, full unlimited). Branches connect over a VPN (Tailscale) to the main computer. **Not done:** working offline when the main computer is unreachable (branch sync with a change log) — clients show an offline screen until it is back.

@@ -3525,7 +3525,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
   const devices = {
     list() {
       requirePerm('settings');
-      return plainAll(db.prepare("SELECT d.*, (SELECT COUNT(*) FROM shifts s WHERE s.device_id = d.id AND s.closed_at IS NULL) AS open_shifts FROM devices d ORDER BY d.kind = 'main' DESC, d.created_at")).map((d) => ({ ...d, active: !!d.active, me: d.id === deviceId }));
+      return plainAll(db.prepare("SELECT d.*, (SELECT COUNT(*) FROM shifts s WHERE s.device_id = d.id AND s.closed_at IS NULL) AS open_shifts FROM devices d ORDER BY d.kind = 'main' DESC, d.created_at").all()).map((d) => ({ ...d, active: !!d.active, me: d.id === deviceId }));
     },
     save({ id, name, active = true } = {}) {
       requirePerm('settings');
@@ -3545,7 +3545,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       checkLimit('devices', db.prepare('SELECT COUNT(*) AS n FROM devices WHERE active = 1').get().n);
       db.prepare("INSERT INTO devices (id, name, kind, last_seen) VALUES (?, ?, 'client', datetime('now', 'localtime'))").run(id, str(name));
     } else {
-      db.prepare("UPDATE devices SET last_seen = datetime('now', 'localtime'), name = CASE WHEN name = '' THEN ? ELSE name END WHERE id = ?").run(str(name), id);
+      // At most one write a minute per device.
+      db.prepare("UPDATE devices SET last_seen = datetime('now', 'localtime'), name = CASE WHEN name = '' THEN ? ELSE name END WHERE id = ? AND (last_seen IS NULL OR last_seen < datetime('now', 'localtime', '-1 minute'))").run(str(name), id);
     }
   }
 

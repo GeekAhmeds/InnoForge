@@ -48,8 +48,9 @@ export default function LicenseTab() {
             <dt>{t('license.soldBy')}</dt><dd>{license.reseller ? `${license.reseller.name}${license.reseller.phone ? ` — ${license.reseller.phone}` : ''}` : VENDOR.name}</dd>
             <dt>{t('limit.users')}</dt><dd>{limit('users')}</dd>
             <dt>{t('limit.warehouses')}</dt><dd>{limit('warehouses')}</dd>
+            <dt>{t('limit.devices')}</dt><dd>{limit('devices')}</dd>
           </dl>
-        ) : <p className="muted">{t('license.devMode')} — {t(`edition.${license.edition || 'full'}`)}</p>}
+        ) : <p className="muted">{license.client ? t('net.licenseFromMain', { server: license.server }) : t('license.devMode')} — {t(`edition.${license.edition || 'full'}`)}</p>}
       </div>
       <div className="card top-gap">
         <h3>{t('license.features')}</h3>

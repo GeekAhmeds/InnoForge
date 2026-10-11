@@ -10,15 +10,22 @@ const { createUpdater } = require('./updater.cjs');
 const excel = require('./excel.cjs');
 const { createKdsServer } = require('./kds-server.cjs');
 const { sendRaw, drawerKick } = require('./rawprint.cjs');
+const { EXPOSED } = require('./exposed.cjs');
+const { exportSheets } = require('./export-sheets.cjs');
+const { createDeviceStore } = require('./device.cjs');
+const { createRemote } = require('./remote.cjs');
+const { createLanServer } = require('./lan-server.cjs');
 
-// Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations', 'purchaseOrders', 'modifiers', 'delivery', 'treasury', 'warehouses', 'installments', 'coupons', 'giftCards', 'employees'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
 
 let db;
-let services;
+let services; // this computer's own services (not in client mode)
+let devices; // device.json: standalone / server / client
+let remote = null; // client mode: the main computer
+let remoteInfo = null; // client mode: what the main computer said last (license, version)
+let lanServer = null; // server mode
 let mainWindow;
 let licenses;
 let license;
@@ -38,7 +45,11 @@ const licenseRequired = () => app.isPackaged || process.env.INNOFORGE_POS_FORCE_
 // Before activation the UI may only read settings (language, business name).
 const ALLOWED_UNLICENSED = new Set(['settings.get', 'settings.setLanguage']);
 
+const clientMode = () => !!remote;
+
 function licenseOk() {
+  // A connected computer runs on the main computer's license, which checks every call.
+  if (clientMode()) return true;
   if (!licenseRequired()) return true;
   if (!license?.valid) return false;
   if (license.expires && Date.now() > Date.parse(license.expires)) license = licenses.status();
@@ -48,6 +59,10 @@ function licenseOk() {
 // What this copy may use. From source (not packaged) everything is on, unless
 // INNOFORGE_POS_EDITION=basic|market|… is set to try an edition.
 function currentEntitlements() {
+  if (clientMode()) {
+    const e = remoteInfo?.entitlements;
+    return e ? { edition: e.edition, features: new Set(e.features), addons: e.addons, limits: e.limits } : FULL;
+  }
   if (!licenseRequired()) {
     const ed = !app.isPackaged && process.env.INNOFORGE_POS_EDITION;
     return ed ? entitlements({ edition: ed }) : FULL;
@@ -57,21 +72,70 @@ function currentEntitlements() {
 }
 const entitlementsJSON = () => { const e = currentEntitlements(); return { edition: e.edition, features: [...e.features], addons: e.addons, limits: e.limits }; };
 
+// Every service call made by the main process goes through `svc`: to this computer's
+// services, or to the main computer in client mode. Always returns a promise.
+const TOP_LEVEL = new Set(['requirePerm', 'audit', 'can']);
+function callService(pathName, args = []) {
+  if (remote) return remote.call(pathName, args);
+  return new Promise((resolve) => {
+    const [ns, method] = pathName.split('.');
+    const owner = method ? services[ns] : services;
+    const fn = owner?.[method || ns];
+    if (typeof fn !== 'function') throw new PosError('UNKNOWN_METHOD', pathName);
+    resolve(fn.apply(owner, args));
+  });
+}
+const svc = new Proxy({}, {
+  get: (_t, ns) => (TOP_LEVEL.has(ns)
+    ? (...args) => callService(ns, args)
+    : new Proxy({}, { get: (_u, method) => (...args) => callService(`${ns}.${method}`, args) })),
+});
+
+async function refreshRemoteInfo() {
+  try { remoteInfo = await remote.info(); } catch { remoteInfo = null; }
+  return remoteInfo;
+}
+
 function boot() {
-  db = openDatabase(dbFile());
-  services = createServices(db, { entitlements: currentEntitlements });
+  devices = createDeviceStore(path.join(app.getPath('userData'), 'device.json'));
+  const dev = devices.load();
   licenses = createLicenseStore({
     file: path.join(app.getPath('userData'), 'license.json'),
     publicKeyPem: require('./license-public.cjs'),
   });
   license = licenses.status();
-  autoBackup('daily');
-  kdsServer = createKdsServer({ services, customerState: () => customerState });
+  if (dev.mode === 'client' && dev.server.host) {
+    // No local data: everything lives on the main computer.
+    remote = createRemote({ server: dev.server, deviceId: dev.id, deviceName: dev.name });
+    refreshRemoteInfo().then(() => remote.reset()).catch(() => {});
+    setInterval(refreshRemoteInfo, 60000).unref?.();
+  } else {
+    db = openDatabase(dbFile());
+    services = createServices(db, { entitlements: currentEntitlements });
+    db.prepare("UPDATE devices SET name = ? WHERE id = 'local' AND name = ''").run(dev.name);
+    autoBackup('daily');
+    if (dev.mode === 'server') startLanServer();
+  }
+  kdsServer = createKdsServer({ services: svc, customerState: () => customerState });
   kdsServer.start().catch((err) => console.error('kitchen screen server', err));
   updater = createUpdater({
     publicKeyPem: require('./license-public.cjs'),
     onState: (state) => mainWindow?.webContents.send('pos:update-state', state),
   });
+}
+
+function startLanServer() {
+  lanServer ??= createLanServer({
+    local: services,
+    makeServices: (deviceId) => createServices(db, { entitlements: currentEntitlements, deviceId }),
+    getConfig: () => devices.load(),
+    licenseOk,
+    info: () => ({ version: app.getVersion(), business_name: services.settings.get().business_name, server_name: devices.load().name }),
+    onCall: (ns, method, arg) => {
+      if (ns === 'settings' && (method === 'newKdsKey' || (method === 'save' && arg && ('kds_lan' in arg || 'kds_port' in arg)))) kdsServer.start().catch(() => {});
+    },
+  });
+  return lanServer.start();
 }
 
 // Keeps rolling copies of the database in userData/backups: one per day (last 14),
@@ -113,12 +177,12 @@ function createWindow() {
   // Serial scales (Web Serial). The port is chosen here, by the name saved in Settings → Devices;
   // 'list only' requests just report the ports so the settings screen can show them.
   const ses = mainWindow.webContents.session;
-  ses.on('select-serial-port', (event, portList, _wc, callback) => {
+  ses.on('select-serial-port', async (event, portList, _wc, callback) => {
     event.preventDefault();
     const ports = portList.map((p) => ({ portId: p.portId, portName: p.portName, displayName: p.displayName || p.portName }));
     mainWindow.webContents.send('pos:serial-ports', ports);
     if (serialListOnly) { serialListOnly = false; callback(''); return; }
-    const wanted = services.settings.get().scale_port;
+    const wanted = await svc.settings.get().then((s) => s.scale_port, () => '');
     const pick = portList.find((p) => p.portName === wanted || p.portId === wanted) || (!wanted && portList.length === 1 ? portList[0] : null);
     callback(pick ? pick.portId : '');
   });
@@ -155,16 +219,18 @@ const fail = (err) => {
   return { ok: false, code: err.code || 'ERROR', message: err.message };
 };
 
-ipcMain.handle('pos:call', (_e, ns, method, arg) => {
+ipcMain.handle('pos:call', async (_e, ns, method, arg) => {
   try {
-    const target = EXPOSED.includes(ns) ? services[ns] : null;
-    if (!target || typeof target[method] !== 'function') throw new PosError('UNKNOWN_METHOD', `${ns}.${method}`);
+    if (!EXPOSED.includes(ns) || typeof method !== 'string' || method.includes('.')) throw new PosError('UNKNOWN_METHOD', `${ns}.${method}`);
+    if (!remote && typeof services[ns]?.[method] !== 'function') throw new PosError('UNKNOWN_METHOD', `${ns}.${method}`);
     if (!ALLOWED_UNLICENSED.has(`${ns}.${method}`) && !licenseOk()) throw new PosError('LICENSE_REQUIRED');
-    const result = target[method](arg);
+    const result = await callService(`${ns}.${method}`, [arg]);
     // Kitchen screen settings take effect right away.
     if (ns === 'settings' && (method === 'newKdsKey' || (method === 'save' && arg && ('kds_lan' in arg || 'kds_port' in arg)))) {
-      return kdsServer.start().then(() => ok(result));
+      await kdsServer.start();
     }
+    // A blocked computer is cut off at once.
+    if (ns === 'devices' && method === 'save' && arg && !arg.active) lanServer?.forget(String(arg.id));
     return ok(result);
   } catch (err) {
     return fail(err);
@@ -176,8 +242,8 @@ ipcMain.handle('pos:call', (_e, ns, method, arg) => {
 ipcMain.handle('pos:openDrawer', async (_e, { manual = false, approval = null } = {}) => {
   try {
     if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
-    if (manual) services.drawer.authorize({ approval });
-    const s = services.settings.get();
+    if (manual) await svc.drawer.authorize({ approval });
+    const s = await svc.settings.get();
     let printer = s.printer_name;
     if (!printer) printer = (await mainWindow.webContents.getPrintersAsync()).find((p) => p.isDefault)?.name || '';
     await sendRaw(printer, drawerKick(s.drawer_pin));
@@ -245,15 +311,101 @@ ipcMain.handle('pos:openKds', (_e, { station = '' } = {}) => {
   return ok(true);
 });
 
-ipcMain.handle('pos:license', () => ok({ ...license, ...entitlementsJSON(), required: licenseRequired(), valid: licenseOk() }));
+ipcMain.handle('pos:license', async () => {
+  if (clientMode()) {
+    await refreshRemoteInfo();
+    const dev = devices.load();
+    return ok({ ...entitlementsJSON(), required: false, valid: true, client: true, connected: !!remoteInfo, serverLicensed: !!remoteInfo?.licensed, server: `${dev.server.host}:${dev.server.port}`, machine: license?.machine });
+  }
+  return ok({ ...license, ...entitlementsJSON(), required: licenseRequired(), valid: licenseOk() });
+});
 
 ipcMain.handle('pos:activate', (_e, key) => {
+  if (clientMode()) return fail(new PosError('CLIENT_MODE'));
   const result = licenses.activate(key);
   if (result.valid) {
     license = result;
-    services.audit('license_activate', { userId: null, details: { customer: result.customer, expires: result.expires, edition: result.edition } });
+    services?.audit('license_activate', { userId: null, details: { customer: result.customer, expires: result.expires, edition: result.edition } });
   }
   return result.valid ? ok({ ...result, ...entitlementsJSON(), required: licenseRequired() }) : fail(new PosError(`LICENSE_${result.reason}`));
+});
+
+// ---------- Several computers on one set of data ----------
+// Settings → Network (and the activation screen): this computer's role, the main
+// computer's address, the access key other computers need.
+ipcMain.handle('pos:network', async () => {
+  const dev = devices.load();
+  const out = { id: dev.id, name: dev.name, mode: remote ? 'client' : dev.mode, server: { host: dev.server.host, port: dev.server.port } };
+  if (remote) {
+    await refreshRemoteInfo();
+    out.remote = remoteInfo ? { connected: true, version: remoteInfo.version, business_name: remoteInfo.business_name, server_name: remoteInfo.server_name, licensed: remoteInfo.licensed } : { connected: false };
+  } else {
+    out.serve = { port: dev.serve.port, key: dev.serve.key, ...(lanServer?.state() || { running: false, addresses: [] }) };
+  }
+  out.version = app.getVersion();
+  return ok(out);
+});
+
+// Changes to the network role need someone allowed to change settings — except on a
+// fresh copy (setup or activation screen), which may join a main computer.
+async function requireNetworkAdmin() {
+  if (!remote && (!services.settings.get().setup_done || (licenseRequired() && !license?.valid))) return;
+  await svc.requirePerm('settings');
+}
+
+ipcMain.handle('pos:networkServe', async (_e, { enabled, port, newKey = false, name } = {}) => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    await requireNetworkAdmin();
+    const dev = devices.load();
+    const p = Number(port) || dev.serve.port;
+    if (!Number.isInteger(p) || p < 1024 || p > 65535) throw new PosError('BAD_PORT');
+    devices.update({
+      mode: enabled ? 'server' : 'standalone',
+      name: name != null ? String(name).trim().slice(0, 60) : dev.name,
+      serve: { port: p, key: newKey ? devices.newKey() : dev.serve.key },
+    });
+    if (enabled) await startLanServer(); else await lanServer?.stop();
+    services.audit('network_update', { details: { mode: enabled ? 'server' : 'standalone', port: p, new_key: !!newKey } });
+    return ok(lanServer?.state() || { running: false });
+  } catch (err) {
+    return fail(err);
+  }
+});
+
+// Joins a main computer: checks the address and key first, then restarts as a client.
+ipcMain.handle('pos:networkConnect', async (_e, { host, port, key, name } = {}) => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    if (devices.load().mode === 'server') throw new PosError('SERVER_MODE');
+    await requireNetworkAdmin();
+    const dev = devices.load();
+    const server = { host: String(host || '').trim().replace(/^https?:\/\//, '').replace(/[/:].*$/, ''), port: Number(port) || 7790, key: String(key || '').trim() };
+    if (!server.host || !server.key) throw new PosError('NAME_REQUIRED');
+    const deviceName = String(name || dev.name).trim().slice(0, 60);
+    const info = await createRemote({ server, deviceId: dev.id, deviceName }).info(8000);
+    if (info.app !== 'innoforge-pos') throw new PosError('SERVER_OFFLINE');
+    services?.audit('network_update', { details: { mode: 'client', server: `${server.host}:${server.port}` } });
+    devices.update({ mode: 'client', name: deviceName, server });
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
+    return ok(info);
+  } catch (err) {
+    return fail(err);
+  }
+});
+
+// Back to working on this computer's own data.
+ipcMain.handle('pos:networkDisconnect', async () => {
+  try {
+    if (!remote) throw new PosError('NOT_FOUND');
+    // Anyone may leave a main computer that cannot be reached; otherwise it needs the permission.
+    if (await refreshRemoteInfo()) await svc.requirePerm('settings');
+    devices.update({ mode: 'standalone' });
+    setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
+    return ok(true);
+  } catch (err) {
+    return fail(err);
+  }
 });
 
 ipcMain.handle('pos:printers', async () => {
@@ -285,6 +437,7 @@ ipcMain.handle('pos:print', async (_e, { html, printer = '', silent = false } = 
 
 ipcMain.handle('pos:backup', async () => {
   try {
+    if (clientMode()) throw new PosError('CLIENT_MODE');
     services.requirePerm('backup');
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
@@ -303,6 +456,7 @@ ipcMain.handle('pos:backup', async () => {
 
 ipcMain.handle('pos:restore', async () => {
   try {
+    if (clientMode()) throw new PosError('CLIENT_MODE');
     services.requirePerm('backup');
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
@@ -331,7 +485,7 @@ ipcMain.handle('pos:restore', async () => {
   }
 });
 
-ipcMain.handle('pos:dataPath', () => ok(dbFile()));
+ipcMain.handle('pos:dataPath', () => ok(clientMode() ? remote.base : dbFile()));
 
 // ---------- Excel ----------
 const xlsxFilter = [{ name: 'Excel', extensions: ['xlsx'] }];
@@ -339,8 +493,8 @@ const stampName = (base) => `${base}-${new Date().toLocaleDateString('en-CA')}.x
 
 ipcMain.handle('pos:excelTemplate', async (_e, kind) => {
   try {
-    services.requirePerm('backup');
-    services.license.requireFeature('excel');
+    await svc.requirePerm('backup');
+    await svc.license.requireFeature('excel');
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: `innoforge-${kind}-template.xlsx`, filters: xlsxFilter });
     if (canceled || !filePath) return ok(null);
     await excel.writeTemplate(kind, filePath);
@@ -353,8 +507,8 @@ ipcMain.handle('pos:excelTemplate', async (_e, kind) => {
 // Opens a sheet and returns its rows for preview; the renderer then calls importer.<kind>.
 ipcMain.handle('pos:excelPick', async (_e, kind) => {
   try {
-    services.requirePerm('backup');
-    services.license.requireFeature('excel');
+    await svc.requirePerm('backup');
+    await svc.license.requireFeature('excel');
   } catch (err) {
     return fail(err);
   }
@@ -367,101 +521,15 @@ ipcMain.handle('pos:excelPick', async (_e, kind) => {
   }
 });
 
-function exportSheets(kind, params = {}) {
-  const t = (ar, en) => `${ar} | ${en}`;
-  const s = services;
-  if (kind === 'products') {
-    s.requirePerm('backup');
-    const showCost = s.can('view_cost');
-    return [{
-      name: 'products',
-      columns: [
-        { header: excel.COLUMNS.products.name[0], key: 'name', width: 32 },
-        { header: excel.COLUMNS.products.barcode[0], key: 'barcode', width: 18 },
-        { header: excel.COLUMNS.products.category[0], key: 'category_name', width: 18 },
-        { header: excel.COLUMNS.products.price[0], key: 'price', money: true },
-        ...(showCost ? [{ header: excel.COLUMNS.products.cost[0], key: 'cost', money: true }] : []),
-        { header: excel.COLUMNS.products.stock[0], key: 'stock' },
-        { header: excel.COLUMNS.products.min_stock[0], key: 'min_stock' },
-        { header: excel.COLUMNS.products.unit[0], key: 'unit' },
-        { header: excel.COLUMNS.products.track_stock[0], key: 'track' },
-        { header: excel.COLUMNS.products.author[0], key: 'author' },
-        { header: excel.COLUMNS.products.publisher[0], key: 'publisher' },
-      ],
-      rows: s.products.list({ includeInactive: true }).map((p) => ({ ...p, track: p.track_stock ? 'نعم' : 'لا' })),
-    }];
-  }
-  if (kind === 'customers' || kind === 'suppliers') {
-    s.requirePerm('backup');
-    const list = kind === 'customers' ? s.customers.list({ includeInactive: true }) : s.suppliers.list({ includeInactive: true });
-    const cols = excel.COLUMNS[kind];
-    return [{
-      name: kind,
-      columns: [
-        { header: cols.name[0], key: 'name', width: 28 },
-        { header: cols.phone[0], key: 'phone', width: 16 },
-        { header: cols.address[0], key: 'address', width: 24 },
-        ...(kind === 'customers' ? [{ header: cols.tax_number[0], key: 'tax_number', width: 18 }, { header: cols.credit_limit[0], key: 'credit_limit', money: true }] : []),
-        // Exported as the opening balance so the file can be re-imported elsewhere as-is.
-        { header: cols.opening_balance[0], key: 'balance', money: true, width: 20 },
-        { header: cols.notes[0], key: 'notes', width: 24 },
-      ],
-      rows: list,
-    }];
-  }
-  if (kind === 'invoices') {
-    s.requirePerm('reports');
-    const orders = s.orders.list({ from: params.from, to: params.to, limit: 100000 });
-    const items = orders.flatMap((o) => s.orders.get(o.id).items.map((i) => ({ ...i, invoice_no: o.invoice_no, completed_at: o.completed_at })));
-    return [
-      {
-        name: 'invoices',
-        columns: [
-          { header: t('رقم الفاتورة', 'Invoice'), key: 'invoice_no' }, { header: t('التاريخ', 'Date'), key: 'completed_at', width: 20 },
-          { header: t('العميل', 'Customer'), key: 'customer_display', width: 24 }, { header: t('الكاشير', 'Cashier'), key: 'user_name' },
-          { header: t('النوع', 'Type'), key: 'order_type' }, { header: t('المجموع', 'Subtotal'), key: 'subtotal', money: true },
-          { header: t('الخصم', 'Discount'), key: 'discount', money: true }, { header: t('الضريبة', 'Tax'), key: 'tax', money: true },
-          { header: t('الخدمة', 'Service'), key: 'service', money: true }, { header: t('الإجمالي', 'Total'), key: 'total', money: true },
-          { header: t('آجل', 'On account'), key: 'credit', money: true }, { header: t('مرتجع', 'Refunded'), key: 'refunded', money: true },
-        ],
-        rows: orders,
-      },
-      {
-        name: 'items',
-        columns: [
-          { header: t('رقم الفاتورة', 'Invoice'), key: 'invoice_no' }, { header: t('التاريخ', 'Date'), key: 'completed_at', width: 20 },
-          { header: t('الصنف', 'Item'), key: 'name', width: 30 }, { header: t('الكمية', 'Qty'), key: 'qty' },
-          { header: t('السعر', 'Price'), key: 'unit_price', money: true }, { header: t('الخصم', 'Discount'), key: 'discount', money: true },
-          { header: t('الإجمالي', 'Total'), key: 'line_total', money: true }, { header: t('مرتجع', 'Returned'), key: 'returned_qty' },
-        ],
-        rows: items,
-      },
-    ];
-  }
-  if (kind === 'report') {
-    const r = s.reports.summary({ from: params.from, to: params.to });
-    const money = (key, header) => ({ header, key, money: true });
-    const totals = Object.entries(r.totals).filter(([, v]) => v != null).map(([k, v]) => ({ k, v }));
-    return [
-      { name: 'summary', columns: [{ header: t('البند', 'Item'), key: 'k', width: 24 }, { header: t('القيمة', 'Value'), key: 'v', width: 18 }], rows: totals.map((x) => ({ ...x, v: ['orders'].includes(x.k) ? x.v : x.v / 10 ** (s.settings.get().decimals ?? 2) })) },
-      { name: 'by day', columns: [{ header: t('اليوم', 'Day'), key: 'day' }, { header: t('الفواتير', 'Invoices'), key: 'orders' }, money('total', t('الإجمالي', 'Total'))], rows: r.byDay },
-      { name: 'top products', columns: [{ header: t('الصنف', 'Item'), key: 'name', width: 30 }, { header: t('الكمية', 'Qty'), key: 'qty' }, money('total', t('الإجمالي', 'Total'))], rows: r.topProducts },
-      { name: 'by method', columns: [{ header: t('الطريقة', 'Method'), key: 'method' }, money('amount', t('المبلغ', 'Amount'))], rows: r.byMethod },
-      { name: 'by category', columns: [{ header: t('التصنيف', 'Category'), key: 'name' }, money('total', t('الإجمالي', 'Total'))], rows: r.byCategory },
-      { name: 'by cashier', columns: [{ header: t('الكاشير', 'Cashier'), key: 'name' }, { header: t('الفواتير', 'Invoices'), key: 'orders' }, money('total', t('الإجمالي', 'Total'))], rows: r.byCashier },
-      { name: 'commissions', columns: [{ header: t('الاسم', 'Name'), key: 'name' }, money('net', t('صافي المبيعات', 'Net sales')), { header: '%', key: 'rate' }, money('commission', t('العمولة', 'Commission'))], rows: s.commissions.report(params) },
-    ];
-  }
-  throw new PosError('UNKNOWN_METHOD', kind);
-}
 
 ipcMain.handle('pos:excelExport', async (_e, { kind, ...params } = {}) => {
   try {
-    const sheets = exportSheets(kind, params); // checks permissions before asking where to save
+    // Checks permissions before asking where to save.
+    const sheets = remote ? await remote.exportSheets(kind, params) : exportSheets(services, kind, params);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: stampName(`innoforge-${kind}`), filters: xlsxFilter });
     if (canceled || !filePath) return ok(null);
-    await excel.writeSheets(filePath, sheets, services.settings.get().decimals ?? 2);
-    services.audit('export', { details: { kind } });
+    await excel.writeSheets(filePath, sheets, (await svc.settings.get()).decimals ?? 2);
+    await svc.audit('export', { details: { kind } });
     return ok(filePath);
   } catch (err) {
     return fail(err);
@@ -472,15 +540,15 @@ ipcMain.handle('pos:excelExport', async (_e, { kind, ...params } = {}) => {
 // from the services (never trusted from the window); only the translated texts come from it.
 ipcMain.handle('pos:reportExcel', async (_e, { id, from, to, labels } = {}) => {
   try {
-    const report = services.reports.run({ id, from, to });
-    const s = services.settings.get();
+    const report = await svc.reports.run({ id, from, to });
+    const s = await svc.settings.get();
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: path.join(app.getPath('documents'), `${String(labels?.title || id).replace(/[\\/:*?"<>|]+/g, '-')} ${from || ''}${to && to !== from ? ` - ${to}` : ''}.xlsx`.replace(/\s+\.xlsx$/, '.xlsx')),
       filters: xlsxFilter,
     });
     if (canceled || !filePath) return ok(null);
     await excel.writeReport(filePath, report, { labels: labels || { title: id, columns: {} }, business: s.business_name, decimals: s.decimals ?? 2, currency: s.currency, rtl: s.language !== 'en' });
-    services.audit('export', { details: { kind: `report:${id}` } });
+    await svc.audit('export', { details: { kind: `report:${id}` } });
     shell.showItemInFolder(filePath);
     return ok(filePath);
   } catch (err) {
@@ -539,6 +607,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('window-all-closed', () => {
     kdsServer?.stop();
+    lanServer?.stop();
     try { db?.close(); } catch { /* already closed */ }
     app.quit();
   });

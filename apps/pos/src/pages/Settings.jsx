@@ -10,19 +10,20 @@ import KitchenSettings from '../components/Kitchen.jsx';
 import Devices from '../components/Devices.jsx';
 import { Coupons } from '../components/Coupons.jsx';
 import LicenseTab from '../components/License.jsx';
+import Network from '../components/Network.jsx';
 import { has } from '../lib/features.js';
 
-const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'data', 'license', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'network', 'data', 'license', 'support'];
 // Which permission opens each tab.
 // Which licensed feature a tab needs.
 const TAB_FEATURE = { priceLists: 'trading', tables: 'restaurant', kitchen: 'restaurant' };
-const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', data: 'backup', license: null, support: null };
+const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', network: 'settings', data: 'backup', license: null, support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
   const tabs = TABS.filter((x) => (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && has(TAB_FEATURE[x]) && (x !== 'promos' || has('promotions') || has('coupons')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', network: 'net.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -37,6 +38,7 @@ export default function Settings() {
       {tab === 'tables' && <Tables />}
       {tab === 'kitchen' && <KitchenSettings />}
       {tab === 'devices' && <Devices />}
+      {tab === 'network' && <Network />}
       {tab === 'data' && <Data />}
       {tab === 'license' && <LicenseTab />}
       {tab === 'support' && (
@@ -510,14 +512,15 @@ function Tables() {
 }
 
 function Data() {
-  const { t, tErr, notify } = useApp();
+  const { t, tErr, notify, license } = useApp();
   const [path, setPath] = useState('');
   useEffect(() => { dataPath().then(setPath).catch(() => {}); }, []);
   return (
     <div className="card narrow">
       <h3>{t('settings.data')}</h3>
       <Field label={t('settings.dataPath')}><input readOnly className="mono" value={path} /></Field>
-      <div className="row">
+      {license?.client && <p className="muted">{t('net.backupOnMain')}</p>}
+      {!license?.client && <div className="row">
         <button className="primary" onClick={async () => {
           try { const p = await backup(); if (p) notify(t('settings.backupDone', { path: p })); } catch (err) { notify(tErr(err), 'error'); }
         }}>💾 {t('settings.backup')}</button>
@@ -525,7 +528,7 @@ function Data() {
           if (!window.confirm(t('settings.restoreWarn'))) return;
           try { await restore(); } catch (err) { notify(tErr(err), 'error'); }
         }}>↺ {t('settings.restore')}</button>
-      </div>
+      </div>}
     </div>
   );
 }

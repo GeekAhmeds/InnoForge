@@ -3,7 +3,7 @@
 Offline desktop point-of-sale and back office for shops, supermarkets, bookstores,
 restaurants/cafés and trading (wholesale/distribution) companies. Built and sold by
 **Inno Source** (https://innovationsrc.com). Arabic-first (RTL) with full English.
-Each installed copy is licensed to **one computer**; updates come from Inno Source's server.
+Each installed copy is licensed to **one computer**; other computers can connect to it as clients (Settings → Network, limited by the license's `devices`). Updates come from Inno Source's server.
 
 Read these before changing anything substantial:
 
@@ -51,6 +51,11 @@ electron/
   services/report-catalog.cjs  every report (one shape → viewer, Excel, PDF)
   updater.cjs         signed updates (generic provider)
   excel.cjs           sheet templates / parsing / export
+  device.cjs          this computer's role (standalone / server = main computer / client) in userData/device.json
+  lan-server.cjs      main computer: serves the services to client computers (key + device limit, per-device services)
+  remote.cjs          client computer: sends service calls to the main computer
+  exposed.cjs         namespaces callable from the window and from the network (EXPOSED / remoteAllowed)
+  export-sheets.cjs   Excel export sheets (runs where the data is)
   kds-server.cjs, kds.html, customer.html   kitchen display + customer display (local HTTP server + standalone pages)
   rawprint.cjs        raw ESC/POS bytes to a printer (cash drawer kick)
 src/
@@ -70,12 +75,12 @@ docs/                 guide.html + developer docs
 
 1. **Money is integer minor units** (piasters) everywhere in the DB and services. Convert only at the UI edge with `toMinor` / `fromMinor` / `formatMoney` (`src/lib/money.js`). Quantities are REAL (weights, cartons).
 2. **The server prices everything.** The renderer sends product ids, quantities, units and *flags* (e.g. `price_override`); `priceCart()` re-reads prices, price lists, customer discounts and promotions from the DB. Never trust a total from the UI.
-3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v16**.
+3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v17**.
 4. **Every service method checks access first**: `requireUser()` or `requirePerm('perm', approval, extra)`. Restricted-but-approvable actions (`discount`, `price_override`, `credit_sale`, `refund`, `void`, `expenses`, `open_drawer`) throw `APPROVAL_REQUIRED`; the UI wraps calls in `withApproval(fn)` to get a supervisor PIN and retry.
 5. **Audit sensitive actions** with `audit('action_name', { entity, entityId, details, approvedBy })` and add `audit.action_name` (+ any `auditKey.*`) to both dictionaries.
 6. **Errors are `PosError(CODE)`**; the UI shows `t('err.CODE')`. Add new codes to both `ar.js` and `en.js`.
 7. **Every UI string goes through `t()`** and must exist in both languages — `test/i18n.test.mjs` fails otherwise.
-8. **New service namespaces must be added to `EXPOSED` in `main.cjs`** or the renderer cannot call them. Things that must not be callable from the UI (e.g. `kds`) stay out.
+8. **New service namespaces must be added to `EXPOSED` in `electron/exposed.cjs`** or the renderer (and client computers) cannot call them. In `main.cjs` call services through `svc.ns.method()` (always awaited) — never `services.` directly — so the same code works on a client computer. Things that must not be callable from the UI (e.g. `kds`) stay out.
 9. **Use `transaction(db, fn)`** for multi-step writes. It nests (inner calls join the outer one).
 10. **No `window.prompt`** (Electron does not support it) — use `ask(label, { type, initial, required })` from the app context. `window.confirm` is fine.
 11. Printing is HTML → hidden window → `webContents.print` (`pos:print`). Build documents in `src/lib/receipt.js` (thermal: `page()`; A4: `a4Html`, `statementHtml`).
@@ -96,5 +101,5 @@ CI (`.github/workflows/pos-installer.yml`) builds Windows + Linux on every push 
 
 ## Things that are deliberately NOT done yet
 
-- Egyptian e-invoice (ETA) integration and multi-branch / multi-device sync — see `docs/FEATURES.md` → *Pending*.
+- Branch computers that keep selling while the main computer is unreachable (offline sync) — see `docs/FEATURES.md` → *Pending*.
 - Update server hosting is half done: the app checks `https://0x01source.com:7999/srv/InnoForge/PoS/` (since 0.1.26) and updates are signed (`POS_SIGNING_KEY` set, 0.1.27 is the first signed build), but `0x01source.com` points at the Hetzner server while the files sit on the office server `inno`, so the URL does not open from outside yet. Where to host is undecided and the `POS_DEPLOY_*` secrets are not set. Current state and options: `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟».

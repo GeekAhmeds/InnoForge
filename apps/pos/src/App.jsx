@@ -11,6 +11,7 @@ import Reports from './pages/Reports.jsx';
 import Shift from './pages/Shift.jsx';
 import Settings from './pages/Settings.jsx';
 import Activation from './pages/Activation.jsx';
+import Offline from './pages/Offline.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Customers from './pages/Customers.jsx';
 import Floor from './pages/Floor.jsx';
@@ -30,10 +31,17 @@ export default function App() {
   const [settings, setSettings] = useState(null);
   const [license, setLicense] = useState(null);
   const reloadSettings = useCallback(async () => setSettings(await api.settings.get()), []);
-  useEffect(() => { reloadSettings(); licenseStatus().then(setLicense); }, [reloadSettings]);
+  useEffect(() => {
+    licenseStatus().then((l) => {
+      setLicense(l);
+      // A computer connected to a main computer that cannot be reached has no settings to load.
+      if (!l.client || l.connected) reloadSettings();
+    });
+  }, [reloadSettings]);
   // Features must be known before the first render that builds the menu.
   if (license) setFeatures(license.features);
 
+  if (license?.client && !license.connected) return <I18nProvider lang="ar"><Offline license={license} /></I18nProvider>;
   if (!settings || !license) return null;
   return (
     <I18nProvider lang={settings.language}>

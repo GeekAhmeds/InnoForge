@@ -556,6 +556,43 @@ export const TOPICS = [
     },
   },
   {
+    id: 'network', icon: '🖧', group: 'more',
+    ar: {
+      title: 'أكتر من جهاز والفروع',
+      intro: 'تقدر تشغّل أكتر من كاشير (أو فرع) على نفس البيانات: جهاز واحد بيبقى «الجهاز الرئيسي» وعليه البيانات، والباقي بيتصلوا بيه. المخزون والفواتير والعملاء والحسابات واحدة على كل الأجهزة.',
+      steps: [
+        'على الجهاز اللي عليه البيانات: الإعدادات ← الشبكة والفروع ← فعّل «الأجهزة التانية تقدر تتصل بالجهاز ده». هيظهرلك العنوان (زي 192.168.1.10:7790) ومفتاح الاتصال.',
+        'لو الويندوز سأل عن الجدار الناري (Firewall) اختار «سماح» عشان الأجهزة التانية تقدر توصل.',
+        'على كل جهاز تاني: من شاشة التفعيل أو أول تشغيل أو الإعدادات ← الشبكة اضغط «اتصل بجهاز رئيسي»، واكتب العنوان والمفتاح واسم للجهاز (زي كاشير 2). البرنامج هيعيد التشغيل ويشتغل على بيانات الرئيسي.',
+        'كل جهاز ليه الطابعات والدرج والميزان وشاشة العميل والمخزن اللي بيبيع منه، ووردية الكاشير بتاعته. الإعدادات العامة (الأسعار والضريبة واسم النشاط) واحدة.',
+        'الفروع البعيدة: ركّب Tailscale (مجاني) على الجهاز الرئيسي وأجهزة الفرع، واستخدم عنوان Tailscale بتاع الرئيسي (100.x.x.x). كل فرع اعمله مخزن، واختاره في «المخزن اللي بيبيع منه» على أجهزة الفرع.',
+        'من نفس الشاشة على الرئيسي تشوف الأجهزة المتصلة وآخر ظهور، وتقدر تغيّر اسم جهاز أو تمنعه فورًا.',
+      ],
+      tips: [
+        'الجهاز الرئيسي لازم يفضل شغال والبرنامج مفتوح طول ما الأجهزة التانية شغالة. لو وقع، الأجهزة هتظهر رسالة «مش قادر أوصل للجهاز الرئيسي».',
+        'عدد الأجهزة المسموح بيه (شامل الرئيسي) مكتوب في الترخيص. النسخ الاحتياطي بيتعمل على الجهاز الرئيسي بس.',
+        'خلي كل الأجهزة على نفس إصدار البرنامج.',
+      ],
+    },
+    en: {
+      title: 'Several computers and branches',
+      intro: 'Several tills (or branches) can work on the same data: one computer is the “main computer” and keeps the data, the others connect to it. Stock, invoices, customers and accounts are the same on all of them.',
+      steps: [
+        'On the computer that has the data: Settings → Network & branches → turn on “Other computers may connect to this one”. The address (e.g. 192.168.1.10:7790) and the connection key are shown.',
+        'If Windows asks about the firewall, choose “Allow” so the other computers can reach it.',
+        'On every other computer: from the activation or first-run screen, or Settings → Network, press “Connect to a main computer”, enter the address, the key and a name (e.g. Till 2). The app restarts on the main computer\'s data.',
+        'Each computer keeps its own printers, drawer, scale, customer display and selling warehouse, and its own cashier shift. Shared settings (prices, tax, business name) are the same everywhere.',
+        'Remote branches: install Tailscale (free) on the main computer and the branch computers and use the main computer\'s Tailscale address (100.x.x.x). Make each branch a warehouse and choose it as the selling warehouse on that branch\'s computers.',
+        'On the main computer the same screen lists the connected computers with when they were last seen; rename or block one at once.',
+      ],
+      tips: [
+        'The main computer must stay on with the app open while the others work. If it goes down they show “Can\'t reach the main computer”.',
+        'How many computers are allowed (including the main one) is part of the license. Backups are made on the main computer only.',
+        'Keep every computer on the same app version.',
+      ],
+    },
+  },
+  {
     id: 'excel', icon: '📥', group: 'more',
     ar: {
       title: 'الإكسيل: رفع وتنزيل',

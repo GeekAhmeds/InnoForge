@@ -566,3 +566,9 @@ button.link { background: none; border: 0; padding: 0; color: var(--brand); text
 .help-steps li::marker { color: var(--brand); font-weight: 800; }
 .help-tips p { background: #fff7e8; border-inline-start: 4px solid #f7a531; padding: 8px 12px; border-radius: 6px; margin: 6px 0; }
 a.button-link { display: inline-block; margin-top: 12px; padding: 10px 18px; border-radius: 10px; background: var(--brand); color: #fff; text-decoration: none; font-weight: 700; }
+
+/* Settings → Network */
+.ok-text { color: var(--good); }
+code.addr { display: inline-block; background: #f3f4f6; border-radius: 6px; padding: 2px 8px; margin: 2px 4px; }
+.offline-screen { max-width: 520px; text-align: center; }
+.row.center { justify-content: center; flex-wrap: wrap; }

@@ -3,6 +3,7 @@ import { activate, api, copyText } from '../lib/api.js';
 import { useI18n } from '../i18n/index.jsx';
 import Support from '../components/Support.jsx';
 import BrandHead from '../components/Brand.jsx';
+import { ConnectModal } from '../components/Network.jsx';
 
 // Shown by installed builds until a license for this computer is entered.
 export default function Activation({ license, onActivated, settings, reloadSettings }) {
@@ -11,6 +12,7 @@ export default function Activation({ license, onActivated, settings, reloadSetti
   const [error, setError] = useState(license.reason && license.reason !== 'EMPTY' ? tErr({ code: `LICENSE_${license.reason}` }) : '');
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -49,8 +51,13 @@ export default function Activation({ license, onActivated, settings, reloadSetti
         </label>
         {error && <p className="warn">{error}</p>}
         <button className="primary lg" disabled={busy || !key.trim()}>{t('license.activate')}</button>
+        <div className="row center top-gap">
+          <span className="muted small">{t('net.activationHint')}</span>
+          <button type="button" className="ghost" onClick={() => setJoining(true)}>🔗 {t('net.join')}</button>
+        </div>
         <Support t={t} compact />
       </form>
+      {joining && <ConnectModal onClose={() => setJoining(false)} />}
     </div>
   );
 }

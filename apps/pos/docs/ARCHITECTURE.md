@@ -71,6 +71,7 @@ Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra
 | v14 | `money_accounts`, `money_moves` (treasury ledger), `account_id` on receipts/expenses/supplier payments, supplier cheque fields, `shifts.deposited` |
 | v15 | `warehouses`, `warehouse_stock`, `stock_transfers(+_items)`, `warehouse_id` on `stock_moves/purchases/stock_counts`; `installment_plans`, `installments` |
 | v16 | `employees`, `attendance`, `employee_moves`, `payrolls`; `coupons`, `orders.coupon_id/coupon_discount`; `gift_cards`, `gift_card_moves` |
+| v17 | `devices` (main + connected computers, active flag), `device_settings` (per-computer printers/drawer/scale/warehouse…), `shifts.device_id`, `orders.device_id` |
 
 Key relationships: an **order** is a cart that is `open` (held cart / table) then `completed` (gets `invoice_no`) or `void`. `orders.credit` is the part left on the customer's account. Stock is always in **base units** (`unit_factor` converts cartons). `stock_moves` is the stock ledger; `batches` hold expiry-tracked stock (FEFO).
 
@@ -105,6 +106,9 @@ Reseller keys: `body.sig.permitBody.permitSig`; the permit is signed by the vend
 
 ### Coupons and gift cards
 A coupon is an extra invoice discount computed in `priceCart` (`coupon_discount`) — it does not count as the cashier's discount. A gift card is a payment (`payments.method = 'gift_card'`) taken from the card balance; selling/topping up a card is money in during the shift (`shiftSummary.giftCash`), not a sale.
+
+### Several computers (main computer + clients)
+`device.json` gives each install an id and a role. **Server** (main computer): `lan-server.cjs` listens on `0.0.0.0:<port>`; every request carries `X-Pos-Key` (timing-safe compare, 10 bad keys → 1 min lock-out per IP) and `X-Pos-Device`; `admitDevice` registers new computers within the license's `devices` limit or refuses blocked ones. Each device id gets its own `createServices(db, { deviceId })`, so login, open shift and `DEVICE_KEYS` settings are per computer while all data is shared (one SQLite connection, synchronous calls — no interleaving). Only `remoteAllowed()` paths (EXPOSED namespaces + a few helpers) can be called. **Client**: no local database; `svc`/`callService` in `main.cjs` forward to `remote.cjs`; the license comes from the main computer (`/api/info`); backup/restore are refused (`CLIENT_MODE`); the local kitchen/customer-display server proxies `kds.*` to the main computer. If the main computer is unreachable the renderer shows `pages/Offline.jsx`.
 
 ### Restaurant
 Floor → table (guests) → cashier screen with the table's open order → `sendToKitchen` splits unsent kitchen items into **tickets per station** (product station → category station → first station) → printed per station and shown on the KDS → chef bumps new → preparing → ready (✅ on the floor) → served. Check (pre-bill), transfer, merge, split are in `floor`.

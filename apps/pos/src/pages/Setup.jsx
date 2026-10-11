@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { seedSamples } from '../lib/samples.js';
 import { Field, Toggle, useApp } from '../components/ui.jsx';
 import BrandHead from '../components/Brand.jsx';
+import { ConnectModal } from '../components/Network.jsx';
 
 const TYPES = [
   { id: 'retail', icon: '🏪' },
@@ -18,6 +19,7 @@ export default function Setup({ onDone }) {
     name: '', username: 'admin', pin: '', samples: true,
   });
   const [busy, setBusy] = useState(false);
+  const [joining, setJoining] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e?.target ? e.target.value : e }));
 
   async function switchLang(language) {
@@ -80,7 +82,12 @@ export default function Setup({ onDone }) {
         </div>
         <Toggle checked={form.samples} onChange={set('samples')} label={t('setup.sample')} />
         <button className="primary lg" disabled={busy}>{t('setup.start')}</button>
+        <div className="row center">
+          <span className="muted small">{t('net.activationHint')}</span>
+          <button type="button" className="ghost" onClick={() => setJoining(true)}>🔗 {t('net.join')}</button>
+        </div>
       </form>
+      {joining && <ConnectModal onClose={() => setJoining(false)} />}
     </div>
   );
 }
