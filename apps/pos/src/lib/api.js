@@ -26,6 +26,8 @@ export const excelTemplate = (kind) => unwrap(bridge.excelTemplate(kind));
 export const excelPick = (kind) => unwrap(bridge.excelPick(kind));
 export const excelExport = (job) => unwrap(bridge.excelExport(job));
 export const savePdf = (job) => unwrap(bridge.savePdf(job));
+export const kdsInfo = () => unwrap(bridge.kdsInfo());
+export const openKds = (opts) => unwrap(bridge.openKds(opts));
 export const updateState = () => unwrap(bridge.updateState());
 export const updateCheck = () => unwrap(bridge.updateCheck());
 export const updateInstall = () => unwrap(bridge.updateInstall());

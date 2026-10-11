@@ -4,6 +4,7 @@ import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import LabelsModal from '../components/Labels.jsx';
+import { sellScreens } from '../lib/screens.js';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -99,7 +100,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
   const { t, tErr, notify, settings, can } = useApp();
   const d = settings.decimals;
   const isNew = !product.id;
-  const restaurant = settings.business_type === 'restaurant';
+  const restaurant = sellScreens(settings).includes('restaurant');
   const bookstore = settings.business_type === 'bookstore';
   const [f, setF] = useState({
     name: product.name || '',
@@ -118,11 +119,13 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     track_expiry: !!product.track_expiry,
     track_serial: !!product.track_serial,
     supplier_id: product.supplier_id || '',
+    station_id: product.station_id || '',
     units: (product.units || []).map((u) => ({ ...u, price: u.price == null ? '' : fromMinor(u.price, d) })),
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
   });
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
   const [suppliers, setSuppliers] = useState(null);
+  const [stations] = useLoad(() => (restaurant ? api.kitchenStations.list() : Promise.resolve([])), []);
   useEffect(() => { if (can('purchases')) api.suppliers.list({}).then(setSuppliers).catch(() => {}); }, [can]);
   const setUnit = (i, k, v) => setF((x) => ({ ...x, units: x.units.map((u, j) => (j === i ? { ...u, [k]: v } : u)) }));
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e }));
@@ -137,6 +140,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         id: product.id,
         category_id: Number(f.category_id) || null,
         ...(suppliers ? { supplier_id: Number(supplierId) || null } : {}),
+        station_id: Number(f.station_id) || null,
         price: toMinor(f.price, d),
         cost: toMinor(f.cost, d),
         stock: Number(f.stock) || 0,
@@ -194,6 +198,12 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         <div className="span2 row wrap">
           <Toggle checked={f.track_stock} onChange={set('track_stock')} label={t('products.trackStock')} />
           {restaurant && <Toggle checked={f.kitchen} onChange={set('kitchen')} label={t('products.kitchen')} />}
+          {restaurant && f.kitchen && !!stations?.length && (
+            <select className="w-auto" value={f.station_id} onChange={set('station_id')} title={t('kitchen.station')}>
+              <option value="">🍳 {t('kitchen.byCategory')}</option>
+              {stations.map((st) => <option key={st.id} value={st.id}>🍳 {st.name}</option>)}
+            </select>
+          )}
           <Toggle checked={f.track_expiry} onChange={set('track_expiry')} label={t('products.trackExpiry')} />
           <Toggle checked={f.track_serial} onChange={set('track_serial')} label={t('products.trackSerial')} />
           <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />

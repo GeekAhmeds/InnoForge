@@ -7,9 +7,10 @@ const { createServices, PosError } = require('./services/index.cjs');
 const { createLicenseStore } = require('./license.cjs');
 const { createUpdater } = require('./updater.cjs');
 const excel = require('./excel.cjs');
+const { createKdsServer } = require('./kds-server.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));
@@ -20,6 +21,8 @@ let mainWindow;
 let licenses;
 let license;
 let updater;
+let kdsServer;
+let kdsWindow;
 
 const dbFile = () => path.join(app.getPath('userData'), 'innoforge-pos.db');
 
@@ -45,6 +48,8 @@ function boot() {
   });
   license = licenses.status();
   autoBackup('daily');
+  kdsServer = createKdsServer({ services });
+  kdsServer.start().catch((err) => console.error('kitchen screen server', err));
   updater = createUpdater({
     publicKeyPem: require('./license-public.cjs'),
     onState: (state) => mainWindow?.webContents.send('pos:update-state', state),
@@ -87,6 +92,8 @@ function createWindow() {
     },
   });
   mainWindow.removeMenu();
+  // The kitchen screen belongs to the till: closing the till closes it too.
+  mainWindow.on('closed', () => { if (kdsWindow && !kdsWindow.isDestroyed()) kdsWindow.close(); });
 
   // Everything is local: block navigation away from the app and open links externally.
   mainWindow.webContents.on('will-navigate', (e, url) => {
@@ -117,10 +124,48 @@ ipcMain.handle('pos:call', (_e, ns, method, arg) => {
     const target = EXPOSED.includes(ns) ? services[ns] : null;
     if (!target || typeof target[method] !== 'function') throw new PosError('UNKNOWN_METHOD', `${ns}.${method}`);
     if (!ALLOWED_UNLICENSED.has(`${ns}.${method}`) && !licenseOk()) throw new PosError('LICENSE_REQUIRED');
-    return ok(target[method](arg));
+    const result = target[method](arg);
+    // Kitchen screen settings take effect right away.
+    if (ns === 'settings' && (method === 'newKdsKey' || (method === 'save' && arg && ('kds_lan' in arg || 'kds_port' in arg)))) {
+      return kdsServer.start().then(() => ok(result));
+    }
+    return ok(result);
   } catch (err) {
     return fail(err);
   }
+});
+
+// Kitchen display: where it can be opened, and a window for a screen on this computer.
+ipcMain.handle('pos:kdsInfo', () => {
+  if (!licenseOk()) return fail(new PosError('LICENSE_REQUIRED'));
+  return ok(kdsServer.info());
+});
+
+ipcMain.handle('pos:openKds', (_e, { station = '' } = {}) => {
+  if (!licenseOk()) return fail(new PosError('LICENSE_REQUIRED'));
+  const info = kdsServer.info();
+  if (!info.running) return fail(new PosError('KDS_NOT_RUNNING', info.error || ''));
+  const url = `${info.localUrl}${station ? `&station=${encodeURIComponent(station)}` : ''}`;
+  if (kdsWindow && !kdsWindow.isDestroyed()) {
+    kdsWindow.loadURL(url);
+    kdsWindow.focus();
+    return ok(true);
+  }
+  // Prefer a second monitor (the one in the kitchen) when there is one.
+  const { screen } = require('electron');
+  const other = screen.getAllDisplays().find((d) => d.id !== screen.getPrimaryDisplay().id);
+  kdsWindow = new BrowserWindow({
+    width: 1280, height: 800, backgroundColor: '#0b1220', title: 'InnoForge — Kitchen', autoHideMenuBar: true,
+    ...(other ? { x: other.bounds.x, y: other.bounds.y } : {}),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: !app.isPackaged },
+  });
+  kdsWindow.removeMenu();
+  kdsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  kdsWindow.webContents.on('will-navigate', (e, target) => { if (!target.startsWith(info.localUrl.split('/kds')[0])) e.preventDefault(); });
+  kdsWindow.on('closed', () => { kdsWindow = null; });
+  if (other) kdsWindow.once('ready-to-show', () => kdsWindow.setFullScreen(true));
+  kdsWindow.loadURL(url);
+  return ok(true);
 });
 
 ipcMain.handle('pos:license', () => ok({ ...license, required: licenseRequired(), valid: licenseOk() }));
@@ -390,6 +435,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
   });
   app.on('window-all-closed', () => {
+    kdsServer?.stop();
     try { db?.close(); } catch { /* already closed */ }
     app.quit();
   });

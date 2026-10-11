@@ -103,9 +103,9 @@ export function checkHtml(order, settings, t, lang) {
   <hr><div class="c muted">${t('floor.notInvoice')}</div>`);
 }
 
-export function kitchenHtml(order, items, settings, t, lang) {
+export function kitchenHtml(order, items, settings, t, lang, station = '') {
   const where = order.order_type === 'dine_in' && order.table_name ? `${t('pos.table')} ${esc(order.table_name)}` : t(`order.${order.order_type}`);
-  return page(settings, lang, `<h1>${t('receipt.kitchen')}</h1>
+  return page(settings, lang, `<h1>${station ? esc(station) : t('receipt.kitchen')}</h1>
   <div class="c" style="font-size:18px;font-weight:bold">${where}</div>
   <div class="c muted">#${order.id} — ${new Date().toLocaleString('en-GB')} — ${esc(order.user_name)}</div>
   <hr>

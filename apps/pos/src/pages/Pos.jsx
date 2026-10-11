@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
-import { a4Html, checkHtml, kitchenHtml, receiptHtml } from '../lib/receipt.js';
+import { a4Html, checkHtml, receiptHtml } from '../lib/receipt.js';
 import { sellScreens } from '../lib/screens.js';
+import { printKitchenTickets } from '../components/Kitchen.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -122,12 +123,11 @@ export default function Pos() {
   const sendKitchen = () => run(async () => {
     if (needsTable()) return setModal({ kind: 'tables' });
     const saved = await saveOpen();
-    const { order, items } = await api.orders.sendToKitchen(saved.id);
+    const { order, tickets } = await api.orders.sendToKitchen(saved.id);
     setCart(cartFromOrder(order));
-    if (!items.length) return notify(t('pos.nothingNew'));
-    if (await printDoc(kitchenHtml(order, items, settings, t, lang), settings.kitchen_printer_name || settings.printer_name)) {
-      notify(t('pos.kitchenSent'));
-    }
+    if (!tickets.length) return notify(t('pos.nothingNew'));
+    await printKitchenTickets(order, tickets, { settings, t, lang, printDoc });
+    notify(t('pos.kitchenSent'));
     if (floorOn && order.order_type === 'dine_in') setPage('floor');
   });
 
@@ -377,6 +377,7 @@ export default function Pos() {
               if (settings.invoice_format === 'a4') await printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name);
               else await printDoc(receiptHtml(order, settings, t, lang));
             }
+            if (order.kitchen_tickets?.length) await printKitchenTickets(order, order.kitchen_tickets, { settings, t, lang, printDoc });
             setLastSale(order);
             done(cart);
           })}

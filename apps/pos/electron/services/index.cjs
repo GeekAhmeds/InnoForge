@@ -37,6 +37,10 @@ const DEFAULT_SETTINGS = {
   loyalty_min_redeem: 100,
   label_printer_name: '',
   label_size: '38x25',
+  kitchen_auto_send: true, // paying an order sends its unsent kitchen items (takeaway paid at once)
+  kds_lan: false, // let tablets on the local network open the kitchen screen
+  kds_port: 7799,
+  kds_key: '',
 };
 
 class PosError extends Error {
@@ -167,7 +171,9 @@ function createServices(db) {
       if (patch && 'business_type' in patch && !['retail', 'bookstore', 'restaurant', 'trading'].includes(patch.business_type)) {
         throw new PosError('INVALID_BUSINESS_TYPE');
       }
-      transaction(db, () => writeSettings(patch));
+      // The kitchen screen key only changes through newKdsKey (forms send stale copies of it).
+      const { kds_key: _key, ...rest } = patch || {};
+      transaction(db, () => writeSettings(rest));
       return getSettings();
     },
   };
@@ -444,6 +450,7 @@ function createServices(db) {
         author: str(p.author) || null,
         publisher: str(p.publisher) || null,
         kitchen: p.kitchen ? 1 : 0,
+        station_id: 'station_id' in p ? int(p.station_id) || null : p.id ? db.prepare('SELECT station_id FROM products WHERE id = ?').get(p.id)?.station_id ?? null : null,
         supplier_id: 'supplier_id' in p ? int(p.supplier_id) || null : p.id ? db.prepare('SELECT supplier_id FROM products WHERE id = ?').get(p.id)?.supplier_id ?? null : null,
         track_expiry: p.track_expiry ? 1 : 0,
         track_serial: p.track_serial ? 1 : 0,
@@ -537,7 +544,8 @@ function createServices(db) {
           u.name AS waiter_name, o.customer_name,
           CAST((julianday('now', 'localtime') - julianday(o.created_at)) * 1440 AS INTEGER) AS minutes,
           (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count,
-          (SELECT COUNT(*) FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = o.id AND p.kitchen = 1 AND i.qty > i.kitchen_sent) AS unsent
+          (SELECT COUNT(*) FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = o.id AND p.kitchen = 1 AND i.qty > i.kitchen_sent) AS unsent,
+          (SELECT COUNT(*) FROM kitchen_tickets k WHERE k.order_id = o.id AND k.status = 'ready') AS ready
         FROM dining_tables t
         LEFT JOIN orders o ON o.table_id = t.id AND o.status = 'open'
         LEFT JOIN users u ON u.id = o.user_id
@@ -894,11 +902,8 @@ function createServices(db) {
       return transaction(db, () => {
         const order = getOrder(id);
         if (order.status !== 'open') throw new PosError('ORDER_NOT_OPEN');
-        const pending = order.items
-          .filter((i) => i.qty > i.kitchen_sent)
-          .map((i) => ({ name: i.name, qty: i.qty - i.kitchen_sent, note: i.note }));
-        db.prepare('UPDATE order_items SET kitchen_sent = qty WHERE order_id = ?').run(id);
-        return { order: getOrder(id), items: pending };
+        const tickets = dispatchKitchen(order);
+        return { order: getOrder(id), tickets, items: tickets.flatMap((tk) => tk.items) };
       });
     },
     /** Cancels an open order; once items reached the kitchen it needs the 'void' permission. */
@@ -911,6 +916,7 @@ function createServices(db) {
         let approvedBy = null;
         if (order.items.some((i) => i.kitchen_sent > 0)) approvedBy = requirePerm('void', arg?.approval).approvedBy;
         db.prepare("UPDATE orders SET status = 'void' WHERE id = ?").run(id);
+        db.prepare("UPDATE kitchen_tickets SET status = 'cancelled' WHERE order_id = ? AND status IN ('new', 'preparing', 'ready')").run(id);
         audit('order_void', { entity: 'order', entityId: id, approvedBy, details: { total: order.total, items: order.items.length, table: order.table_name } });
         return true;
       });
@@ -1004,7 +1010,9 @@ function createServices(db) {
         }
         if (cart.quote_id) db.prepare("UPDATE quotes SET status = 'invoiced', order_id = ? WHERE id = ? AND status IN ('quote', 'order')").run(orderId, cart.quote_id);
         for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
-        return getOrder(orderId);
+        // Orders paid straight away (takeaway, counter) still have to reach the kitchen.
+        const tickets = priced.settings.kitchen_auto_send ? dispatchKitchen(getOrder(orderId)) : [];
+        return { ...getOrder(orderId), kitchen_tickets: tickets };
       });
     },
     list({ from, to, search = '', limit = 200 } = {}) {
@@ -2211,9 +2219,129 @@ function createServices(db) {
     },
   };
 
+  // ---------- kitchen stations, tickets and the kitchen display ----------
+  const activeStations = () => plainAll(db.prepare('SELECT * FROM kitchen_stations WHERE active = 1 ORDER BY sort, id').all());
+
+  /**
+   * Turns an order's unsent kitchen items into one ticket per station (the product's
+   * station, else its category's, else the first station) and marks everything sent.
+   * Returns the tickets with their station so the caller can print them.
+   */
+  function dispatchKitchen(order) {
+    const stations = activeStations();
+    const byId = new Map(stations.map((st) => [st.id, st]));
+    const rows = db.prepare(`
+      SELECT i.id, i.name, i.qty, i.kitchen_sent, i.note, p.station_id AS p_station, c.station_id AS c_station
+      FROM order_items i JOIN products p ON p.id = i.product_id LEFT JOIN categories c ON c.id = p.category_id
+      WHERE i.order_id = ? AND p.kitchen = 1 AND i.qty > i.kitchen_sent ORDER BY i.id`).all(order.id);
+    const groups = new Map();
+    for (const r of rows) {
+      const st = byId.get(r.p_station) || byId.get(r.c_station) || stations[0] || null;
+      const key = st?.id ?? 0;
+      if (!groups.has(key)) groups.set(key, { station: st, items: [] });
+      groups.get(key).items.push({ name: r.name, qty: r.qty - r.kitchen_sent, note: r.note });
+    }
+    db.prepare('UPDATE order_items SET kitchen_sent = qty WHERE order_id = ?').run(order.id);
+    const tickets = [];
+    for (const g of groups.values()) {
+      const id = Number(db.prepare('INSERT INTO kitchen_tickets (order_id, station_id, items, table_name, order_type, user_name, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(order.id, g.station?.id ?? null, JSON.stringify(g.items), order.table_name || '', order.order_type, order.user_name || session.user?.name || '', order.note || '').lastInsertRowid);
+      tickets.push({ id, station: g.station, items: g.items });
+    }
+    return tickets;
+  }
+
+  const kitchenStations = {
+    list() {
+      requireUser();
+      return plainAll(db.prepare('SELECT * FROM kitchen_stations ORDER BY sort, id').all());
+    },
+    save(st = {}) {
+      requirePerm('settings');
+      if (!str(st.name)) throw new PosError('NAME_REQUIRED');
+      const vals = [str(st.name), str(st.printer_name), Math.min(5, Math.max(1, int(st.copies, 1))), st.print === false ? 0 : 1, st.display === false ? 0 : 1, int(st.sort), st.active === false ? 0 : 1];
+      if (st.id) {
+        db.prepare('UPDATE kitchen_stations SET name = ?, printer_name = ?, copies = ?, print = ?, display = ?, sort = ?, active = ? WHERE id = ?').run(...vals, st.id);
+        return st.id;
+      }
+      return Number(db.prepare('INSERT INTO kitchen_stations (name, printer_name, copies, print, display, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    remove(id) {
+      requirePerm('settings');
+      db.prepare('DELETE FROM kitchen_stations WHERE id = ?').run(id);
+      return true;
+    },
+    /** Which station each category's dishes go to. */
+    setCategory({ categoryId, stationId } = {}) {
+      requirePerm('settings');
+      db.prepare('UPDATE categories SET station_id = ? WHERE id = ?').run(int(stationId) || null, categoryId);
+      return true;
+    },
+  };
+
+  /**
+   * The kitchen display. Not reachable through the app's IPC: the main process serves it
+   * over a local HTTP server guarded by an access key, so no one has to sign in on it.
+   */
+  const NEXT = { new: 'preparing', preparing: 'ready', ready: 'served' };
+  const kds = {
+    state({ stationId = null } = {}) {
+      const s = getSettings();
+      const params = [];
+      let where = "k.status IN ('new', 'preparing', 'ready')";
+      if (int(stationId)) { where += ' AND k.station_id = ?'; params.push(int(stationId)); }
+      const tickets = db.prepare(`
+        SELECT k.*, st.name AS station_name, o.guests,
+          CAST((julianday('now', 'localtime') - julianday(k.created_at)) * 1440 AS INTEGER) AS minutes
+        FROM kitchen_tickets k LEFT JOIN kitchen_stations st ON st.id = k.station_id LEFT JOIN orders o ON o.id = k.order_id
+        WHERE ${where} AND (st.id IS NULL OR st.display = 1) ORDER BY k.id`).all(...params)
+        .map((k) => ({ ...plain(k), items: JSON.parse(k.items) }));
+      return {
+        business_name: s.business_name, language: s.language,
+        stations: activeStations().filter((st) => st.display).map(({ id, name }) => ({ id, name })),
+        tickets,
+      };
+    },
+    /** Moves a ticket on: new → preparing → ready → served (or to a given status). */
+    bump({ id, to = null } = {}) {
+      const k = db.prepare('SELECT status FROM kitchen_tickets WHERE id = ?').get(int(id));
+      if (!k) throw new PosError('NOT_FOUND');
+      const next = to && ['new', 'preparing', 'ready', 'served'].includes(to) ? to : NEXT[k.status];
+      if (!next) throw new PosError('INVALID_STATUS');
+      const col = { preparing: 'started_at', ready: 'ready_at', served: 'served_at' }[next];
+      db.prepare(`UPDATE kitchen_tickets SET status = ?${col ? `, ${col} = datetime('now', 'localtime')` : ''} WHERE id = ?`).run(next, int(id));
+      return true;
+    },
+    /** Brings back the last ticket served by mistake. */
+    recall({ stationId = null } = {}) {
+      const k = int(stationId)
+        ? db.prepare("SELECT id FROM kitchen_tickets WHERE status = 'served' AND station_id = ? ORDER BY served_at DESC, id DESC LIMIT 1").get(int(stationId))
+        : db.prepare("SELECT id FROM kitchen_tickets WHERE status = 'served' ORDER BY served_at DESC, id DESC LIMIT 1").get();
+      if (!k) return false;
+      db.prepare("UPDATE kitchen_tickets SET status = 'ready', served_at = NULL WHERE id = ?").run(k.id);
+      return true;
+    },
+    /** Creates the access key the first time (8 characters, no look-alike letters). */
+    ensureKey() {
+      let key = getSettings().kds_key;
+      if (!key) {
+        const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        key = Array.from(crypto.randomBytes(8), (b) => abc[b % abc.length]).join('');
+        writeSettings({ kds_key: key });
+      }
+      return key;
+    },
+  };
+  settings.newKdsKey = () => {
+    requirePerm('settings');
+    writeSettings({ kds_key: '' });
+    audit('kds_key_reset');
+    return kds.ensureKey();
+  };
+
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, requireAdmin, requirePerm, audit, can,
   };
 }
 

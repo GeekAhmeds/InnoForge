@@ -587,3 +587,46 @@ test('restaurant floor: guests, transfer, merge, split bill, printed check', () 
   s.floor.printCheck(a.id);
   assert.ok(s.tables.list().find((x) => x.id === t3).check_printed_at);
 });
+
+test('kitchen: stations by product/category, tickets on send and on payment, display flow, void cancels', () => {
+  const { s, db } = setup({ business_type: 'restaurant', tax_rate: 0, service_rate: 0 });
+  const grill = s.kitchenStations.save({ name: 'Grill', printer_name: 'GRILL-80' });
+  const bar = s.kitchenStations.save({ name: 'Bar', copies: 2 });
+  const food = s.categories.save({ name: 'Food' });
+  const drinks = s.categories.save({ name: 'Drinks' });
+  s.kitchenStations.setCategory({ categoryId: drinks, stationId: bar });
+  const burger = s.products.save({ name: 'Burger', price: 10000, kitchen: true, track_stock: false, category_id: food });
+  const juice = s.products.save({ name: 'Juice', price: 3000, kitchen: true, track_stock: false, category_id: drinks });
+  const water = s.products.save({ name: 'Water', price: 500, kitchen: false, track_stock: false });
+  s.shifts.open({});
+  const [t1] = s.tables.list().map((x) => x.id);
+  const o = s.orders.saveOpen({ order_type: 'dine_in', table_id: t1, items: [{ product_id: burger, qty: 2, note: 'no onion' }, { product_id: juice, qty: 1 }, { product_id: water, qty: 1 }] });
+  const sent = s.orders.sendToKitchen(o.id);
+  assert.deepEqual(sent.tickets.map((tk) => [tk.station.name, tk.items.map((i) => `${i.qty}x${i.name}`).join()]), [['Grill', '2xBurger'], ['Bar', '1xJuice']]);
+  assert.equal(s.orders.sendToKitchen(o.id).tickets.length, 0); // nothing new
+  // the display (no sign-in needed) moves tickets along
+  const key = s.kds.ensureKey();
+  assert.equal(key.length, 8);
+  assert.equal(s.kds.ensureKey(), key);
+  s.settings.save({ kds_key: 'HACKED', business_name: 'x' });
+  assert.equal(s.kds.ensureKey(), key);
+  let st = s.kds.state({});
+  assert.equal(st.tickets.length, 2);
+  assert.equal(s.kds.state({ stationId: bar }).tickets.length, 1);
+  const grillTicket = st.tickets.find((tk) => tk.station_id === grill);
+  s.kds.bump({ id: grillTicket.id }); s.kds.bump({ id: grillTicket.id });
+  assert.equal(s.tables.list().find((x) => x.id === t1).ready, 1);
+  s.kds.bump({ id: grillTicket.id });
+  assert.equal(s.kds.state({}).tickets.length, 1);
+  assert.equal(s.kds.recall({}), true);
+  assert.equal(s.kds.state({}).tickets.length, 2);
+  // takeaway paid at once still reaches the kitchen
+  const paid = s.orders.checkout({ order_type: 'takeaway', items: [{ product_id: burger, qty: 1 }], payments: [{ method: 'cash', amount: 10000 }] });
+  assert.equal(paid.kitchen_tickets.length, 1);
+  // voiding an order clears its tickets from the screen
+  const o2 = s.orders.saveOpen({ order_type: 'takeaway', items: [{ product_id: juice, qty: 3 }] });
+  s.orders.sendToKitchen(o2.id);
+  s.orders.voidOpen({ id: o2.id });
+  assert.ok(!s.kds.state({}).tickets.some((tk) => tk.order_id === o2.id));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitchen_tickets WHERE status = ?').get('cancelled').n, 1);
+});

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InnoForge KDS</title>
+<style>
+  :root { --bg: #0b1220; --panel: #131c2e; --line: #23304a; --text: #e8edf6; --muted: #8a97b0; --new: #3b82f6; --prep: #f59e0b; --ready: #10b981; --late: #ef4444; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.4 Tahoma, "Segoe UI", Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; white-space: nowrap; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  button { font: inherit; color: var(--text); background: #1c2840; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+  button.on { background: var(--new); border-color: var(--new); }
+  .spacer { flex: 1; }
+  .clock { font-size: 20px; font-weight: bold; direction: ltr; }
+  .counts span { margin-inline-start: 10px; color: var(--muted); }
+  main { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; min-height: calc(100% - 60px); }
+  .lane { background: rgba(255,255,255,.02); border: 1px solid var(--line); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .lane h2 { margin: 0 4px 2px; font-size: 16px; display: flex; justify-content: space-between; }
+  .lane.new h2 { color: var(--new); } .lane.preparing h2 { color: var(--prep); } .lane.ready h2 { color: var(--ready); }
+  .ticket { background: var(--panel); border: 2px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; user-select: none; animation: pop .25s ease-out; }
+  .lane.new .ticket { border-color: var(--new); } .lane.preparing .ticket { border-color: var(--prep); } .lane.ready .ticket { border-color: var(--ready); }
+  .ticket.late { box-shadow: 0 0 0 2px var(--late) inset; }
+  .t-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .t-where { font-size: 20px; font-weight: bold; }
+  .t-time { font-weight: bold; direction: ltr; }
+  .t-time.warn { color: var(--prep); } .t-time.late { color: var(--late); }
+  .t-sub { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .t-items { list-style: none; margin: 0; padding: 0; }
+  .t-items li { font-size: 18px; padding: 3px 0; border-top: 1px dashed var(--line); }
+  .t-items li:first-child { border-top: 0; }
+  .t-items b { display: inline-block; min-width: 2.2em; color: #fff; }
+  .t-items .note { display: block; font-size: 13px; color: var(--prep); padding-inline-start: 2.2em; }
+  .t-act { margin-top: 8px; width: 100%; font-weight: bold; padding: 10px; }
+  .lane.new .t-act { background: var(--new); } .lane.preparing .t-act { background: var(--prep); color: #111; } .lane.ready .t-act { background: var(--ready); color: #04210f; }
+  .empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  .banner { margin: 12px; padding: 14px; border-radius: 10px; background: #3b1219; color: #fecaca; display: none; }
+  @keyframes pop { from { transform: scale(.96); opacity: .3; } to { transform: none; opacity: 1; } }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">🍳</h1>
+  <div class="tabs" id="tabs"></div>
+  <span class="spacer"></span>
+  <span class="counts" id="counts"></span>
+  <button id="recall" title=""></button>
+  <button id="sound">🔔</button>
+  <button id="full">⛶</button>
+  <span class="clock" id="clock"></span>
+</header>
+<div class="banner" id="banner"></div>
+<main>
+  <section class="lane new"><h2><span data-t="new"></span><span id="n-new"></span></h2><div id="l-new"></div></section>
+  <section class="lane preparing"><h2><span data-t="preparing"></span><span id="n-preparing"></span></h2><div id="l-preparing"></div></section>
+  <section class="lane ready"><h2><span data-t="ready"></span><span id="n-ready"></span></h2><div id="l-ready"></div></section>
+</main>
+<script>
+(() => {
+  const T = {
+    ar: { new: 'جديد', preparing: 'بيتحضّر', ready: 'جاهز للتقديم', all: 'كل الأقسام', start: 'ابدأ التحضير', done: 'جاهز ✓', served: 'اتقدّم', recall: '↶ استرجاع آخر طلب',
+      table: 'طاولة', dine_in: 'صالة', takeaway: 'تيك أواي', delivery: 'دليفري', sale: 'كاشير', none: 'مفيش طلبات', badKey: 'مفتاح شاشة المطبخ غلط — افتح الرابط من الإعدادات ← المطبخ.', offline: 'مفيش اتصال بجهاز الكاشير…', guests: 'أفراد', min: 'د' },
+    en: { new: 'New', preparing: 'Preparing', ready: 'Ready to serve', all: 'All stations', start: 'Start', done: 'Ready ✓', served: 'Served', recall: '↶ Recall last',
+      table: 'Table', dine_in: 'Dine-in', takeaway: 'Takeaway', delivery: 'Delivery', sale: 'Counter', none: 'No orders', badKey: 'Wrong kitchen screen key — open the link from Settings → Kitchen.', offline: 'Cannot reach the cashier computer…', guests: 'guests', min: 'min' },
+  };
+  const q = new URLSearchParams(location.search);
+  const key = q.get('key') || '';
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+  let station = q.get('station') || store.get('kds-station') || '';
+  let sound = store.get('kds-sound') !== '0';
+  let lang = 'ar';
+  let seen = null;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const t = (k) => (T[lang] || T.ar)[k] || k;
+
+  function beep() {
+    if (!sound) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.18].forEach((d) => {
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.25, ctx.currentTime + d); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + d + 0.15);
+        o.start(ctx.currentTime + d); o.stop(ctx.currentTime + d + 0.16);
+      });
+    } catch {}
+  }
+
+  async function api(path, body) {
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await fetch(`/api/${path}${sep}key=${encodeURIComponent(key)}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    if (res.status === 403) throw Object.assign(new Error('key'), { code: 'key' });
+    if (!res.ok) throw new Error('http');
+    return res.json();
+  }
+
+  function where(k) {
+    if (k.table_name) return `${t('table')} ${esc(k.table_name)}`;
+    return t(k.order_type) || '';
+  }
+
+  function render(state) {
+    lang = state.language === 'en' ? 'en' : 'ar';
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+    $('title').textContent = `🍳 ${state.business_name || 'KDS'}`;
+    $('recall').textContent = t('recall');
+    $('tabs').innerHTML = state.stations.length > 1
+      ? [`<button data-st="" class="${!station ? 'on' : ''}">${t('all')}</button>`, ...state.stations.map((s) => `<button data-st="${s.id}" class="${String(s.id) === String(station) ? 'on' : ''}">${esc(s.name)}</button>`)].join('')
+      : '';
+    const ids = new Set(state.tickets.map((k) => k.id));
+    if (seen && state.tickets.some((k) => k.status === 'new' && !seen.has(k.id))) beep();
+    seen = ids;
+    for (const lane of ['new', 'preparing', 'ready']) {
+      const list = state.tickets.filter((k) => k.status === lane);
+      $(`n-${lane}`).textContent = list.length || '';
+      $(`l-${lane}`).innerHTML = list.length ? list.map((k) => {
+        const late = k.minutes >= 20; const warn = k.minutes >= 10;
+        const act = { new: t('start'), preparing: t('done'), ready: t('served') }[lane];
+        return `<div class="ticket ${late && lane !== 'ready' ? 'late' : ''}" data-id="${k.id}">
+          <div class="t-head"><span class="t-where">${where(k)}</span><span class="t-time ${late ? 'late' : warn ? 'warn' : ''}">${k.minutes} ${t('min')}</span></div>
+          <div class="t-sub">#${k.order_id}${k.station_name && !station ? ` · ${esc(k.station_name)}` : ''}${k.guests ? ` · ${k.guests} ${t('guests')}` : ''} · ${esc(k.user_name)} · ${esc(String(k.created_at).slice(11, 16))}</div>
+          <ul class="t-items">${k.items.map((i) => `<li><b>${i.qty}×</b>${esc(i.name)}${i.note ? `<span class="note">✎ ${esc(i.note)}</span>` : ''}</li>`).join('')}</ul>
+          ${k.note ? `<div class="t-sub">✎ ${esc(k.note)}</div>` : ''}
+          <button class="t-act" data-id="${k.id}">${act}</button>
+        </div>`;
+      }).join('') : `<div class="empty">${t('none')}</div>`;
+    }
+    $('counts').innerHTML = '';
+  }
+
+  async function refresh() {
+    try {
+      const state = await api(`state${station ? `?station=${encodeURIComponent(station)}` : ''}`);
+      $('banner').style.display = 'none';
+      render(state);
+    } catch (err) {
+      $('banner').textContent = err.code === 'key' ? t('badKey') : t('offline');
+      $('banner').style.display = 'block';
+    }
+  }
+
+  document.addEventListener('click', async (e) => {
+    const tab = e.target.closest('[data-st]');
+    if (tab) { station = tab.dataset.st; store.set('kds-station', station); refresh(); return; }
+    const tk = e.target.closest('.t-act');
+    if (tk && tk.dataset.id) { await api('bump', { id: Number(tk.dataset.id) }).catch(() => {}); refresh(); }
+  });
+  $('recall').onclick = async () => { await api('recall', { station }).catch(() => {}); refresh(); };
+  $('sound').onclick = () => { sound = !sound; store.set('kds-sound', sound ? '1' : '0'); $('sound').textContent = sound ? '🔔' : '🔕'; if (sound) beep(); };
+  $('sound').textContent = sound ? '🔔' : '🔕';
+  $('full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
+  const tick = () => { $('clock').textContent = new Date().toTimeString().slice(0, 5); };
+  tick(); setInterval(tick, 10000);
+  refresh(); setInterval(refresh, 3000);
+})();
+</script>
+</body>
+</html>

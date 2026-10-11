@@ -55,7 +55,7 @@ export default function Floor() {
         <div className="floor-grid">
           {shown.map((x) => (
             <button key={x.id} className={`floor-table ${x.order_id ? (x.check_printed_at ? 'check' : 'busy') : 'free'}`} onClick={() => onTable(x)}>
-              <div className="ft-head"><b>{x.name}</b>{x.unsent > 0 && <span className="ft-unsent" title={t('floor.unsent')}>🔔 {x.unsent}</span>}</div>
+              <div className="ft-head"><b>{x.name}</b><span>{x.ready > 0 && <span className="ft-ready" title={t('floor.ready')}>✅ {x.ready}</span>}{x.unsent > 0 && <span className="ft-unsent" title={t('floor.unsent')}>🔔 {x.unsent}</span>}</span></div>
               {x.order_id ? (
                 <>
                   <div className="ft-total">{m(x.order_total)}</div>
