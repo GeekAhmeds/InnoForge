@@ -11,7 +11,7 @@ name: POS installer
 #   POS_DEPLOY_PORT   SSH port (default 22)
 #   POS_DEPLOY_USER   SSH user that can write to the update folder
 #   POS_DEPLOY_KEY    SSH private key for that user
-#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7788/srv/InnoForge/PoS/
+#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7999/srv/InnoForge/PoS/
 
 on:
   workflow_dispatch:

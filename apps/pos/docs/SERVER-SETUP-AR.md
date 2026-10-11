@@ -18,7 +18,7 @@ GitHub Actions: بيشغّل الاختبارات ← بيبني نسخة وين
 بيرفع ملفات التحديث بـ SSH على السيرفر في فولدر  /srv/InnoForge/PoS
         │
         ▼
-السيرفر بيعرض الفولدر ده على  https://0x01source.com:7788/srv/InnoForge/PoS/
+السيرفر بيعرض الفولدر ده على  https://0x01source.com:7999/srv/InnoForge/PoS/
         │
         ▼
 برنامج العميل بيسأل السيرفر كل 6 ساعات (وأول ما يفتح): في نسخة جديدة؟
@@ -65,11 +65,11 @@ ssh root@0x01source.com -p 22
 uname -a
 cat /etc/os-release | head -3
 which nginx apache2 httpd caddy 2>/dev/null
-sudo ss -ltnp | grep -E ':7788|:443|:80'
+sudo ss -ltnp | grep -E ':7999|:443|:80'
 ls -la /srv /srv/InnoForge 2>/dev/null
 ```
 
-**✅ ابعتلي** الناتج، عشان أعرف أنهي برنامج بيشغّل البورت 7788 (nginx ولا Apache ولا غيره).
+**✅ ابعتلي** الناتج، عشان أعرف الويب سيرفر عندك إيه (nginx ولا Apache ولا غيره)، وأتأكد إن البورت **7999 فاضي** ومفيش حاجة تانية شغالة عليه. لو سطر `:7999` ظهر في الناتج، يبقى البورت مستخدم ونختار رقم تاني.
 
 ---
 
@@ -123,21 +123,31 @@ ssh -i ~/pos-deploy -p 22 deploy@0x01source.com "echo ok > /srv/InnoForge/PoS/te
 
 ---
 
-## الخطوة 3: السيرفر يعرض الفولدر على 7788 بشهادة HTTPS سليمة
+## الخطوة 3: السيرفر يعرض الفولدر على 7999 بشهادة HTTPS سليمة
 
 افتح في المتصفح:
 
 ```
-https://0x01source.com:7788/srv/InnoForge/PoS/test.txt
+https://0x01source.com:7999/srv/InnoForge/PoS/test.txt
 ```
 
 - **لو ظهرت كلمة `ok` من غير أي تحذير أمان:** ممتاز، روح للخطوة 4.
 - **لو ظهر تحذير شهادة:** البرنامج هيرفض التحديث. لازم شهادة حقيقية (Let's Encrypt مجانية).
-- **لو ظهر 404:** الويب سيرفر محتاج يعرف الفولدر. لو nginx، ضيف ده في `server` الخاص بالبورت 7788:
+- **لو الصفحة مفتحتش خالص (timeout أو connection refused):** يبقى لسه مفيش حاجة شغالة على 7999، أو الفايروول قافله. البورت ده جديد، فاعمل ملف nginx جديد بالإعدادات اللي تحت، وافتح البورت في الفايروول:
+
+```bash
+sudo ufw allow 7999/tcp        # لو بتستخدم ufw
+# أو: sudo firewall-cmd --permanent --add-port=7999/tcp && sudo firewall-cmd --reload
+```
+
+  ولو السيرفر عند شركة استضافة فيها firewall من لوحة التحكم (Security Group)، افتح 7999 من هناك كمان.
+- **لو ظهر 404:** الويب سيرفر محتاج يعرف الفولدر.
+
+لو nginx، اعمل ملف جديد `/etc/nginx/sites-available/innoforge-pos` (ومتلمسش إعدادات المواقع التانية اللي شغالة عندك) وحط فيه:
 
 ```nginx
 server {
-    listen 7788 ssl;
+    listen 7999 ssl;
     server_name 0x01source.com;
     ssl_certificate     /etc/letsencrypt/live/0x01source.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/0x01source.com/privkey.pem;
@@ -155,11 +165,14 @@ server {
 }
 ```
 
-بعدها:
+بعدها فعّله وجرّب الإعدادات قبل ما تعمل reload (عشان المواقع التانية متقعش لو فيه غلطة):
 
 ```bash
+sudo ln -s /etc/nginx/sites-available/innoforge-pos /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+> لو nginx عندك مش بيستخدم `sites-enabled` (زي CentOS)، حط الملف في `/etc/nginx/conf.d/innoforge-pos.conf`.
 
 لو محتاج شهادة Let's Encrypt:
 
@@ -196,7 +209,7 @@ sudo certbot certonly --nginx -d 0x01source.com
 1. افتح: **https://github.com/GeekAhmeds/InnoForge/actions/workflows/pos-installer.yml**
 2. اضغط **Run workflow**، واختار الفرع `claude/amazing-noether-jd4woa`، وعلّم ✔ على **publish**، واضغط **Run workflow**.
 3. استنى حوالي 5 دقايق. المفروض يبقى فيه 3 مربعات خضرا: `build (Windows)`، و`build (Linux)`، و`publish`.
-4. افتح في المتصفح: `https://0x01source.com:7788/srv/InnoForge/PoS/latest.yml`. المفروض يظهر فيه `version: 0.1.xx`.
+4. افتح في المتصفح: `https://0x01source.com:7999/srv/InnoForge/PoS/latest.yml`. المفروض يظهر فيه `version: 0.1.xx`.
 
 **✅ ابعتلي** صورة أو الناتج. ولو حاجة طلعت حمرا، ابعتلي لينك التشغيل وهقرا السبب.
 

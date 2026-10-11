@@ -13,7 +13,7 @@ description: Build, version, sign and publish InnoForge POS installers and autom
 - Run the workflow manually (Actions → POS installer → Run workflow) with **publish** ticked to upload the update files to the server over SSH.
 - Repository secrets:
   - `POS_SIGNING_KEY` — contents of `pos-license-private.pem`; without it installed apps reject the update.
-  - `POS_DEPLOY_HOST`, `POS_DEPLOY_PORT`, `POS_DEPLOY_USER`, `POS_DEPLOY_KEY` (SSH private key), `POS_DEPLOY_PATH` — the folder the web server serves as `https://0x01source.com:7788/srv/InnoForge/PoS/`.
+  - `POS_DEPLOY_HOST`, `POS_DEPLOY_PORT`, `POS_DEPLOY_USER`, `POS_DEPLOY_KEY` (SSH private key), `POS_DEPLOY_PATH` — the folder the web server serves as `https://0x01source.com:7999/srv/InnoForge/PoS/`.
 
 ## Local build
 ```bash
