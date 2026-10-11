@@ -862,3 +862,79 @@ test('installments: only for a customer credit invoice; cancelling restores a pl
   assert.equal(s.installments.get(o.id), null);
   assert.equal(s.customers.openInvoices(cust).open[0].open, 600000);
 });
+
+test('coupons: percent / amount codes, minimum, limits, and they need no discount permission', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const id = s.products.save({ name: 'Shirt', price: 20000, cost: 1, stock: 50 });
+  s.coupons.save({ code: 'eid10', kind: 'percent', value: 10, max_uses: 1 });
+  s.coupons.save({ code: 'BIG', kind: 'amount', value: 5000, min_total: 50000 });
+  s.users.save({ name: 'Cash', username: 'c', pin: '1111', role: 'cashier' });
+  s.shifts.open({ openingCash: 0 });
+  s.auth.logout();
+  s.auth.login({ username: 'c', pin: '1111' });
+  const cart = (code, qty = 2) => ({ items: [{ product_id: id, qty }], coupon_code: code, payments: [{ method: 'cash', amount: 100000 }] });
+  assert.equal(s.orders.quote(cart('EID10')).discount, 4000); // case-insensitive
+  assert.equal(tryCode(() => s.orders.quote(cart('BIG'))), 'COUPON_MIN_TOTAL');
+  assert.equal(s.orders.quote(cart('BIG', 3)).total, 55000);
+  assert.equal(tryCode(() => s.orders.quote(cart('NOPE'))), 'COUPON_INVALID');
+  const o = s.orders.checkout(cart('EID10')); // a cashier (10% max) — coupons are not their discount
+  assert.equal(o.total, 36000);
+  assert.equal(o.coupon_discount, 4000);
+  assert.equal(tryCode(() => s.orders.checkout(cart('EID10'))), 'COUPON_USED_UP');
+});
+
+test('gift cards: sold into the drawer, pay part of a sale, balance and history', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const id = s.products.save({ name: 'Book', price: 30000, cost: 1, stock: 50 });
+  assert.equal(tryCode(() => s.giftCards.issue({ amount: 50000 })), 'NO_OPEN_SHIFT');
+  s.shifts.open({ openingCash: 0 });
+  const card = s.giftCards.issue({ amount: 50000, method: 'cash' });
+  assert.equal(card.code.length, 12);
+  const o = s.orders.checkout({ items: [{ product_id: id, qty: 2 }], gift_card: { code: card.code, amount: 50000 }, payments: [{ method: 'cash', amount: 10000 }] });
+  assert.deepEqual(o.payments.map((p) => [p.method, p.amount]).sort(), [['cash', 10000], ['gift_card', 50000]]);
+  assert.equal(s.giftCards.lookup(card.code).balance, 0);
+  assert.equal(tryCode(() => s.orders.checkout({ items: [{ product_id: id, qty: 1 }], gift_card: { code: card.code, amount: 100 }, payments: [{ method: 'cash', amount: 30000 }] })), 'GIFT_CARD_BALANCE');
+  s.giftCards.topup({ id: card.id, amount: 20000 });
+  assert.equal(s.giftCards.get(card.id).moves.length, 3);
+  // The drawer holds the card money (50000 + 20000) and the cash part of the sale.
+  assert.equal(s.shifts.summary().expectedCash, 80000);
+  assert.equal(s.giftCards.summary().outstanding, 20000);
+  assert.equal(tryCode(() => s.giftCards.lookup('000')), 'GIFT_CARD_INVALID');
+});
+
+test('employees: punch in/out, absence, advances from the drawer, payroll and undo', () => {
+  const { s } = setup({ tax_rate: 0 });
+  s.shifts.open({ openingCash: 100000 });
+  const ali = s.employees.save({ name: 'Ali', job: 'Cashier', salary: 600000 });
+  const day = s.employees.save({ name: 'Saad', pay_type: 'daily', salary: 20000 });
+  assert.equal(s.employees.punch({ employeeId: ali }).action, 'in');
+  assert.equal(s.employees.punch({ employeeId: ali }).action, 'out');
+  assert.equal(tryCode(() => s.employees.punch({ employeeId: ali })), 'ALREADY_CHECKED_OUT');
+  const month = '2026-03';
+  s.employees.setDay({ employeeId: ali, day: '2026-03-02', status: 'absent' });
+  s.employees.setDay({ employeeId: ali, day: '2026-03-03', status: 'absent' });
+  for (const d of ['01', '02', '03']) s.employees.setDay({ employeeId: day, day: `2026-03-${d}`, status: 'present' });
+  s.employees.addMove({ employeeId: ali, kind: 'advance', amount: 50000, month, fromDrawer: true });
+  s.employees.addMove({ employeeId: ali, kind: 'bonus', amount: 10000, month });
+  assert.equal(s.shifts.summary().expectedCash, 50000); // the advance left the drawer
+  const pr = s.employees.payroll({ month });
+  const a = pr.rows.find((r) => r.employee_id === ali);
+  assert.equal(a.absence, 40000); // 2 × 600000 / 30
+  assert.equal(a.net, 600000 - 40000 + 10000 - 50000);
+  assert.equal(pr.rows.find((r) => r.employee_id === day).net, 60000);
+  assert.equal(s.employees.attendance({ month }).rows.find((r) => r.id === ali).absent, 2);
+  s.employees.pay({ month, employeeId: ali, fromDrawer: false });
+  assert.equal(tryCode(() => s.employees.pay({ month, employeeId: ali })), 'PAYROLL_DONE');
+  assert.equal(tryCode(() => s.employees.addMove({ employeeId: ali, kind: 'bonus', amount: 1, month })), 'PAYROLL_DONE');
+  assert.equal(s.employees.payroll({ month }).rows.find((r) => r.employee_id === ali).paid, true);
+  const salaries = s.expenses.list({}).filter((e) => e.amount === 520000);
+  assert.equal(salaries.length, 1);
+  s.employees.unpay({ month, employeeId: ali });
+  assert.equal(s.expenses.list({}).filter((e) => e.amount === 520000).length, 0);
+  // Cashiers can punch but not see salaries.
+  s.users.save({ name: 'Cash', username: 'c', pin: '1111', role: 'cashier' });
+  s.auth.logout(); s.auth.login({ username: 'c', pin: '1111' });
+  assert.equal(s.employees.list()[0].salary, null);
+  assert.equal(s.employees.punch({ employeeId: day }).action, 'in');
+  assert.equal(tryCode(() => s.employees.payroll({ month })), 'FORBIDDEN');
+});

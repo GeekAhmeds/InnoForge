@@ -8,6 +8,7 @@ import Support from '../components/Support.jsx';
 import { UpdatePanel } from '../components/Updates.jsx';
 import KitchenSettings from '../components/Kitchen.jsx';
 import Devices from '../components/Devices.jsx';
+import { Coupons } from '../components/Coupons.jsx';
 
 const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'data', 'support'];
 // Which permission opens each tab.
@@ -28,7 +29,7 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'audit' && <AuditLog />}
       {tab === 'priceLists' && <PriceLists />}
-      {tab === 'promos' && <><Promotions /><Loyalty /></>}
+      {tab === 'promos' && <><Promotions /><Coupons /><Loyalty /></>}
       {tab === 'tables' && <Tables />}
       {tab === 'kitchen' && <KitchenSettings />}
       {tab === 'devices' && <Devices />}
@@ -248,7 +249,7 @@ function Users() {
 }
 
 // Detail fields holding money (stored in minor units) and how to label every field.
-const AUDIT_MONEY = new Set(['amount', 'discount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to', 'financed']);
+const AUDIT_MONEY = new Set(['amount', 'discount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to', 'financed', 'net']);
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6];
 

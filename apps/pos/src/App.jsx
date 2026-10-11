@@ -17,6 +17,7 @@ import Floor from './pages/Floor.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Delivery from './pages/Delivery.jsx';
 import Treasury from './pages/Treasury.jsx';
+import Employees from './pages/Employees.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { UpdateBanner } from './components/Updates.jsx';
@@ -47,6 +48,7 @@ const NAV = [
   { id: 'products', icon: '📦', perm: 'products' },
   { id: 'purchases', icon: '🚚', perm: 'purchases' },
   { id: 'reports', icon: '📊', perm: 'reports' },
+  { id: 'employees', icon: '🧑‍💼' },
   { id: 'shift', icon: '⏱' },
   { id: 'settings', icon: '⚙', perm: ['settings', 'users', 'audit', 'backup'] },
 ];
@@ -123,7 +125,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     // Restaurants also get the delivery board right after the floor.
     if (screens.includes('restaurant')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
     const nav = [...sellNav, ...NAV.filter((n) => !n.perm || [].concat(n.perm).some((p) => user.perms?.[p]))];
-    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

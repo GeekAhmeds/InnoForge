@@ -370,7 +370,13 @@ export default function Pos() {
 
         <div className="totals">
           <Row label={t('pos.subtotal')} value={m(quote?.subtotal)} />
-          <Row label={t('pos.discount')} value={quote?.discount ? '− ' + m(quote.discount) : m(0)} onClick={() => cart.items.length && setModal({ kind: 'discount' })} link />
+          <Row label={t('pos.discount')} value={quote?.discount - (quote?.coupon_discount || 0) ? '− ' + m(quote.discount - (quote.coupon_discount || 0)) : m(0)} onClick={() => cart.items.length && setModal({ kind: 'discount' })} link />
+          {cart.coupon_code && (
+            <div className="trow coupon-row">
+              <span>🎟 {t('coupon.coupon')} <b dir="ltr">{cart.coupon_code}</b> <button className="ghost sm" title={t('coupon.remove')} onClick={() => setCart((c) => ({ ...c, coupon_code: '' }))}>✕</button></span>
+              <span className="promo">{quote?.coupon_discount ? '− ' + m(quote.coupon_discount) : '…'}</span>
+            </div>
+          )}
           {quote?.service ? <Row label={`${t('pos.service')} (${settings.service_rate}%)`} value={m(quote.service)} /> : null}
           {quote?.delivery_fee ? <Row label={t('delivery.fee')} value={m(quote.delivery_fee)} /> : null}
           {settings.tax_rate ? <Row label={`${t('pos.tax')} (${settings.tax_rate}%)`} value={m(quote?.tax)} /> : null}
@@ -416,6 +422,7 @@ export default function Pos() {
           current={cart.discount}
           onClose={() => setModal(null)}
           onSave={(discount) => { setCart((c) => ({ ...c, discount })); setModal(null); }}
+          onCoupon={(code) => { setCart((c) => ({ ...c, coupon_code: code })); setModal(null); }}
         />
       )}
       {modal?.kind === 'customer' && (
@@ -457,8 +464,8 @@ export default function Pos() {
           total={quote.total}
           customer={modal.customer}
           onClose={() => { setModal(null); focusSearch(); }}
-          onPay={(payments, printReceipt, redeemPoints) => run(async () => {
-            const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval, redeem_points: redeemPoints || 0 }));
+          onPay={(payments, printReceipt, redeemPoints, giftCard = null) => run(async () => {
+            const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval, redeem_points: redeemPoints || 0, gift_card: giftCard }));
             setModal(null);
             notify(t('pay.done', { n: order.invoice_no }));
             if (printReceipt) {
@@ -582,10 +589,15 @@ function LineModal({ item, onClose, onSave, onRemove }) {
   );
 }
 
-function DiscountModal({ subtotal, current, onClose, onSave }) {
-  const { t, settings } = useApp();
+function DiscountModal({ subtotal, current, onClose, onSave, onCoupon }) {
+  const { t, tErr, settings } = useApp();
   const [mode, setMode] = useState('amount');
   const [value, setValue] = useState(current ? fromMinor(current, settings.decimals) : '');
+  const [code, setCode] = useState('');
+  const [codeErr, setCodeErr] = useState('');
+  const applyCoupon = async () => {
+    try { const c = await api.coupons.check(code); onCoupon(c.code); } catch (err) { setCodeErr(tErr(err)); }
+  };
   const compute = () => (mode === 'percent' ? Math.round((subtotal * (Number(value) || 0)) / 100) : toMinor(value, settings.decimals));
   return (
     <Modal
@@ -606,6 +618,14 @@ function DiscountModal({ subtotal, current, onClose, onSave }) {
         <input className="xl" autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
         <p className="muted">= {formatMoney(compute(), settings)}</p>
       </form>
+      <div className="coupon-box">
+        <label>🎟 {t('coupon.haveCode')}</label>
+        <div className="row">
+          <input dir="ltr" className="mono" value={code} placeholder="EID2026" onChange={(e) => { setCode(e.target.value.toUpperCase()); setCodeErr(''); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); } }} />
+          <button type="button" disabled={!code.trim()} onClick={applyCoupon}>{t('coupon.apply')}</button>
+        </div>
+        {codeErr && <p className="warn small">{codeErr}</p>}
+      </div>
     </Modal>
   );
 }
@@ -727,7 +747,7 @@ function HeldModal({ onClose, onPick }) {
 const METHODS = ['cash', 'card', 'wallet'];
 
 function PayModal({ total, customer, onClose, onPay }) {
-  const { t, settings } = useApp();
+  const { t, tErr, settings } = useApp();
   const d = settings.decimals;
   const [amounts, setAmounts] = useState({ cash: fromMinor(total, d), card: '', wallet: '' });
   const [active, setActive] = useState('cash');
@@ -738,7 +758,10 @@ function PayModal({ total, customer, onClose, onPay }) {
   const loyaltyOn = settings.loyalty_enabled && customer;
   const [redeem, setRedeem] = useState(0);
   const pointsValue = Math.round(redeem * (settings.loyalty_point_value || 0));
-  const paid = METHODS.reduce((s, k) => s + toMinor(amounts[k], d), 0) + pointsValue;
+  // Gift card: looked up by code, then pays up to its balance.
+  const [gift, setGift] = useState(null); // { open, code, card, amount, err }
+  const giftValue = gift?.card ? Math.min(gift.amount, gift.card.balance) : 0;
+  const paid = METHODS.reduce((s, k) => s + toMinor(amounts[k], d), 0) + pointsValue + giftValue;
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const m = (v) => formatMoney(v, settings);
@@ -766,7 +789,7 @@ function PayModal({ total, customer, onClose, onPay }) {
   async function submit() {
     if (!canComplete) return;
     setBusy(true);
-    await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt, redeem);
+    await onPay(METHODS.map((method) => ({ method, amount: toMinor(amounts[method], d) })).filter((p) => p.amount > 0), printReceipt, redeem, giftValue > 0 ? { code: gift.card.code, amount: giftValue } : null);
     setBusy(false);
   }
 
@@ -793,6 +816,34 @@ function PayModal({ total, customer, onClose, onPay }) {
               setRedeem(max);
               setAmounts((a) => ({ ...a, cash: fromMinor(Math.max(0, total - Math.round(max * settings.loyalty_point_value)), d) }));
             }}>{t('loyalty.redeem')}</button>}
+        </div>
+      )}
+      {!gift?.open ? (
+        <button type="button" className="ghost sm gift-toggle" onClick={() => setGift({ open: true, code: '', card: null, amount: 0, err: '' })}>🎁 {t('gift.payWith')}</button>
+      ) : (
+        <div className="pay-customer gift">
+          {gift.card ? (
+            <>
+              <span>🎁 <b dir="ltr">{gift.card.code}</b> · {t('gift.balance')}: {m(gift.card.balance)} → <b>{m(giftValue)}</b></span>
+              <button type="button" onClick={() => setGift(null)}>✕</button>
+            </>
+          ) : (
+            <form className="row" onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const card = await api.giftCards.lookup(gift.code);
+                const amount = Math.min(card.balance, Math.max(0, total - pointsValue));
+                setGift({ ...gift, card, amount, err: '' });
+                // The rest (if any) stays on cash.
+                setAmounts((a) => ({ ...a, cash: fromMinor(Math.max(0, total - pointsValue - amount), d), card: '', wallet: '' }));
+              } catch (err) { setGift({ ...gift, err: tErr(err) }); }
+            }}>
+              <input autoFocus dir="ltr" className="mono" placeholder={t('gift.code')} value={gift.code} onChange={(e) => setGift({ ...gift, code: e.target.value, err: '' })} />
+              <button type="submit" disabled={!gift.code.trim()}>{t('gift.check')}</button>
+              <button type="button" className="ghost" onClick={() => setGift(null)}>✕</button>
+              {gift.err && <span className="warn small">{gift.err}</span>}
+            </form>
+          )}
         </div>
       )}
       {customer && (

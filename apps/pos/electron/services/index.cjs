@@ -704,8 +704,11 @@ function createServices(db) {
     const creditSales = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE shift_id = ? AND status = 'completed'").get(shiftId).t;
     const collections = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM customer_payments WHERE shift_id = ? AND method NOT IN ('return', 'discount') AND status = 'posted' GROUP BY method").all(shiftId));
     const customerCash = collections.find((c) => c.method === 'cash')?.amount || 0;
-    const expectedCash = shift.opening_cash + cashSales + customerCash - refunds.cash - supplierCash - expenseCash;
-    return { shift, sales, byMethod, refunds, supplierCash, expenseCash, creditSales, collections, customerCash, expectedCash };
+    // Gift cards sold / topped up during the shift (money in, not a sale).
+    const giftSales = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM gift_card_moves WHERE shift_id = ? AND kind IN ('issue', 'topup') GROUP BY method").all(shiftId));
+    const giftCash = giftSales.find((g) => g.method === 'cash')?.amount || 0;
+    const expectedCash = shift.opening_cash + cashSales + customerCash + giftCash - refunds.cash - supplierCash - expenseCash;
+    return { shift, sales, byMethod, refunds, supplierCash, expenseCash, creditSales, collections, customerCash, giftSales, giftCash, expectedCash };
   }
 
   const shifts = {
@@ -925,13 +928,24 @@ function createServices(db) {
     // Delivery: the zone's fee (or a typed fee), added after tax and never discounted.
     const zone = orderType === 'delivery' && int(cart.zone_id) ? db.prepare('SELECT * FROM delivery_zones WHERE id = ? AND active = 1').get(int(cart.zone_id)) : null;
     const deliveryFee = orderType === 'delivery' ? (zone ? zone.fee : Math.max(0, int(cart.delivery_fee))) : 0;
+    // A coupon code is an extra invoice discount (validated here, counted at checkout).
+    const coupon = str(cart.coupon_code) ? findCoupon(cart.coupon_code) : null;
+    let couponDiscount = 0;
+    if (coupon) {
+      const net = items.reduce((sum, i) => sum + Math.round(i.unit_price * i.qty) - i.discount, 0) - Math.max(0, int(cart.discount));
+      if (net < coupon.min_total) throw new PosError('COUPON_MIN_TOTAL', String(coupon.min_total));
+      couponDiscount = Math.max(0, Math.min(net, coupon.kind === 'percent' ? Math.round((net * Math.min(100, coupon.value)) / 100) : coupon.value));
+    }
     const totals = computeTotals(items, {
-      discount: int(cart.discount),
+      discount: int(cart.discount) + couponDiscount,
       taxRate: s.tax_rate,
       pricesIncludeTax: s.prices_include_tax,
       serviceRate: orderType === 'dine_in' ? s.service_rate : 0,
     });
-    return { settings: s, orderType, priceListId, customerPct, ...totals, total: totals.total + deliveryFee, delivery_fee: deliveryFee, zone_id: zone?.id ?? null };
+    return {
+      settings: s, orderType, priceListId, customerPct, ...totals, total: totals.total + deliveryFee, delivery_fee: deliveryFee, zone_id: zone?.id ?? null,
+      coupon_id: coupon?.id ?? null, coupon_code: coupon?.code ?? '', coupon_discount: Math.min(couponDiscount, totals.discount),
+    };
   }
 
   /**
@@ -941,7 +955,7 @@ function createServices(db) {
   function authorizeCart(priced, approval, { credit = 0 } = {}) {
     const gross = priced.lines.reduce((sum, l) => sum + Math.round(l.unit_price * l.qty), 0);
     // Automatic promotions are not the cashier's discount, so only manual ones count here.
-    const discount = priced.lines.reduce((sum, l) => sum + Math.min(l.manual_discount, Math.round(l.unit_price * l.qty)), 0) + priced.discount;
+    const discount = priced.lines.reduce((sum, l) => sum + Math.min(l.manual_discount, Math.round(l.unit_price * l.qty)), 0) + priced.discount - (priced.coupon_discount || 0);
     const pct = gross > 0 ? (discount / gross) * 100 : 0;
     const granted = [];
     if (discount > 0) {
@@ -983,6 +997,8 @@ function createServices(db) {
       tax: priced.tax,
       service: priced.service,
       total: priced.total,
+      coupon_id: priced.coupon_id,
+      coupon_discount: priced.coupon_discount || 0,
     };
     let orderId = cart.id || null;
     if (orderId) {
@@ -1111,6 +1127,12 @@ function createServices(db) {
           if (value > priced.total) throw new PosError('POINTS_EXCEED_TOTAL');
           payments.push({ method: 'points', amount: value });
         }
+        // A gift card pays like any other method, out of its balance.
+        const gift = int(cart.gift_card?.amount) > 0 ? cardByCode(cart.gift_card.code) : null;
+        if (gift) {
+          if (int(cart.gift_card.amount) > gift.balance) throw new PosError('GIFT_CARD_BALANCE', String(gift.balance));
+          payments.push({ method: 'gift_card', amount: int(cart.gift_card.amount) });
+        }
         const tendered = payments.reduce((s, p) => s + p.amount, 0);
         const nonCash = payments.filter((p) => p.method !== 'cash').reduce((s, p) => s + p.amount, 0);
         if (nonCash > priced.total) throw new PosError('NON_CASH_OVERPAY');
@@ -1151,6 +1173,17 @@ function createServices(db) {
         }
 
         for (const l of priced.lines) consumeStock(l.product_id, l.qty, l.unit_factor, l.modifiers, -1, 'sale', orderId, u.id);
+        if (gift) {
+          const used = payments.find((p) => p.method === 'gift_card').amount;
+          db.prepare('UPDATE gift_cards SET balance = balance - ? WHERE id = ?').run(used, gift.id);
+          db.prepare("INSERT INTO gift_card_moves (card_id, kind, amount, order_id, shift_id, user_id) VALUES (?, 'redeem', ?, ?, ?, ?)").run(gift.id, -used, orderId, shift.id, u.id);
+        }
+        if (priced.coupon_id) {
+          // Re-checked inside the transaction so a limited coupon cannot be over-used.
+          const c = db.prepare('SELECT max_uses, used FROM coupons WHERE id = ?').get(priced.coupon_id);
+          if (c.max_uses > 0 && c.used >= c.max_uses) throw new PosError('COUPON_USED_UP');
+          db.prepare('UPDATE coupons SET used = used + 1 WHERE id = ?').run(priced.coupon_id);
+        }
         if (priced.orderType === 'delivery') db.prepare("UPDATE orders SET delivery_status = 'delivered', delivered_at = datetime('now', 'localtime') WHERE id = ?").run(orderId);
         if (loyalty) {
           // Points are earned on what the customer actually pays for (not on points spent).
@@ -2578,6 +2611,298 @@ function createServices(db) {
     };
   }
 
+  // ---------- coupons & gift cards ----------
+  function findCoupon(code) {
+    const c = db.prepare('SELECT * FROM coupons WHERE code = ?').get(str(code));
+    const today = new Date().toLocaleDateString('en-CA');
+    if (!c || !c.active) throw new PosError('COUPON_INVALID');
+    if ((c.valid_from && today < c.valid_from) || (c.valid_to && today > c.valid_to)) throw new PosError('COUPON_EXPIRED');
+    if (c.max_uses > 0 && c.used >= c.max_uses) throw new PosError('COUPON_USED_UP');
+    return c;
+  }
+  function cardByCode(code) {
+    const card = db.prepare('SELECT * FROM gift_cards WHERE code = ?').get(str(code).replace(/\s+/g, ''));
+    if (!card || !card.active) throw new PosError('GIFT_CARD_INVALID');
+    if (card.expires && card.expires < new Date().toLocaleDateString('en-CA')) throw new PosError('GIFT_CARD_EXPIRED');
+    return card;
+  }
+
+  const coupons = {
+    list() {
+      requireUser();
+      return plainAll(db.prepare(`SELECT c.*, (SELECT COALESCE(SUM(o.coupon_discount), 0) FROM orders o WHERE o.coupon_id = c.id AND o.status = 'completed') AS given
+        FROM coupons c ORDER BY c.active DESC, c.id DESC`).all());
+    },
+    save(c = {}) {
+      requirePerm('settings');
+      const code = str(c.code).toUpperCase().replace(/\s+/g, '');
+      if (!code) throw new PosError('NAME_REQUIRED');
+      if (!['percent', 'amount'].includes(c.kind)) throw new PosError('INVALID_AMOUNT');
+      const value = Math.max(0, int(c.value));
+      if (!value || (c.kind === 'percent' && value > 100)) throw new PosError('INVALID_AMOUNT');
+      if (db.prepare('SELECT 1 FROM coupons WHERE code = ? AND id != ?').get(code, c.id || 0)) throw new PosError('DUPLICATE_CODE');
+      const vals = [code, c.kind, value, Math.max(0, int(c.min_total)), Math.max(0, int(c.max_uses)), str(c.valid_from) || null, str(c.valid_to) || null, str(c.notes), c.active === false ? 0 : 1];
+      if (c.id) {
+        db.prepare('UPDATE coupons SET code = ?, kind = ?, value = ?, min_total = ?, max_uses = ?, valid_from = ?, valid_to = ?, notes = ?, active = ? WHERE id = ?').run(...vals, c.id);
+        return c.id;
+      }
+      const id = Number(db.prepare('INSERT INTO coupons (code, kind, value, min_total, max_uses, valid_from, valid_to, notes, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      audit('coupon_add', { entity: 'coupon', entityId: id, details: { code, kind: c.kind, value } });
+      return id;
+    },
+    /** Checks a code at the till (the discount itself is worked out by the cart quote). */
+    check(code) {
+      requireUser();
+      const c = findCoupon(code);
+      return { code: c.code, kind: c.kind, value: c.value, min_total: c.min_total };
+    },
+  };
+
+  const newCardCode = () => {
+    for (;;) {
+      const code = String(crypto.randomInt(10 ** 11, 10 ** 12));
+      if (!db.prepare('SELECT 1 FROM gift_cards WHERE code = ?').get(code)) return code;
+    }
+  };
+  const getCard = (id) => {
+    const card = plain(db.prepare('SELECT g.*, c.name AS customer_name FROM gift_cards g LEFT JOIN customers c ON c.id = g.customer_id WHERE g.id = ?').get(id));
+    if (!card) throw new PosError('NOT_FOUND');
+    card.moves = plainAll(db.prepare(`SELECT m.*, o.invoice_no, u.name AS user_name FROM gift_card_moves m LEFT JOIN orders o ON o.id = m.order_id JOIN users u ON u.id = m.user_id
+      WHERE m.card_id = ? ORDER BY m.id DESC`).all(id));
+    return card;
+  };
+
+  const giftCards = {
+    list({ search = '' } = {}) {
+      requireUser();
+      const q = `%${str(search)}%`;
+      return plainAll(db.prepare(`SELECT g.*, c.name AS customer_name FROM gift_cards g LEFT JOIN customers c ON c.id = g.customer_id
+        WHERE g.code LIKE ? OR COALESCE(c.name, '') LIKE ? ORDER BY g.id DESC LIMIT 500`).all(q, q));
+    },
+    summary() {
+      requireUser();
+      return plain(db.prepare('SELECT COUNT(*) AS cards, COALESCE(SUM(balance), 0) AS outstanding FROM gift_cards WHERE active = 1').get());
+    },
+    /** Looks a card up by its code (balance shown at the till). */
+    lookup(code) {
+      requireUser();
+      return getCard(cardByCode(code).id);
+    },
+    get(id) {
+      requireUser();
+      return getCard(int(id));
+    },
+    /** Sells a new card: the money goes into the drawer (cash) or is recorded by method. */
+    issue({ amount, method = 'cash', code = '', customerId = null, expires = '' } = {}) {
+      const u = requireUser();
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+      const shift = currentShift();
+      if (!shift) throw new PosError('NO_OPEN_SHIFT');
+      const cardCode = str(code).replace(/\s+/g, '') || newCardCode();
+      if (db.prepare('SELECT 1 FROM gift_cards WHERE code = ?').get(cardCode)) throw new PosError('DUPLICATE_CODE');
+      return transaction(db, () => {
+        const id = Number(db.prepare('INSERT INTO gift_cards (code, initial, balance, customer_id, expires, user_id) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(cardCode, value, value, int(customerId) || null, str(expires) || null, u.id).lastInsertRowid);
+        db.prepare("INSERT INTO gift_card_moves (card_id, kind, amount, method, shift_id, user_id) VALUES (?, 'issue', ?, ?, ?, ?)").run(id, value, method, shift.id, u.id);
+        audit('gift_card_issue', { entity: 'gift_card', entityId: id, details: { code: cardCode, amount: value, method } });
+        return getCard(id);
+      });
+    },
+    topup({ id, amount, method = 'cash' } = {}) {
+      const u = requireUser();
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+      const shift = currentShift();
+      if (!shift) throw new PosError('NO_OPEN_SHIFT');
+      const card = getCard(int(id));
+      if (!card.active) throw new PosError('GIFT_CARD_INVALID');
+      return transaction(db, () => {
+        db.prepare('UPDATE gift_cards SET balance = balance + ? WHERE id = ?').run(value, card.id);
+        db.prepare("INSERT INTO gift_card_moves (card_id, kind, amount, method, shift_id, user_id) VALUES (?, 'topup', ?, ?, ?, ?)").run(card.id, value, method, shift.id, u.id);
+        audit('gift_card_topup', { entity: 'gift_card', entityId: card.id, details: { code: card.code, amount: value, method } });
+        return getCard(card.id);
+      });
+    },
+    setActive({ id, active }) {
+      requirePerm('customers_edit');
+      db.prepare('UPDATE gift_cards SET active = ? WHERE id = ?').run(active ? 1 : 0, int(id));
+      audit('gift_card_status', { entity: 'gift_card', entityId: int(id), details: { active: !!active } });
+      return getCard(int(id));
+    },
+  };
+
+  // ---------- employees ----------
+  const monthOf = (m) => (/^\d{4}-\d{2}$/.test(str(m)) ? str(m) : new Date().toLocaleDateString('en-CA').slice(0, 7));
+  const nowTime = () => new Date().toTimeString().slice(0, 5);
+  const staffCategory = (kind) => ({
+    advance: getSettings().language === 'en' ? 'Staff advances' : 'سلف موظفين',
+    salary: getSettings().language === 'en' ? 'Salaries' : 'مرتبات',
+  })[kind];
+
+  /** What one employee is owed for a month (base, absence, bonuses, deductions, advances). */
+  function payslip(e, month) {
+    const att = db.prepare("SELECT SUM(status = 'present') AS present, SUM(status = 'absent') AS absent, SUM(status = 'leave') AS leave FROM attendance WHERE employee_id = ? AND day LIKE ?").get(e.id, `${month}-%`);
+    const sum = (kind) => db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM employee_moves WHERE employee_id = ? AND month = ? AND kind = ?').get(e.id, month, kind).t;
+    const present = att.present || 0;
+    const absent = att.absent || 0;
+    const base = e.pay_type === 'daily' ? e.salary * present : e.salary;
+    // Monthly staff lose a 30th of the salary for each day marked absent (leave is paid).
+    const absence = e.pay_type === 'daily' ? 0 : Math.round((e.salary / 30) * absent);
+    const bonuses = sum('bonus');
+    const deductions = sum('deduction');
+    const advances = sum('advance');
+    return { employee_id: e.id, name: e.name, job: e.job, pay_type: e.pay_type, salary: e.salary, days: present, absent, leave: att.leave || 0, base, absence, bonuses, deductions, advances, net: base - absence + bonuses - deductions - advances };
+  }
+
+  const employees = {
+    list({ includeInactive = false } = {}) {
+      requireUser();
+      const today = new Date().toLocaleDateString('en-CA');
+      const showPay = can('employees');
+      return plainAll(db.prepare(`SELECT e.*, a.status AS today_status, a.check_in, a.check_out FROM employees e
+        LEFT JOIN attendance a ON a.employee_id = e.id AND a.day = ? ${includeInactive ? '' : 'WHERE e.active = 1'} ORDER BY e.name`).all(today))
+        .map((e) => (showPay ? e : { ...e, salary: null, notes: '' }));
+    },
+    save(e = {}) {
+      requirePerm('employees');
+      if (!str(e.name)) throw new PosError('NAME_REQUIRED');
+      const vals = [str(e.name), str(e.phone), str(e.job), int(e.user_id) || null, e.pay_type === 'daily' ? 'daily' : 'monthly', Math.max(0, int(e.salary)), str(e.hired_at) || null, str(e.notes), e.active === false ? 0 : 1];
+      if (e.id) {
+        const old = db.prepare('SELECT salary FROM employees WHERE id = ?').get(e.id);
+        if (!old) throw new PosError('NOT_FOUND');
+        db.prepare('UPDATE employees SET name = ?, phone = ?, job = ?, user_id = ?, pay_type = ?, salary = ?, hired_at = ?, notes = ?, active = ? WHERE id = ?').run(...vals, e.id);
+        if (old.salary !== vals[5]) audit('salary_change', { entity: 'employee', entityId: e.id, details: { name: vals[0], from: old.salary, to: vals[5] } });
+        return e.id;
+      }
+      return Number(db.prepare('INSERT INTO employees (name, phone, job, user_id, pay_type, salary, hired_at, notes, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+    },
+    /** Check-in, then check-out, for today (the shop's terminal: any logged-in user). */
+    punch({ employeeId } = {}) {
+      requireUser();
+      const e = db.prepare('SELECT id, name FROM employees WHERE id = ? AND active = 1').get(int(employeeId));
+      if (!e) throw new PosError('NOT_FOUND');
+      const today = new Date().toLocaleDateString('en-CA');
+      const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND day = ?').get(e.id, today);
+      if (!row) {
+        db.prepare("INSERT INTO attendance (employee_id, day, status, check_in) VALUES (?, ?, 'present', ?)").run(e.id, today, nowTime());
+        return { action: 'in', time: nowTime(), name: e.name };
+      }
+      if (row.status !== 'present' || !row.check_in) {
+        db.prepare("UPDATE attendance SET status = 'present', check_in = ? WHERE id = ?").run(nowTime(), row.id);
+        return { action: 'in', time: nowTime(), name: e.name };
+      }
+      if (row.check_out) throw new PosError('ALREADY_CHECKED_OUT');
+      db.prepare('UPDATE attendance SET check_out = ? WHERE id = ?').run(nowTime(), row.id);
+      return { action: 'out', time: nowTime(), name: e.name };
+    },
+    /** The month's attendance as a grid: one row per employee, one cell per day. */
+    attendance({ month } = {}) {
+      requirePerm('employees');
+      const m = monthOf(month);
+      const [y, mo] = m.split('-').map(Number);
+      const days = new Date(y, mo, 0).getDate();
+      const rows = db.prepare('SELECT id, name, job FROM employees WHERE active = 1 ORDER BY name').all().map((e) => {
+        const by = {};
+        for (const a of db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND day LIKE ?').all(e.id, `${m}-%`)) by[Number(a.day.slice(8))] = plain(a);
+        const count = (st) => Object.values(by).filter((a) => a.status === st).length;
+        return { ...plain(e), by, present: count('present'), absent: count('absent'), leave: count('leave') };
+      });
+      return { month: m, days, rows };
+    },
+    /** Sets or corrects one day (status, times); an empty status clears it. */
+    setDay({ employeeId, day, status = 'present', checkIn = '', checkOut = '', notes = '' } = {}) {
+      requirePerm('employees');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(str(day))) throw new PosError('INVALID_DATE');
+      if (!status) {
+        db.prepare('DELETE FROM attendance WHERE employee_id = ? AND day = ?').run(int(employeeId), str(day));
+        return true;
+      }
+      if (!['present', 'absent', 'leave'].includes(status)) throw new PosError('INVALID_STATUS');
+      db.prepare(`INSERT INTO attendance (employee_id, day, status, check_in, check_out, notes) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(employee_id, day) DO UPDATE SET status = excluded.status, check_in = excluded.check_in, check_out = excluded.check_out, notes = excluded.notes`)
+        .run(int(employeeId), str(day), status, str(checkIn) || null, str(checkOut) || null, str(notes));
+      return true;
+    },
+    /** Advance (money paid out now — drawer or account — and taken back from the salary), bonus or deduction. */
+    addMove({ employeeId, kind, amount, month, notes = '', fromDrawer = true, accountId = null, approval = null } = {}) {
+      const u = requirePerm('employees').user;
+      if (!['advance', 'bonus', 'deduction'].includes(kind)) throw new PosError('INVALID_STATUS');
+      const value = int(amount);
+      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
+      const e = db.prepare('SELECT * FROM employees WHERE id = ?').get(int(employeeId));
+      if (!e) throw new PosError('NOT_FOUND');
+      const m = monthOf(month);
+      if (db.prepare('SELECT 1 FROM payrolls WHERE month = ? AND employee_id = ?').get(m, e.id)) throw new PosError('PAYROLL_DONE');
+      return transaction(db, () => {
+        const expenseId = kind === 'advance' ? expenses.create({ category: staffCategory('advance'), amount: value, notes: `${e.name}${str(notes) ? ` — ${str(notes)}` : ''}`, fromDrawer, accountId, approval }).id : null;
+        const id = Number(db.prepare('INSERT INTO employee_moves (employee_id, kind, amount, month, notes, expense_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(e.id, kind, value, m, str(notes), expenseId, u.id).lastInsertRowid);
+        audit(`employee_${kind}`, { entity: 'employee', entityId: e.id, details: { name: e.name, amount: value, month: m } });
+        return id;
+      });
+    },
+    moves({ month, employeeId = null } = {}) {
+      requirePerm('employees');
+      const m = monthOf(month);
+      return plainAll(db.prepare(`SELECT x.*, e.name, u.name AS user_name FROM employee_moves x JOIN employees e ON e.id = x.employee_id JOIN users u ON u.id = x.user_id
+        WHERE x.month = ? ${employeeId ? 'AND x.employee_id = ?' : ''} ORDER BY x.id DESC`).all(...[m, ...(employeeId ? [int(employeeId)] : [])]));
+    },
+    removeMove(id) {
+      requirePerm('employees');
+      const mv = db.prepare('SELECT * FROM employee_moves WHERE id = ?').get(int(id));
+      if (!mv) throw new PosError('NOT_FOUND');
+      if (db.prepare('SELECT 1 FROM payrolls WHERE month = ? AND employee_id = ?').get(mv.month, mv.employee_id)) throw new PosError('PAYROLL_DONE');
+      transaction(db, () => {
+        db.prepare('DELETE FROM employee_moves WHERE id = ?').run(mv.id);
+        if (mv.expense_id) expenses.remove(mv.expense_id);
+      });
+      return true;
+    },
+    /** The month's payroll: computed for unpaid employees, as saved for paid ones. */
+    payroll({ month } = {}) {
+      requirePerm('employees');
+      const m = monthOf(month);
+      const paid = new Map(db.prepare('SELECT * FROM payrolls WHERE month = ?').all(m).map((p) => [p.employee_id, plain(p)]));
+      const staff = db.prepare(`SELECT * FROM employees WHERE active = 1 OR id IN (SELECT employee_id FROM payrolls WHERE month = ?) ORDER BY name`).all(m);
+      const rows = staff.map((e) => {
+        const p = paid.get(e.id);
+        return p ? { ...p, name: e.name, job: e.job, pay_type: e.pay_type, salary: e.salary, paid: true } : { ...payslip(e, m), paid: false };
+      });
+      return { month: m, rows, total: rows.reduce((sum, r) => sum + r.net, 0) };
+    },
+    /** Pays (closes) one employee's month: the net goes out as a salaries expense. */
+    pay({ month, employeeId, fromDrawer = false, accountId = null, approval = null } = {}) {
+      const u = requirePerm('employees').user;
+      const m = monthOf(month);
+      const e = db.prepare('SELECT * FROM employees WHERE id = ?').get(int(employeeId));
+      if (!e) throw new PosError('NOT_FOUND');
+      if (db.prepare('SELECT 1 FROM payrolls WHERE month = ? AND employee_id = ?').get(m, e.id)) throw new PosError('PAYROLL_DONE');
+      const slip = payslip(e, m);
+      return transaction(db, () => {
+        const expenseId = slip.net > 0 ? expenses.create({ category: staffCategory('salary'), amount: slip.net, notes: `${e.name} — ${m}`, fromDrawer, accountId, approval }).id : null;
+        const id = Number(db.prepare(`INSERT INTO payrolls (month, employee_id, days, absent, base, absence, bonuses, deductions, advances, net, expense_id, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(m, e.id, slip.days, slip.absent, slip.base, slip.absence, slip.bonuses, slip.deductions, slip.advances, slip.net, expenseId, u.id).lastInsertRowid);
+        audit('payroll_pay', { entity: 'employee', entityId: e.id, details: { name: e.name, month: m, net: slip.net } });
+        return plain(db.prepare('SELECT * FROM payrolls WHERE id = ?').get(id));
+      });
+    },
+    /** Re-opens a paid month (the salary expense is removed). */
+    unpay({ month, employeeId } = {}) {
+      requirePerm('employees');
+      const p = db.prepare('SELECT * FROM payrolls WHERE month = ? AND employee_id = ?').get(monthOf(month), int(employeeId));
+      if (!p) throw new PosError('NOT_FOUND');
+      transaction(db, () => {
+        db.prepare('DELETE FROM payrolls WHERE id = ?').run(p.id);
+        if (p.expense_id) expenses.remove(p.expense_id);
+        audit('payroll_undo', { entity: 'employee', entityId: p.employee_id, details: { month: p.month, net: p.net } });
+      });
+      return true;
+    },
+  };
+
   const rebates = {
     list({ supplierId = null, status = '' } = {}) {
       requirePerm('purchases');
@@ -3132,7 +3457,7 @@ function createServices(db) {
 
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
   };
 }
 

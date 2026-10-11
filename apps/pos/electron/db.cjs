@@ -767,6 +767,104 @@ const MIGRATIONS = [
   );
   CREATE INDEX idx_installments_plan ON installments(plan_id, seq);
   `,
+  // v16: employees (attendance, advances, bonuses/deductions, monthly payroll);
+  // coupon codes and prepaid gift cards.
+  `
+  CREATE TABLE employees (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    phone      TEXT NOT NULL DEFAULT '',
+    job        TEXT NOT NULL DEFAULT '',
+    user_id    INTEGER REFERENCES users(id),
+    pay_type   TEXT NOT NULL DEFAULT 'monthly' CHECK (pay_type IN ('monthly', 'daily')),
+    salary     INTEGER NOT NULL DEFAULT 0, -- monthly salary, or the day rate for daily workers
+    hired_at   TEXT,
+    notes      TEXT NOT NULL DEFAULT '',
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE attendance (
+    id          INTEGER PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    day         TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'present' CHECK (status IN ('present', 'absent', 'leave')),
+    check_in    TEXT,
+    check_out   TEXT,
+    notes       TEXT NOT NULL DEFAULT '',
+    UNIQUE (employee_id, day)
+  );
+  -- advance (paid out now, deducted from the salary) | bonus | deduction, for a payroll month.
+  CREATE TABLE employee_moves (
+    id          INTEGER PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    kind        TEXT NOT NULL CHECK (kind IN ('advance', 'bonus', 'deduction')),
+    amount      INTEGER NOT NULL,
+    month       TEXT NOT NULL,
+    notes       TEXT NOT NULL DEFAULT '',
+    expense_id  INTEGER REFERENCES expenses(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE payrolls (
+    id          INTEGER PRIMARY KEY,
+    month       TEXT NOT NULL,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    days        REAL NOT NULL DEFAULT 0,
+    absent      REAL NOT NULL DEFAULT 0,
+    base        INTEGER NOT NULL,
+    absence     INTEGER NOT NULL DEFAULT 0,
+    bonuses     INTEGER NOT NULL DEFAULT 0,
+    deductions  INTEGER NOT NULL DEFAULT 0,
+    advances    INTEGER NOT NULL DEFAULT 0,
+    net         INTEGER NOT NULL,
+    expense_id  INTEGER REFERENCES expenses(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE (month, employee_id)
+  );
+
+  CREATE TABLE coupons (
+    id         INTEGER PRIMARY KEY,
+    code       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    kind       TEXT NOT NULL CHECK (kind IN ('percent', 'amount')),
+    value      INTEGER NOT NULL, -- percent, or minor units
+    min_total  INTEGER NOT NULL DEFAULT 0,
+    max_uses   INTEGER NOT NULL DEFAULT 0, -- 0 = unlimited
+    used       INTEGER NOT NULL DEFAULT 0,
+    valid_from TEXT,
+    valid_to   TEXT,
+    notes      TEXT NOT NULL DEFAULT '',
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  ALTER TABLE orders ADD COLUMN coupon_id INTEGER REFERENCES coupons(id);
+  ALTER TABLE orders ADD COLUMN coupon_discount INTEGER NOT NULL DEFAULT 0;
+
+  CREATE TABLE gift_cards (
+    id          INTEGER PRIMARY KEY,
+    code        TEXT NOT NULL UNIQUE,
+    initial     INTEGER NOT NULL,
+    balance     INTEGER NOT NULL,
+    customer_id INTEGER REFERENCES customers(id),
+    expires     TEXT,
+    active      INTEGER NOT NULL DEFAULT 1,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  -- issue / topup (money in: method + shift) | redeem (order) | refund (back onto the card).
+  CREATE TABLE gift_card_moves (
+    id         INTEGER PRIMARY KEY,
+    card_id    INTEGER NOT NULL REFERENCES gift_cards(id),
+    kind       TEXT NOT NULL,
+    amount     INTEGER NOT NULL,
+    method     TEXT NOT NULL DEFAULT '',
+    order_id   INTEGER REFERENCES orders(id),
+    shift_id   INTEGER REFERENCES shifts(id),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX idx_gift_moves_card ON gift_card_moves(card_id);
+  `,
 ];
 
 function openDatabase(file) {

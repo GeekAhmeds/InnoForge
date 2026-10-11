@@ -508,3 +508,30 @@ button.link { background: none; border: 0; padding: 0; color: var(--brand); text
 .wh-card.on { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft, #e8efff); }
 .wh-card.dim { opacity: .55; }
 .nowrap-head h3, .nowrap-head label { white-space: nowrap; }
+
+/* employees */
+.punch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-top: 10px; }
+.punch-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 14px; border: 1px solid var(--line); background: #fff; min-height: 120px; }
+.punch-card.in { border-color: var(--good); background: #ecfdf5; }
+.punch-card.out { opacity: .6; }
+.punch-card b { font-size: 16px; }
+.att-wrap { overflow-x: auto; }
+.att-grid th.c, .att-grid td.c { text-align: center; padding: 4px 3px; min-width: 24px; }
+.att-grid td.att { cursor: pointer; }
+.att-grid td.att:hover { background: var(--brand-soft, #eef4ff); }
+.att-grid td.att.present { color: var(--good); font-weight: bold; }
+.att-grid td.att.absent { color: #b91c1c; background: #fef2f2; font-weight: bold; }
+.att-grid td.att.leave { color: #92400e; background: #fffbeb; }
+.badge.mv-advance { background: #fef3c7; color: #92400e; }
+.badge.mv-bonus { background: #d1fae5; color: #065f46; }
+.badge.mv-deduction { background: #fee2e2; color: #991b1b; }
+.big-total { font-size: 28px; font-weight: bold; text-align: center; margin: 6px 0 12px; }
+
+/* coupons & gift cards */
+.coupon-box { border-top: 1px dashed var(--line); margin-top: 12px; padding-top: 10px; }
+.coupon-box label { font-size: 13px; color: var(--muted); }
+.coupon-row .ghost.sm { padding: 0 6px; }
+.gift-toggle { margin-bottom: 10px; }
+.pay-customer.gift { background: #fdf2f8; border: 1px solid #f9a8d4; }
+.gift-card-face { background: linear-gradient(135deg, #be185d, #7c3aed); color: #fff; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+.gift-card-face .code { font: bold 22px monospace; letter-spacing: 2px; direction: ltr; }

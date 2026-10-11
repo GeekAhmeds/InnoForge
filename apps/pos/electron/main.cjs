@@ -11,7 +11,7 @@ const { createKdsServer } = require('./kds-server.cjs');
 const { sendRaw, drawerKick } = require('./rawprint.cjs');
 
 // Only these namespaces are reachable from the renderer.
-const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations', 'purchaseOrders', 'modifiers', 'delivery', 'treasury', 'warehouses', 'installments'];
+const EXPOSED = ['settings', 'auth', 'users', 'categories', 'products', 'tables', 'shifts', 'orders', 'suppliers', 'purchases', 'expenses', 'customers', 'reports', 'auditLog', 'commissions', 'importer', 'priceLists', 'quotes', 'stockCounts', 'promotions', 'rebates', 'floor', 'kitchenStations', 'purchaseOrders', 'modifiers', 'delivery', 'treasury', 'warehouses', 'installments', 'coupons', 'giftCards', 'employees'];
 
 // Lets a portable install or tests keep data in a chosen folder.
 if (process.env.INNOFORGE_POS_DATA_DIR) app.setPath('userData', path.resolve(process.env.INNOFORGE_POS_DATA_DIR));

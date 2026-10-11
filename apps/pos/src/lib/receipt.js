@@ -1,6 +1,7 @@
 // Builds self-contained HTML documents for the thermal printer.
 import { formatMoney, formatQty } from './money.js';
 import { VENDOR } from './vendor.js';
+import { barcodeSvg } from './barcode.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Numbers, phones and dates inside RTL text must stay left-to-right.
@@ -64,7 +65,7 @@ export function receiptHtml(order, settings, t, lang) {
   <hr>
   <table>
     ${line(t('pos.subtotal'), m(order.subtotal))}
-    ${order.discount ? line(t('pos.discount'), '− ' + m(order.discount)) : ''}
+    ${order.discount ? line(order.coupon_discount ? `${t('pos.discount')} (🎟 ${t('coupon.coupon')} ${m(order.coupon_discount)})` : t('pos.discount'), '− ' + m(order.discount)) : ''}
     ${order.service ? line(t('pos.service'), m(order.service)) : ''}
     ${order.delivery_fee ? line(t('delivery.fee'), m(order.delivery_fee)) : ''}
     ${order.tax ? line(settings.prices_include_tax ? `${t('pos.tax')} (${t('receipt.taxIncluded')})` : t('pos.tax'), m(order.tax)) : ''}
@@ -139,6 +140,7 @@ export function shiftHtml(summary, settings, t, lang) {
     ${summary.supplierCash ? line(t('shift.supplierCash'), '− ' + m(summary.supplierCash)) : ''}
     ${summary.expenseCash ? line(t('shift.expenseCash'), '− ' + m(summary.expenseCash)) : ''}
     ${summary.customerCash ? line(t('shift.customerCash'), '+ ' + m(summary.customerCash)) : ''}
+    ${summary.giftCash ? line(t('shift.giftCash'), '+ ' + m(summary.giftCash)) : ''}
     ${summary.creditSales ? line(t('shift.creditSales'), m(summary.creditSales)) : ''}
   </table><hr><table>
     ${line(t('shift.expectedCash'), m(expectedCash), 'big')}
@@ -340,4 +342,36 @@ export function installmentsHtml(plan, settings, t, lang) {
   ${plan.notes ? `<p>${esc(plan.notes)}</p>` : ''}
   <div class="sign"><span>${t('inst.customerSign')}: ....................</span><span>${t('collect.signature')}: ....................</span></div>
   </body></html>`;
+}
+
+/** A4 payroll sheet for a month: one line per employee with what makes up the net pay. */
+export function payslipHtml(data, settings, t, lang) {
+  const m = (v) => (v ? formatMoney(v, settings) : '');
+  return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4 landscape; margin: 12mm; } body { font: 12px/1.5 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
+    h1 { font-size: 18px; margin: 0; } .muted { color: #555; } .head { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: start; } th { background: #eee; } .n { text-align: end; }
+  </style></head><body>
+  <div class="head"><div><h1>${esc(settings.business_name)}</h1></div><div><b>${t('emp.tab.payroll')} — ${ltr(data.month)}</b></div></div>
+  <table><thead><tr><th>${t('common.name')}</th><th class="n">${t('emp.days')}</th><th class="n">${t('emp.base')}</th><th class="n">${t('emp.absence')}</th><th class="n">${t('emp.kind.bonus')}</th>
+    <th class="n">${t('emp.kind.deduction')}</th><th class="n">${t('emp.kind.advance')}</th><th class="n">${t('emp.net')}</th><th>${t('emp.signature')}</th></tr></thead><tbody>
+  ${data.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="n">${r.days}${r.absent ? ` / ✕${r.absent}` : ''}</td><td class="n">${m(r.base)}</td><td class="n">${m(r.absence)}</td><td class="n">${m(r.bonuses)}</td>
+    <td class="n">${m(r.deductions)}</td><td class="n">${m(r.advances)}</td><td class="n"><b>${formatMoney(r.net, settings)}</b></td><td></td></tr>`).join('')}
+  </tbody><tfoot><tr><td colspan="7"><b>${t('common.total')}</b></td><td class="n"><b>${formatMoney(data.total, settings)}</b></td><td></td></tr></tfoot></table>
+  </body></html>`;
+}
+
+/** Thermal slip handed over with a sold gift card: code (with barcode), value, expiry. */
+export function giftCardHtml(card, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  return page(settings, lang, `${header(settings, t)}
+  <hr><div class="c"><b>🎁 ${t('gift.card')}</b></div><hr>
+  <div class="c">${barcodeSvg(card.code, { height: 42 })}</div>
+  <div class="c" style="font: bold 17px monospace; letter-spacing: 1px" dir="ltr">${esc(card.code.replace(/(\d{4})(?=\d)/g, '$1 '))}</div>
+  <table>
+    <tr class="big"><td>${t('gift.balance')}</td><td class="n">${m(card.balance)}</td></tr>
+    ${card.expires ? `<tr><td>${t('gift.expires')}</td><td class="n">${ltr(card.expires)}</td></tr>` : ''}
+    <tr><td>${t('receipt.date')}</td><td class="n">${ltr(String(card.created_at).slice(0, 10))}</td></tr>
+  </table>
+  <hr><div class="c muted">${t('gift.slipNote')}</div>`);
 }
