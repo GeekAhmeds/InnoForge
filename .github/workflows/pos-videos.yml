@@ -16,6 +16,12 @@ on:
       rate:
         description: Speaking speed (e.g. +0%, +10%, -5%)
         default: '+0%'
+  # Also re-made automatically when the video scripts change (manual runs need the
+  # workflow on the default branch).
+  push:
+    paths:
+      - 'apps/pos/tools/videos/**'
+      - '.github/workflows/pos-videos.yml'
 
 jobs:
   videos:
@@ -52,7 +58,7 @@ jobs:
       - name: Record promo
         run: node tools/videos/promo.cjs tools/videos/promo-assets release/videos/00-promo.mp4
       - name: Egyptian voice-over
-        run: python3 tools/videos/voiceover.py release/videos --voice "${{ inputs.voice }}" --rate "${{ inputs.rate }}" --out release/videos/voiced
+        run: python3 tools/videos/voiceover.py release/videos --voice "${{ inputs.voice || 'ar-EG-SalmaNeural' }}" --rate "${{ inputs.rate || '+0%' }}" --out release/videos/voiced
       - name: Subtitles next to the voiced videos
         run: cp release/videos/*.srt release/videos/voiced/ 2>/dev/null || true
 
