@@ -41,6 +41,17 @@ const DEFAULT_SETTINGS = {
   kds_lan: false, // let tablets on the local network open the kitchen screen
   kds_port: 7799,
   kds_key: '',
+  // Label-printing scales print EAN-13 barcodes: prefix + item code (PLU) + weight or price + check digit.
+  scale_barcodes: false,
+  scale_prefixes: '21,22,23,24,25,26,27,28,29',
+  scale_code_digits: 5,
+  scale_value: 'weight', // weight | price
+  scale_value_decimals: 3, // weight in grams → 3; price in piasters → 2
+  // A scale connected to this computer (serial / USB-serial) sends the weight continuously or on request.
+  scale_serial: false,
+  scale_port: '',
+  scale_baud: 9600,
+  scale_request: '', // '' (scale streams) | 'W' | 'ENQ' | 'P' — sent to ask for a reading
 };
 
 class PosError extends Error {
@@ -357,6 +368,33 @@ function createServices(db) {
     }
   }
 
+  /**
+   * Reads a label-printing scale's barcode (e.g. 21 01234 01250 7 = item 1234, 1.250 kg).
+   * Returns the product with `scale: { qty, value, kind }`, or null when it is not one.
+   */
+  function scaleBarcode(code) {
+    const s = getSettings();
+    if (!s.scale_barcodes || !/^\d{13}$/.test(code)) return null;
+    const prefixes = String(s.scale_prefixes).split(/[,\s]+/).filter(Boolean);
+    const prefix = prefixes.find((p) => code.startsWith(p));
+    if (!prefix) return null;
+    const codeDigits = Math.min(6, Math.max(4, int(s.scale_code_digits, 5)));
+    const plu = code.slice(prefix.length, prefix.length + codeDigits);
+    const raw = code.slice(prefix.length + codeDigits, 12);
+    if (!raw) return null;
+    const row = db.prepare(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.plu IS NOT NULL AND CAST(p.plu AS INTEGER) = ?`).get(Number(plu));
+    if (!row) return null;
+    const value = Number(raw) / 10 ** Math.max(0, int(s.scale_value_decimals, 3));
+    // A price label: quantity = printed price ÷ price per kg.
+    const qty = s.scale_value === 'price'
+      ? (row.price > 0 ? Math.round(((value * 10 ** (s.decimals ?? 2)) / row.price) * 1000) / 1000 : 0)
+      : Math.round(value * 1000) / 1000;
+    if (!(qty > 0)) return null;
+    const [p] = withUnitsAndPrices([plain(row)]);
+    if (!can('view_cost')) delete p.cost;
+    return { ...p, scale: { qty, value, kind: s.scale_value } };
+  }
+
   const products = {
     list({ search = '', categoryId = null, includeInactive = false, top = false } = {}) {
       requireUser();
@@ -393,6 +431,8 @@ function createServices(db) {
     byBarcode(barcode) {
       requireUser();
       const code = str(barcode);
+      const weighed = scaleBarcode(code);
+      if (weighed) return weighed;
       const direct = db.prepare(`${PRODUCT_SELECT} WHERE p.barcode = ? AND p.active = 1`).get(code);
       if (direct) return withUnitsAndPrices([plain(direct)])[0];
       const unit = db.prepare('SELECT * FROM product_units WHERE barcode = ?').get(code);
@@ -453,6 +493,8 @@ function createServices(db) {
         station_id: 'station_id' in p ? int(p.station_id) || null : p.id ? db.prepare('SELECT station_id FROM products WHERE id = ?').get(p.id)?.station_id ?? null : null,
         supplier_id: 'supplier_id' in p ? int(p.supplier_id) || null : p.id ? db.prepare('SELECT supplier_id FROM products WHERE id = ?').get(p.id)?.supplier_id ?? null : null,
         track_expiry: p.track_expiry ? 1 : 0,
+        by_weight: p.by_weight ? 1 : 0,
+        plu: str(p.plu) || null,
         track_serial: p.track_serial ? 1 : 0,
         active: p.active === false ? 0 : 1,
       };

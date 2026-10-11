@@ -4,6 +4,7 @@ import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { a4Html, checkHtml, receiptHtml } from '../lib/receipt.js';
 import { sellScreens } from '../lib/screens.js';
 import { printKitchenTickets } from '../components/Kitchen.jsx';
+import { connectScale, onScale, stableWeight } from '../lib/scale.js';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 
 const emptyCart = (orderType) => ({
@@ -67,18 +68,38 @@ export default function Pos() {
   }, [cart, notify, tErr]);
 
   // A scanned unit barcode (e.g. a carton) adds that unit; the server prices it.
-  const addProduct = useCallback((p, qty = 1, unit = null) => {
+  const addProduct = useCallback((p, qty = 1, unit = null, { separate = false } = {}) => {
     setCart((c) => {
       const unitId = unit?.id ?? null;
-      const idx = c.items.findIndex((i) => i.product_id === p.id && (i.unit_id ?? null) === unitId && !i.note && !i.discount && !i.price_override);
+      // Weighed items stay on their own lines (each has its own weight/label).
+      const idx = separate ? -1 : c.items.findIndex((i) => i.product_id === p.id && (i.unit_id ?? null) === unitId && !i.note && !i.discount && !i.price_override);
       const items = [...c.items];
       const price = unit ? unit.price ?? Math.round(p.price * unit.factor) : p.price;
       if (idx >= 0) items[idx] = { ...items[idx], qty: items[idx].qty + qty };
-      else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: price, list_price: price, qty, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial });
+      else items.push({ product_id: p.id, unit_id: unitId, name: unit ? `${p.name} (${unit.name})` : p.name, unit_price: price, list_price: price, qty, discount: 0, note: '', serials: '', kitchen_sent: 0, track_serial: !!p.track_serial, by_weight: !!p.by_weight });
       return { ...c, items };
     });
     setLastSale(null);
   }, []);
+
+  // Scale on a cable: keep the live weight; reconnect to the already-allowed port on its own.
+  const [scale, setScale] = useState({ r: null, connected: false });
+  useEffect(() => onScale((r, connected) => setScale({ r, connected })), []);
+  useEffect(() => {
+    if (settings.scale_serial) connectScale({ baud: settings.scale_baud, request: settings.scale_request }, { reuse: true }).catch(() => {});
+  }, [settings.scale_serial, settings.scale_baud, settings.scale_request]);
+
+  /** Tapping a product sold by weight takes the scale's weight, or asks for it. */
+  async function pick(p) {
+    if (!p.by_weight) { addProduct(p); focusSearch(); return; }
+    let w = stableWeight();
+    if (!w) {
+      const v = await ask(t('pos.enterWeight', { name: p.name }), { type: 'number', required: true });
+      w = Number(String(v || '').replace(',', '.'));
+    }
+    if (w > 0) addProduct(p, Math.round(w * 1000) / 1000, null, { separate: true });
+    focusSearch();
+  }
 
   async function onSearchEnter() {
     const q = search.trim();
@@ -86,7 +107,11 @@ export default function Pos() {
     // Barcode scanners type the code and press Enter; support "3*code" for quantity.
     const [, qtyStr, code] = q.match(/^(\d+(?:\.\d+)?)\*(.+)$/) || [null, null, q];
     const byCode = await api.products.byBarcode(code);
-    if (byCode) {
+    if (byCode?.scale) {
+      // A scale label carries the weight (or price) of this package.
+      addProduct(byCode, byCode.scale.qty, null, { separate: true });
+      setSearch('');
+    } else if (byCode) {
       addProduct(byCode, qtyStr ? Number(qtyStr) : 1, byCode.unit || null);
       setSearch('');
     } else if (products.length === 1) {
@@ -163,6 +188,8 @@ export default function Pos() {
       if (!otherField && !search && cart.items.length && ['+', '-', 'Delete'].includes(e.key)) {
         e.preventDefault();
         const last = cart.items.length - 1;
+        const lastItem = cart.items[last];
+        if (e.key !== 'Delete' && (lastItem.by_weight || !Number.isInteger(lastItem.qty))) return;
         setCart((c) => ({
           ...c,
           items: e.key === 'Delete' ? c.items.slice(0, -1)
@@ -193,6 +220,12 @@ export default function Pos() {
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && onSearchEnter()}
           />
+          {settings.scale_serial && (
+            <button className={`scale-chip ${scale.connected ? 'on' : ''} ${scale.r?.stable ? 'stable' : ''}`} title={t('devices.serialScale')}
+              onClick={() => !scale.connected && connectScale({ baud: settings.scale_baud, request: settings.scale_request }).catch((err) => notify(tErr(err), 'error'))}>
+              ⚖ {scale.connected ? (scale.r ? `${formatQty(scale.r.weight)} kg` : '…') : t('devices.connect')}
+            </button>
+          )}
           {!restaurant && <button onClick={() => setModal({ kind: 'held' })}>⏸ {t('pos.held')}</button>}
           {restaurant && (floorOn
             ? <button onClick={() => setPage('floor')}>🍽 {t('nav.floor')}</button>
@@ -208,10 +241,10 @@ export default function Pos() {
         </div>
         <div className="product-grid">
           {products.map((p) => (
-            <button key={p.id} className="product" style={{ '--chip': p.category_color || '#94a3b8' }} onClick={() => { addProduct(p); focusSearch(); }}>
+            <button key={p.id} className="product" style={{ '--chip': p.category_color || '#94a3b8' }} onClick={() => pick(p)}>
               <span className="p-name">{p.name}</span>
               {p.author && <span className="p-sub">{p.author}</span>}
-              <span className="p-price">{m(p.price)}</span>
+              <span className="p-price">{m(p.price)}{p.by_weight ? ` / ${p.unit === 'pcs' ? 'kg' : p.unit}` : ''}</span>
               {p.track_stock ? <span className={`p-stock ${p.stock <= p.min_stock ? 'low' : ''}`}>{p.stock > 0 ? formatQty(p.stock) : t('pos.outOfStock')}</span> : null}
             </button>
           ))}
@@ -274,10 +307,11 @@ export default function Pos() {
                   {ql?.customer_discount > 0 && <small className="promo">👤 {t('pos.customerDiscount', { p: quote.customerPct })} −{m(ql.customer_discount)}</small>}
                   {ql?.promo_name && <small className="promo">🏷 {ql.promo_name} −{m(ql.promo_discount)}</small>}
                 </div>
-                <div className="qty" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x)) }))}>−</button>
+                <div className="qty" onClick={(e) => { if (!it.by_weight && Number.isInteger(it.qty)) e.stopPropagation(); }}>
+                  {/* Weights are typed (line editor), not stepped. */}
+                  <button disabled={it.by_weight || !Number.isInteger(it.qty)} onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x)) }))}>−</button>
                   <span>{formatQty(it.qty)}</span>
-                  <button onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: x.qty + 1 } : x)) }))}>+</button>
+                  <button disabled={it.by_weight || !Number.isInteger(it.qty)} onClick={() => setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === idx ? { ...x, qty: x.qty + 1 } : x)) }))}>+</button>
                 </div>
                 <span className="line-total">{m(ql ? ql.line_total : it.unit_price * it.qty)}</span>
               </div>

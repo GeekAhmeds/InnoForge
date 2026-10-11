@@ -582,6 +582,12 @@ const MIGRATIONS = [
   );
   CREATE INDEX idx_kitchen_tickets_status ON kitchen_tickets(status);
   `,
+  // v11: products sold by weight, with the PLU code used by label-printing scales.
+  `
+  ALTER TABLE products ADD COLUMN by_weight INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE products ADD COLUMN plu TEXT;
+  CREATE INDEX idx_products_plu ON products(plu);
+  `,
 ];
 
 function openDatabase(file) {

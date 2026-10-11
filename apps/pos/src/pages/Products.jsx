@@ -120,6 +120,8 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     track_serial: !!product.track_serial,
     supplier_id: product.supplier_id || '',
     station_id: product.station_id || '',
+    by_weight: !!product.by_weight,
+    plu: product.plu || '',
     units: (product.units || []).map((u) => ({ ...u, price: u.price == null ? '' : fromMinor(u.price, d) })),
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
   });
@@ -206,6 +208,8 @@ function ProductModal({ product, categories, onClose, onSaved }) {
           )}
           <Toggle checked={f.track_expiry} onChange={set('track_expiry')} label={t('products.trackExpiry')} />
           <Toggle checked={f.track_serial} onChange={set('track_serial')} label={t('products.trackSerial')} />
+          <Toggle checked={f.by_weight} onChange={(v) => setF((x) => ({ ...x, by_weight: v, unit: v && (!x.unit || x.unit === 'pcs') ? 'kg' : x.unit }))} label={`⚖ ${t('products.byWeight')}`} />
+          {f.by_weight && <input className="w-amount mono" dir="ltr" placeholder={t('products.plu')} title={t('products.pluHint')} value={f.plu} onChange={set('plu')} />}
           <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />
         </div>
         {f.track_stock && <>

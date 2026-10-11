@@ -630,3 +630,23 @@ test('kitchen: stations by product/category, tickets on send and on payment, dis
   assert.ok(!s.kds.state({}).tickets.some((tk) => tk.order_id === o2.id));
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitchen_tickets WHERE status = ?').get('cancelled').n, 1);
 });
+
+test('scale barcodes: weight and price labels find the product by PLU', () => {
+  const { s } = setup({ tax_rate: 0, scale_barcodes: true });
+  const cheese = s.products.save({ name: 'Roumy cheese', price: 32000, by_weight: true, plu: '00123', unit: 'kg', stock: 20 });
+  // 21 + 00123 + 01250 (1.250 kg) + check digit
+  const w = s.products.byBarcode('2100123012507');
+  assert.equal(w.id, cheese);
+  assert.equal(w.scale.qty, 1.25);
+  assert.equal(s.products.byBarcode('2100999012507'), null); // unknown PLU
+  // price labels: 21 + 00123 + 08000 (80.00) → 0.25 kg at 320/kg
+  s.settings.save({ scale_value: 'price', scale_value_decimals: 2 });
+  assert.equal(s.products.byBarcode('2100123080001').scale.qty, 0.25);
+  // turned off: a normal barcode lookup
+  s.settings.save({ scale_barcodes: false });
+  assert.equal(s.products.byBarcode('2100123012507'), null);
+  s.shifts.open({});
+  s.settings.save({ scale_barcodes: true, scale_value: 'weight', scale_value_decimals: 3 });
+  const o = s.orders.checkout({ items: [{ product_id: cheese, qty: s.products.byBarcode('2100123012507').scale.qty }], payments: [{ method: 'cash', amount: 40000 }] });
+  assert.equal(o.total, 40000);
+});

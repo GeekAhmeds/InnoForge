@@ -437,3 +437,12 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid 
 .ft-ready { font-size: 12px; background: var(--good); color: #fff; border-radius: 99px; padding: 1px 8px; margin-inline-end: 4px; }
 .kds-links { margin-top: 12px; padding: 12px; border: 1px dashed var(--line); border-radius: 10px; background: #fafbff; }
 .kds-links code { padding: 4px 8px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+
+/* Scales */
+.scale-chip { font-weight: 700; white-space: nowrap; direction: ltr; }
+.scale-chip.on { border-color: var(--brand); }
+.scale-chip.stable { background: #ecfdf5; border-color: var(--good); color: var(--good); }
+.scale-example { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.scale-example code { font-size: 18px; letter-spacing: 1px; padding: 6px 10px; background: #f6f7f9; border-radius: 8px; }
+.scale-readout { font-size: 22px; font-weight: 700; direction: ltr; }
+.scale-readout.stable { color: var(--good); }

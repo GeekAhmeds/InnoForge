@@ -22,6 +22,7 @@ let licenses;
 let license;
 let updater;
 let kdsServer;
+let serialListOnly = false;
 let kdsWindow;
 
 const dbFile = () => path.join(app.getPath('userData'), 'innoforge-pos.db');
@@ -92,6 +93,21 @@ function createWindow() {
     },
   });
   mainWindow.removeMenu();
+  // Serial scales (Web Serial). The port is chosen here, by the name saved in Settings → Devices;
+  // 'list only' requests just report the ports so the settings screen can show them.
+  const ses = mainWindow.webContents.session;
+  ses.on('select-serial-port', (event, portList, _wc, callback) => {
+    event.preventDefault();
+    const ports = portList.map((p) => ({ portId: p.portId, portName: p.portName, displayName: p.displayName || p.portName }));
+    mainWindow.webContents.send('pos:serial-ports', ports);
+    if (serialListOnly) { serialListOnly = false; callback(''); return; }
+    const wanted = services.settings.get().scale_port;
+    const pick = portList.find((p) => p.portName === wanted || p.portId === wanted) || (!wanted && portList.length === 1 ? portList[0] : null);
+    callback(pick ? pick.portId : '');
+  });
+  ses.setPermissionCheckHandler(() => true);
+  ses.setDevicePermissionHandler((details) => details.deviceType === 'serial');
+
   // The kitchen screen belongs to the till: closing the till closes it too.
   mainWindow.on('closed', () => { if (kdsWindow && !kdsWindow.isDestroyed()) kdsWindow.close(); });
 
@@ -134,6 +150,8 @@ ipcMain.handle('pos:call', (_e, ns, method, arg) => {
     return fail(err);
   }
 });
+
+ipcMain.handle('pos:serialListOnly', () => { serialListOnly = true; return ok(true); });
 
 // Kitchen display: where it can be opened, and a window for a screen on this computer.
 ipcMain.handle('pos:kdsInfo', () => {

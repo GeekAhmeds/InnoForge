@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('posBridge', {
   savePdf: (job) => ipcRenderer.invoke('pos:savePdf', job),
   kdsInfo: () => ipcRenderer.invoke('pos:kdsInfo'),
   openKds: (opts) => ipcRenderer.invoke('pos:openKds', opts),
+  serialListOnly: () => ipcRenderer.invoke('pos:serialListOnly'),
+  onSerialPorts: (fn) => {
+    const listener = (_e, ports) => fn(ports);
+    ipcRenderer.on('pos:serial-ports', listener);
+    return () => ipcRenderer.removeListener('pos:serial-ports', listener);
+  },
   updateState: () => ipcRenderer.invoke('pos:updateState'),
   updateCheck: () => ipcRenderer.invoke('pos:updateCheck'),
   updateInstall: () => ipcRenderer.invoke('pos:updateInstall'),

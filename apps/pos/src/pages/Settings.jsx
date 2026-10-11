@@ -7,16 +7,17 @@ import { formatMoney } from '../lib/money.js';
 import Support from '../components/Support.jsx';
 import { UpdatePanel } from '../components/Updates.jsx';
 import KitchenSettings from '../components/Kitchen.jsx';
+import Devices from '../components/Devices.jsx';
 
-const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'data', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'data', 'support'];
 // Which permission opens each tab.
-const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', data: 'backup', support: null };
+const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', data: 'backup', support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
   const tabs = TABS.filter((x) => (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', data: 'settings.data', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', data: 'settings.data', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -30,6 +31,7 @@ export default function Settings() {
       {tab === 'promos' && <><Promotions /><Loyalty /></>}
       {tab === 'tables' && <Tables />}
       {tab === 'kitchen' && <KitchenSettings />}
+      {tab === 'devices' && <Devices />}
       {tab === 'data' && <Data />}
       {tab === 'support' && (
         <>
