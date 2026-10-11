@@ -35,7 +35,7 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | 14 | Loyalty points | ✅ | `loyalty_moves`, checkout/refund |
 | 15 | Barcode labels | ✅ | `components/Labels.jsx`, `lib/barcode.js` |
 | 16 | Excel import (products, customers, suppliers) and export | ✅ | `electron/excel.cjs`, `importer.*`, `ExcelImport.jsx` |
-| 17 | Egyptian e-invoice (ETA) | ⏳ | — needs ETA API credentials + USB e-signature token per company |
+| 17 | Egyptian e-invoice (ETA) + e-receipt | ✅ built, ⏳ not yet tried on the live ETA system | `electron/eta.cjs` (documents, serialization, UUID chain), `eta-submitter.cjs` (token, sign, submit, poll), `eta.*` / `etaQueue` services, Settings → E-invoice + E-invoice page (`components/Eta.jsx`) |
 | 18 | Several branches / devices on the same data | ✅ (live: one main computer; branches over a VPN) | `lan-server.cjs`, `remote.cjs`, `device.cjs`, `devices.*`, Settings → Network (`components/Network.jsx`) |
 | 19 | Send invoice / statement on WhatsApp | ✅ | `lib/share.js` |
 
@@ -104,6 +104,6 @@ Known limits (by design, for now):
 
 ## Pending — suggested plans
 
-**ETA e-invoice (17).** Add per-company ETA settings (client id/secret, environment), product GS1/EGS codes and tax types, a document builder (ETA JSON v1.0), signing through the company's USB token (a small signer helper using the token's PKCS#11 driver), and a submission queue so selling stays offline: invoices queue locally and submit when online, with a status screen (submitted / valid / rejected + reasons) and retry.
+**ETA e-invoice (17) — built; needs a real taxpayer to finish.** Done: settings the customer fills in (taxpayer data, ERP + POS credentials, signer, default codes, pre-production/production), item codes per product, buyer details per customer, a queue (`eta_documents`, v18) filled at checkout/refund, document builders (invoice v1.0 / credit note, receipt v1.2 / return receipt with the per-device UUID chain), canonical serialization, background submission with token cache, validation polling, retry/skip, status page. Not done / to verify: a real run on ETA pre-production with a taxpayer's credentials; the USB-token signer itself (we call an external signer by URL or command — a PKCS#11 CAdES-BES signer still has to be chosen or written); the QR code on printed e-receipts; cancelling a valid document at ETA from the app.
 
 **Multi-device (18) — done as “one main computer”.** One PC (the main computer) keeps the database and serves it on the network (`electron/lan-server.cjs`, port 7790, access key); other PCs switch to client mode (`device.json` → `mode: client`) and send every service call to it (`remote.cjs`). Each connected PC has its own services instance on the main computer: its own logged-in user, open shift (`shifts.device_id`) and device settings (`device_settings`: printers, drawer, scale, selling warehouse…). Orders record `device_id`. The license limit `devices` counts the main computer too (basic 1, market 3, restaurant/trading 5, full unlimited). Branches connect over a VPN (Tailscale) to the main computer. **Not done:** working offline when the main computer is unreachable (branch sync with a change log) — clients show an offline screen until it is back.

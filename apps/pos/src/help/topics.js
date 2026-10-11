@@ -556,6 +556,47 @@ export const TOPICS = [
     },
   },
   {
+    id: 'eta', icon: '🏛', group: 'money', feature: 'eta',
+    ar: {
+      title: 'الفاتورة والإيصال الإلكتروني (الضرائب)',
+      intro: 'البرنامج بيبعت فواتيرك لمنظومة الفاتورة الإلكترونية والإيصال الإلكتروني بتاعة مصلحة الضرائب لوحده في الخلفية. البيع عمره ما بيقف لو النت فاصل: المستندات بتستنى وتتبعت أول ما النت يرجع.',
+      steps: [
+        'سجّل الشركة على بوابة المنظومة (invoicing.eta.gov.eg)، وسجّل «نظام ERP» عشان تاخد Client ID و Client Secret للفواتير، وسجّل كل جهاز كاشير كـ POS للإيصالات.',
+        'الإعدادات ← الفاتورة الإلكترونية: فعّلها واختار «تجربة»، وحدد فواتير (للشركات) و/أو إيصالات (للأفراد).',
+        'اكتب بيانات الشركة: رقم التسجيل الضريبي، كود النشاط، كود الفرع، والعنوان (محافظة، مدينة، شارع، رقم مبنى).',
+        'اكتب Client ID و Secret. للفواتير: ركّب برنامج التوقيع بتاع الـ USB Token واختار طريقته (عنوان أو أمر). للإيصالات: اكتب سيريال الجهاز وبيانات الـ POS على كل جهاز كاشير.',
+        'اكتب الكود الافتراضي للأصناف (EGS أو GS1)، وكود لكل صنف من شاشة الصنف لو مختلف. للعملاء الشركات اكتب الرقم الضريبي والعنوان في بيانات العميل.',
+        'اضغط «اختبر الدخول» و«معاينة آخر فاتورة». بعد كده كل بيع بيظهر في صفحة «الفاتورة الإلكترونية» بحالته: في الانتظار، اتبعت، صالح، أو مرفوض بالسبب.',
+        'لو مستند اترفض: صلّح السبب (كود صنف، عنوان، رقم ضريبي…) واضغط «ابعت تاني». المرتجعات بتطلع لوحدها كإشعار دائن أو إيصال مرتجع.',
+        'لما كل حاجة تطلع «صالح» على التجربة، حوّل البيئة لـ «فعلي».',
+      ],
+      tips: [
+        'بيانات الدخول (Secret والمفتاح المشترك) بتتحفظ ومش بتظهر تاني على الشاشة.',
+        'مع أكتر من جهاز: الإرسال بيحصل من الجهاز الرئيسي، وكل جهاز كاشير بيتسجل كـ POS ببياناته.',
+        'الربط مكتوب حسب مواصفات المنظومة المنشورة، ولازم يتجرب على بيئة التجربة لكل عميل قبل التشغيل الفعلي.',
+      ],
+    },
+    en: {
+      title: 'E-invoice and e-receipt (tax authority)',
+      intro: 'The app sends your invoices to the Egyptian Tax Authority e-invoice and e-receipt systems by itself in the background. Selling never stops when the internet is down: documents wait and go out when it is back.',
+      steps: [
+        'Register the company on the ETA portal (invoicing.eta.gov.eg), register an ERP system to get the invoice Client ID and Secret, and register every till as a POS for receipts.',
+        'Settings → E-invoice: turn it on, choose Pre-production, and pick invoices (companies) and/or receipts (individuals).',
+        'Enter the company details: tax registration number, activity code, branch code and address (governorate, city, street, building).',
+        'Enter the Client ID and Secret. Invoices: install the USB-token signer and choose how to reach it (URL or command). Receipts: enter the POS serial and credentials on each till.',
+        'Enter the default item code (EGS or GS1), and a code per item on the product screen when different. For company customers enter the tax number and address on the customer.',
+        'Press “Test login” and “Preview the last sale”. From then on every sale shows on the E-invoice page with its status: waiting, sent, valid, or rejected with the reason.',
+        'If a document is rejected, fix the reason (item code, address, tax number…) and press “Send again”. Returns go out by themselves as credit notes or return receipts.',
+        'Once everything comes back Valid on pre-production, switch the environment to Production.',
+      ],
+      tips: [
+        'Secrets and the pre-shared key are stored and never shown again.',
+        'With several computers the main computer sends everything; each till is registered as its own POS.',
+        'The integration follows ETA\'s published specification and must be tried on pre-production for every customer before going live.',
+      ],
+    },
+  },
+  {
     id: 'network', icon: '🖧', group: 'more',
     ar: {
       title: 'أكتر من جهاز والفروع',

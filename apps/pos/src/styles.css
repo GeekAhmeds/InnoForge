@@ -572,3 +572,15 @@ a.button-link { display: inline-block; margin-top: 12px; padding: 10px 18px; bor
 code.addr { display: inline-block; background: #f3f4f6; border-radius: 6px; padding: 2px 8px; margin: 2px 4px; }
 .offline-screen { max-width: 520px; text-align: center; }
 .row.center { justify-content: center; flex-wrap: wrap; }
+/* E-invoice */
+button.stat { cursor: pointer; text-align: start; font: inherit; }
+button.stat.on { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand) inset; }
+button.stat span { color: var(--muted); }
+.badge.eta-ok { background: #ecfdf5; color: var(--good); }
+.badge.eta-info { background: #e8f0fd; color: var(--brand); }
+.badge.eta-bad { background: #fef2f2; color: #b91c1c; }
+.badge.eta-muted { background: #f3f4f6; color: var(--muted); }
+.eta-error { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b91c1c; }
+pre.json { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; max-height: 60vh; overflow: auto; font-size: 12px; text-align: left; }
+.eta-steps { margin: 6px 0 14px; padding-inline-start: 20px; line-height: 1.8; }
+.eta-settings .card { margin-bottom: 14px; }

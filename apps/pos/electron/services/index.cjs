@@ -3668,7 +3668,6 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
   }
 
   const etaRow = (r) => r && { ...plain(r), payload: undefined, has_payload: !!r.payload };
-  const ETA_OPEN = "('pending', 'error')";
 
   const eta = {
     /** The queue at a glance, and what is missing in the settings. */
@@ -3686,7 +3685,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       requirePerm('reports');
       const where = ['1 = 1'];
       const args = [];
-      if (status === 'open') where.push(`d.status IN ${ETA_OPEN}`);
+      if (status === 'attention') where.push("d.status IN ('error', 'rejected', 'invalid')");
       else if (status) { where.push('d.status = ?'); args.push(str(status)); }
       if (from) { where.push('d.created_at >= ?'); args.push(str(from)); }
       if (to) { where.push("d.created_at < date(?, '+1 day')"); args.push(str(to)); }

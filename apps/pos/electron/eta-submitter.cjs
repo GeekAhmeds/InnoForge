@@ -95,7 +95,7 @@ function createEtaSubmitter({ queue, fetchImpl = (...a) => fetch(...a), sign = s
         queue.setPayload(d.id, doc);
         out.push({ row: d, doc });
       } catch (err) {
-        queue.result(d.id, { status: 'error', error: `${err.code || 'ETA_SIGN'}: ${err.message}` });
+        queue.result(d.id, { status: 'error', error: err.code || `ETA_SIGN: ${err.message}` });
       }
     }
     if (!out.length) return 0;
@@ -185,7 +185,9 @@ function createEtaSubmitter({ queue, fetchImpl = (...a) => fetch(...a), sign = s
         await poll();
         last = { at: new Date().toISOString(), ok: true, message: '' };
       } catch (err) {
-        last = { at: new Date().toISOString(), ok: false, message: err.message || String(err) };
+        // No internet / ETA unreachable: everything stays queued for the next round.
+        const offline = err.name === 'TypeError' || err.name === 'TimeoutError' || /fetch failed/i.test(err.message);
+        last = { at: new Date().toISOString(), ok: false, message: offline ? 'ETA_OFFLINE' : err.code || err.message || String(err) };
         log('e-invoice', err);
       }
       return { ...sent, last };

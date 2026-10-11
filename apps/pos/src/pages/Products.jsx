@@ -129,6 +129,9 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     station_id: product.station_id || '',
     by_weight: !!product.by_weight,
     plu: product.plu || '',
+    eta_item_type: product.eta_item_type || '',
+    eta_item_code: product.eta_item_code || '',
+    eta_unit: product.eta_unit || '',
     is_ingredient: !!product.is_ingredient,
     units: (product.units || []).map((u) => ({ ...u, price: u.price == null ? '' : fromMinor(u.price, d) })),
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
@@ -220,6 +223,18 @@ function ProductModal({ product, categories, onClose, onSaved }) {
           {f.by_weight && <input className="w-amount mono" dir="ltr" placeholder={t('products.plu')} title={t('products.pluHint')} value={f.plu} onChange={set('plu')} />}
           <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />
         </div>
+        {settings.eta_enabled && has('eta') && (
+          <div className="span2 sub-section">
+            <h4>🏛 {t('eta.itemCodes')}</h4>
+            <div className="grid3">
+              <Field label={t('eta.itemType')}>
+                <select value={f.eta_item_type} onChange={set('eta_item_type')}><option value="">{t('eta.general')} ({settings.eta_item_type})</option><option value="EGS">EGS</option><option value="GS1">GS1</option></select>
+              </Field>
+              <Field label={t('eta.itemCode')} hint={t('eta.itemCodeHint')}><input dir="ltr" value={f.eta_item_code} onChange={set('eta_item_code')} placeholder={settings.eta_item_code} /></Field>
+              <Field label={t('eta.unit')}><input dir="ltr" value={f.eta_unit} onChange={set('eta_unit')} placeholder={settings.eta_unit} /></Field>
+            </div>
+          </div>
+        )}
         {restaurant && <ProductKitchenFields productId={product.id} f={f} setF={setF} />}
         {f.track_stock && <>
           {isNew

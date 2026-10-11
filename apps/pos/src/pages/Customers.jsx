@@ -193,7 +193,8 @@ function CustomerModal({ customer, onClose, onSaved }) {
   const { t, tErr, notify, settings, can } = useApp();
   const isAdmin = can('customers_edit');
   const d = settings.decimals;
-  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '' });
+  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '', eta: parseEta(customer.eta) });
+  const setEta = (k) => (e) => setF((x) => ({ ...x, eta: { ...x.eta, [k]: e.target.value } }));
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
   async function save(e) {
@@ -230,6 +231,25 @@ function CustomerModal({ customer, onClose, onSaved }) {
           <input type="number" min="0" max="100" step="0.5" value={f.discount_percent || ''} onChange={set('discount_percent')} placeholder="0" disabled={!isAdmin} />
         </Field>
         <div className="span2"><Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field></div>
+        {settings.eta_enabled && has('eta') && (
+          <div className="span2 sub-section">
+            <h4>🏛 {t('eta.buyer')}</h4>
+            <p className="muted small">{t('eta.buyerHint')}</p>
+            <div className="grid3">
+              <Field label={t('eta.buyerType')}>
+                <select value={f.eta.type || ''} onChange={setEta('type')}>
+                  <option value="">{t('eta.buyerAuto')}</option>
+                  <option value="B">{t('eta.buyer.B')}</option><option value="P">{t('eta.buyer.P')}</option><option value="F">{t('eta.buyer.F')}</option>
+                </select>
+              </Field>
+              <Field label={t('eta.buyerId')} hint={t('eta.buyerIdHint')}><input dir="ltr" value={f.eta.id || ''} onChange={setEta('id')} /></Field>
+              <Field label={t('eta.governate')}><input value={f.eta.governate || ''} onChange={setEta('governate')} /></Field>
+              <Field label={t('eta.city')}><input value={f.eta.regionCity || ''} onChange={setEta('regionCity')} /></Field>
+              <Field label={t('eta.street')}><input value={f.eta.street || ''} onChange={setEta('street')} /></Field>
+              <Field label={t('eta.building')}><input value={f.eta.buildingNumber || ''} onChange={setEta('buildingNumber')} /></Field>
+            </div>
+          </div>
+        )}
         {f.id && isAdmin && <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />}
         <button hidden />
       </form>
@@ -308,4 +328,9 @@ function Statement({ id, onClose }) {
       {receiptNo && <ReceiptModal receiptNo={receiptNo} onClose={() => setReceiptNo(null)} onChanged={reload} />}
     </Modal>
   );
+}
+
+function parseEta(v) {
+  if (v && typeof v === 'object') return v;
+  try { return v ? JSON.parse(v) : {}; } catch { return {}; }
 }
