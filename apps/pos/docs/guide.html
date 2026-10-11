@@ -145,6 +145,8 @@
       <a href="#printing">الطباعة</a>
       <a href="#backup">النسخ الاحتياطي</a>
       <a href="#shortcuts">اختصارات الكيبورد</a>
+      <a href="#network">أكتر من جهاز والفروع</a>
+      <a href="#eta">الفاتورة الإلكترونية</a>
       <a href="#helpcenter">دليل الاستخدام جوه البرنامج والفيديوهات</a>
       <div class="grp">مساعدة</div>
       <a href="#faq">أسئلة شائعة</a>
@@ -196,6 +198,8 @@
       <a href="#printing">Printing</a>
       <a href="#backup">Backup</a>
       <a href="#shortcuts">Keyboard shortcuts</a>
+      <a href="#network">Several computers and branches</a>
+      <a href="#eta">E-invoice (ETA)</a>
       <a href="#helpcenter">In-app guide and videos</a>
       <div class="grp">Help</div>
       <a href="#faq">FAQ</a>
@@ -1467,6 +1471,36 @@ npm run dist:win</code></pre>
           <tr><td><kbd>F11</kbd></td><td>Full screen</td></tr>
           <tr><td>Number keys</td><td>On the sign-in screen: type the PIN</td></tr>
         </table></div>
+      </div>
+    </section>
+
+    <section id="network">
+      <div lang="ar">
+        <h2>أكتر من جهاز والفروع على نفس البيانات</h2>
+        <p>جهاز واحد بيبقى <b>الجهاز الرئيسي</b> وعليه البيانات: <b>الإعدادات ← الشبكة والفروع ← «الأجهزة التانية تقدر تتصل بالجهاز ده»</b>. هيظهر العنوان (زي <code>192.168.1.10:7790</code>) ومفتاح الاتصال. لو الويندوز سأل عن الـ Firewall اختار «سماح».</p>
+        <p>على أي جهاز تاني: من شاشة التفعيل أو أول تشغيل أو الإعدادات ← الشبكة، اضغط <b>«اتصل بجهاز رئيسي»</b> واكتب العنوان والمفتاح. الجهاز المتصل مش محتاج مفتاح تفعيل لوحده؛ بيشتغل بترخيص الرئيسي، وعدد الأجهزة المسموح (شامل الرئيسي) جزء من الترخيص.</p>
+        <p>كل جهاز ليه طابعاته ودرجه وميزانه والمخزن اللي بيبيع منه ووردية الكاشير بتاعته؛ الأصناف والمخزون والعملاء والفواتير واحدة. الفروع البعيدة بتتصل عن طريق <b>Tailscale</b> (مجاني) بعنوان الرئيسي على Tailscale. الجهاز الرئيسي لازم يفضل شغال؛ لو وقع، الأجهزة بتظهر رسالة «مش قادر أوصل للجهاز الرئيسي».</p>
+      </div>
+      <div lang="en">
+        <h2>Several computers and branches on the same data</h2>
+        <p>One computer is the <b>main computer</b> and keeps the data: <b>Settings → Network &amp; branches → “Other computers may connect to this one”</b>. The address (e.g. <code>192.168.1.10:7790</code>) and the connection key are shown. If Windows asks about the firewall, choose “Allow”.</p>
+        <p>On any other computer: from the activation or first-run screen, or Settings → Network, press <b>“Connect to a main computer”</b> and enter the address and key. A connected computer needs no key of its own; it runs on the main computer's license, which sets how many computers (including the main one) are allowed.</p>
+        <p>Each computer keeps its own printers, drawer, scale, selling warehouse and cashier shift; products, stock, customers and invoices are shared. Remote branches connect over <b>Tailscale</b> (free) using the main computer's Tailscale address. The main computer must stay on; if it goes down the others show “Can't reach the main computer”.</p>
+      </div>
+    </section>
+
+    <section id="eta">
+      <div lang="ar">
+        <h2>الفاتورة والإيصال الإلكتروني (مصلحة الضرائب)</h2>
+        <p>من <b>الإعدادات ← الفاتورة الإلكترونية</b> العميل بيدخل بياناته بنفسه: رقم التسجيل الضريبي، كود النشاط والفرع والعنوان، Client ID و Secret من بوابة المنظومة (للفواتير)، وبيانات كل جهاز كاشير كـ POS (للإيصالات)، وبرنامج التوقيع بتاع الـ USB Token، والأكواد الافتراضية للأصناف. وفيه «اختبر الدخول» و«معاينة آخر فاتورة».</p>
+        <p>بعد التفعيل كل بيع ومرتجع بيتبعت لوحده في الخلفية — الشركات (ليها رقم ضريبي) فاتورة إلكترونية، والأفراد إيصال إلكتروني — والبيع عمره ما بيستنى النت. صفحة <b>🏛 الفاتورة الإلكترونية</b> بتوري كل مستند وحالته (في الانتظار، اتبعت، صالح، مرفوض بالسبب) مع «ابعت تاني» و«تجاهل».</p>
+        <p><b>مهم:</b> ابدأ دايمًا على «بيئة التجربة» لحد ما المستندات تطلع «صالح»، وبعدين حوّل للفعلي. الربط مكتوب حسب المواصفات المنشورة وما اتجربش لسه على المنظومة الحقيقية.</p>
+      </div>
+      <div lang="en">
+        <h2>Egyptian e-invoice and e-receipt (ETA)</h2>
+        <p>In <b>Settings → E-invoice</b> the customer enters their own details: tax registration number, activity and branch codes, address, the ERP Client ID and Secret (invoices), each till's POS registration (receipts), the USB-token signer and default item codes. “Test login” and “Preview the last sale” check them.</p>
+        <p>Once on, every sale and return is sent in the background — companies (with a tax number) get an e-invoice, individuals an e-receipt — and selling never waits for the internet. The <b>🏛 E-invoice</b> page lists every document with its status (waiting, sent, valid, rejected with the reason) and “Send again” / “Skip”.</p>
+        <p><b>Important:</b> always start on pre-production until documents come back Valid, then switch to production. The integration follows the published specification and has not yet been run against the live system.</p>
       </div>
     </section>
 

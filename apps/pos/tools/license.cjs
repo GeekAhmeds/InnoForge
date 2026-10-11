@@ -5,7 +5,7 @@
 //
 //   node tools/license.cjs keygen                     # once: create the key pair
 //   node tools/license.cjs issue --machine 7F3A-91C2-04BE-D5E8-2A6F --customer "مكتبة النور" [--days 365]
-//        [--edition basic|market|restaurant|trading|full] [--addons warehouses,employees] [--users 5] [--warehouses 3]
+//        [--edition basic|market|restaurant|trading|full] [--addons warehouses,employees] [--users 5] [--warehouses 3] [--devices 3]
 //   node tools/license.cjs machine                    # print this computer's Machine ID
 //
 // Resellers (they never get the vendor key):
