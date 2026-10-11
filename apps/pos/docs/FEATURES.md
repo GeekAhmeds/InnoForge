@@ -89,6 +89,7 @@ Known limits (by design, for now):
 | Signed automatic updates from the vendor server | ✅ | `updater.cjs`, `tools/sign-update.cjs`, CI workflow |
 | Daily + pre-update backups, manual backup/restore | ✅ | `autoBackup`, Settings → Data |
 | Windows installer, Linux AppImage/deb | ✅ (Windows installer not yet run on real Windows) | CI |
+| Automatic upload of updates to the server | ⏳ | CI `publish` job ready (incl. SSH jump host); server choice and `POS_DEPLOY_*` secrets pending — see `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟» |
 
 ## Pending — suggested plans
 

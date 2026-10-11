@@ -91,3 +91,4 @@ CI (`.github/workflows/pos-installer.yml`) builds Windows + Linux on every push 
 ## Things that are deliberately NOT done yet
 
 - Egyptian e-invoice (ETA) integration and multi-branch / multi-device sync — see `docs/FEATURES.md` → *Pending*.
+- Update server hosting is half done: the app checks `https://0x01source.com:7999/srv/InnoForge/PoS/` (since 0.1.26) and updates are signed (`POS_SIGNING_KEY` set, 0.1.27 is the first signed build), but `0x01source.com` points at the Hetzner server while the files sit on the office server `inno`, so the URL does not open from outside yet. Where to host is undecided and the `POS_DEPLOY_*` secrets are not set. Current state and options: `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟».
