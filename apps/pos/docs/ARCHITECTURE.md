@@ -1,0 +1,104 @@
+# InnoForge POS — Architecture
+
+## 1. Big picture
+
+```
+┌──────────────────────── Electron main process (Node) ────────────────────────┐
+│ main.cjs ── IPC router ──► services/index.cjs ──► node:sqlite (one .db file)  │
+│    │  pos:call(ns, method, arg) → { ok, data } | { ok:false, code, message } │
+│    ├─ license.cjs   (Ed25519 key, bound to the machine ID)                    │
+│    ├─ updater.cjs   (electron-updater + our own signature check)              │
+│    ├─ excel.cjs     (exceljs)                                                 │
+│    ├─ kds-server.cjs ─ HTTP :7799 ─► kds.html (kitchen screen, any browser)   │
+│    └─ printing / PDF / backups / serial-port picking for scales               │
+└──────────────▲─────────────────────────────────────────────────────────────────┘
+               │ contextBridge (preload.cjs → window.posBridge)
+┌──────────────┴──────────── Renderer (React, sandboxed) ───────────────────────┐
+│ App.jsx (context) → pages/* → components/* ; lib/api.js proxies every call    │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Offline by design.** Everything lives in `userData/innoforge-pos.db` (WAL mode). The only network use is the update check and, optionally, the kitchen screen on the LAN.
+- **One logged-in user per app instance.** `createServices(db)` keeps `session.user`; every method checks it.
+- **The renderer has no Node access** (`sandbox`, `contextIsolation`, no `nodeIntegration`). All privileged work goes through `posBridge`.
+
+## 2. The service layer (`electron/services/index.cjs`)
+
+A single factory returns namespaces. Those listed in `EXPOSED` (main.cjs) are callable from the UI:
+
+| Namespace | Responsibility |
+|---|---|
+| `settings` | key/value settings with typed defaults (`DEFAULT_SETTINGS`); `newKdsKey` |
+| `auth`, `users` | setup, PIN login (scrypt), roles + per-user permission overrides, approvers, salespeople |
+| `categories`, `products` | catalog, units, price-list prices, barcodes (incl. scale labels), expiry batches, best sellers |
+| `tables`, `floor` | restaurant tables; transfer / merge / split bill / printed check |
+| `shifts` | open/close drawer, Z-report (`shiftSummary`) |
+| `orders` | `quote` (price a cart), `saveOpen`, `sendToKitchen`, `checkout`, `refund`, `voidOpen`, serial search |
+| `customers` | accounts, statement, open invoices, receipts (`collect`, `voidReceipt`), cheques, aging, loyalty points |
+| `suppliers`, `purchases`, `rebates` | purchasing (line discount %, bonus units), supplier payments, returns, volume rebates |
+| `expenses`, `reports`, `commissions`, `auditLog` | money out, reporting, sales-rep commission, activity log |
+| `priceLists`, `promotions`, `quotes`, `stockCounts`, `importer` | trading tools, automatic promotions, quotations, stock taking, Excel import |
+| `kitchenStations` | kitchen stations, printers, category routing |
+| `kds` *(not exposed)* | kitchen display state / bump / recall — only the local HTTP server calls it |
+
+Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra)`, `audit(...)`, `PosError(code)`, `transaction(db, fn)`, helpers `int / num / str / plain / plainAll`, `dateRange(from, to)`.
+
+## 3. Data model (by migration)
+
+| Ver | Adds |
+|---|---|
+| v1 | `settings`, `users`, `categories`, `products`, `dining_tables`, `shifts`, `orders`, `order_items`, `payments`, `returns`, `return_items`, `stock_moves` |
+| v2 | `suppliers`, `purchases`, `purchase_items`, `supplier_payments`, `expenses` |
+| v3 | `customers`, `customer_payments`, `orders.customer_id/credit` |
+| v4 | supervisor role, `users.permissions` (JSON overrides), `commission_rate`, `orders.salesperson_id`, `audit_log` |
+| v5 | opening balances for customers/suppliers |
+| v6 | `price_lists`, `product_prices`, `product_units`, `batches`, `quotes`, `quote_items`, `purchase_returns(+_items)`, `stock_counts(+_items)`, expiry/serial flags |
+| v7 | `promotions`, loyalty (`customers.points`, `loyalty_moves`) |
+| v8 | receipt vouchers on `customer_payments` (number, status, cheque fields, collector), `payment_allocations`, `customers.payment_terms/discount_percent`, `orders.due_date`, `order_items.customer_discount`, `products.supplier_id`, purchase bonus / line discount, `supplier_rebates` |
+| v9 | `quote_items.manual_discount` |
+| v10 | `orders.guests/check_printed_at`, `kitchen_stations`, `categories/products.station_id`, `kitchen_tickets` |
+| v11 | `products.by_weight`, `products.plu` |
+
+Key relationships: an **order** is a cart that is `open` (held cart / table) then `completed` (gets `invoice_no`) or `void`. `orders.credit` is the part left on the customer's account. Stock is always in **base units** (`unit_factor` converts cartons). `stock_moves` is the stock ledger; `batches` hold expiry-tracked stock (FEFO).
+
+## 4. Main flows
+
+### Selling (`orders.checkout`)
+1. `priceCart(cart)` — re-prices every line from the DB: unit price (unit / price list / base), customer standing discount, manual discount, best automatic promotion; then `computeTotals` (tax inclusive/exclusive, service for dine-in).
+2. Stock check (if negative stock is off), serial numbers for serial-tracked items.
+3. Payments: methods `cash / card / wallet / bank / other` + loyalty `points`. Unpaid remainder → **credit sale** (needs a customer, `credit_sale` permission, credit limit); due date = explicit, customer terms, or `overdue_days`.
+4. `authorizeCart` — manual discounts within `max_discount`, price overrides, credit; otherwise `APPROVAL_REQUIRED`.
+5. Persist order + lines, invoice number, payments (change comes out of cash), stock moves, loyalty, quote → invoiced, audit, auto kitchen tickets.
+
+### Customer accounts and collections
+- Balance = opening + Σ credit sales − Σ posted `customer_payments` (receipts, settlement discounts, return credits).
+- `openItems(customerId)`: payments **allocated** to invoices settle those first; everything else (unallocated money, credit opening balance, over-allocations) settles the oldest debts; what is left is an **advance**.
+- Receipt voucher = rows sharing a `receipt_no` (money row + optional `discount` row). Cheques reduce the balance when received; *bounced* reverses them (and their discount). Voiding needs `void` + reason; cash from a closed shift cannot be voided.
+- Aging buckets by invoice age; *overdue* = past its due date.
+
+### Restaurant
+Floor → table (guests) → cashier screen with the table's open order → `sendToKitchen` splits unsent kitchen items into **tickets per station** (product station → category station → first station) → printed per station and shown on the KDS → chef bumps new → preparing → ready (✅ on the floor) → served. Check (pre-bill), transfer, merge, split are in `floor`.
+
+### Purchasing and suppliers
+Purchase lines: unit cost, trade discount %, bonus units (free) → weighted average cost per base unit, stock and batches. Supplier balance = opening + purchases − payments − return credits − rebates. Rebate agreements compute progress on purchases or on sales of the supplier's products and are settled as a credit on the supplier account.
+
+### Scales
+- **Label scales:** `products.byBarcode` recognises EAN-13 labels `prefix + PLU + value + check` (settings `scale_*`), matches `products.plu`, returns `scale.qty`.
+- **Cable scales:** renderer `lib/scale.js` uses Web Serial; main's `select-serial-port` handler picks the port saved in settings. `lib/scale-parse.js` understands common formats (`ST,GS,+1.250kg`, `001250` grams…).
+
+## 5. Security model
+
+- **Licensing** (`license.cjs`): key = `base64url(payload).base64url(Ed25519 sig)`; payload `{product, machine, customer, issued, expires}`. Machine ID = SHA-256 of the OS machine GUID. Clock rollback is detected. Required only when packaged.
+- **Code protection**: main process obfuscated heavily, renderer lightly; asar + integrity fuse, `onlyLoadAppFromAsar`, `runAsNode` off, no inspector. This raises the bar; it is not unbreakable.
+- **Updates**: the app installs an update only if `<installer>.sig` verifies `innoforge-pos-update:<version>:<sha512>` with the vendor public key. Unsigned or wrongly signed updates are rejected.
+- **Permissions**: role defaults + per-user overrides; admins always have everything; approvals need another user with the permission *and* `approve`; failed approvals are audited (written after rollback).
+- **Kitchen screen server**: binds to 127.0.0.1 unless LAN is enabled; every API call needs the access key (timing-safe compare); the page has a strict CSP; it can only read tickets and move their status.
+- **Backups**: daily copy (14 kept) and one before each update, in `userData/backups`.
+
+## 6. Renderer conventions
+
+- `useApp()` gives `settings, user, shift, t, tErr, notify, printDoc, withApproval, ask, can, setPage, openInPos…`.
+- `useLoad(loader, deps)` → `[data, reload, setData]`.
+- Modals: `Modal`, fields: `Field`, toggles: `Toggle` from `components/ui.jsx`.
+- Selling screens are configurable (`lib/screens.js`): cashier (`pos`), restaurant floor (`floor`), trading invoice (`invoice`).
+- Printable documents are plain HTML strings built in `lib/receipt.js`.

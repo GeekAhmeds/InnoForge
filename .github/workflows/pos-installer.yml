@@ -1,16 +1,17 @@
 name: POS installer
 
 # Every push builds signed Windows and Linux installers + the update files as artifacts.
-# Running it manually with "publish" ticked also uploads the update to the server,
-# so every installed copy picks it up automatically.
+# Pushes to main also upload the update to the server automatically (when the deploy
+# secrets are set), so every installed copy updates itself. Running the workflow by hand
+# with "publish" ticked uploads from any branch.
 #
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   POS_SIGNING_KEY   contents of pos-license-private.pem (signs updates; required to publish)
-#   POS_DEPLOY_HOST   server host name for upload over SSH, e.g. 0x01source.com      (optional)
-#   POS_DEPLOY_PORT   SSH port (default 22)                                          (optional)
-#   POS_DEPLOY_USER   SSH user                                                       (optional)
-#   POS_DEPLOY_KEY    SSH private key for that user                                  (optional)
-#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7788/srv/InnoForge/PoS/ (optional)
+#   POS_DEPLOY_HOST   server host name for upload over SSH, e.g. 0x01source.com
+#   POS_DEPLOY_PORT   SSH port (default 22)
+#   POS_DEPLOY_USER   SSH user that can write to the update folder
+#   POS_DEPLOY_KEY    SSH private key for that user
+#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7788/srv/InnoForge/PoS/
 
 on:
   workflow_dispatch:
@@ -75,21 +76,40 @@ jobs:
           path: apps/pos/release/update/
           retention-days: 30
 
+  # Collects both platforms' update files and uploads them in one go (scp-action needs a Linux runner).
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: inputs.publish || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    env:
+      HAS_DEPLOY: ${{ secrets.POS_DEPLOY_HOST != '' && secrets.POS_DEPLOY_KEY != '' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-server-files-*
+          path: update
+          merge-multiple: true
       - name: Check publish requirements
-        if: inputs.publish
+        id: check
         shell: bash
         run: |
-          ls release/update/*.sig >/dev/null 2>&1 || { echo "::error::POS_SIGNING_KEY secret is missing: installed apps would reject this update."; exit 1; }
-          [ -n "${{ secrets.POS_DEPLOY_HOST }}" ] || { echo "::error::POS_DEPLOY_* secrets are not set. Download the 'update-server-files' artifact and upload it to the server manually."; exit 1; }
-
+          ls -la update
+          if ! ls update/*.sig >/dev/null 2>&1; then
+            echo "::error::POS_SIGNING_KEY secret is missing: installed apps would reject this update."; exit 1
+          fi
+          if [ "$HAS_DEPLOY" != "true" ]; then
+            if [ "${{ inputs.publish }}" = "true" ]; then echo "::error::POS_DEPLOY_* secrets are not set."; exit 1; fi
+            echo "::notice::Deploy secrets not set — skipping the upload. Download the update-server-files artifacts and upload them by hand."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload to update server
-        if: inputs.publish
+        if: steps.check.outputs.skip != 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.POS_DEPLOY_HOST }}
           port: ${{ secrets.POS_DEPLOY_PORT || 22 }}
           username: ${{ secrets.POS_DEPLOY_USER }}
           key: ${{ secrets.POS_DEPLOY_KEY }}
-          source: apps/pos/release/update/*
+          source: update/*
           target: ${{ secrets.POS_DEPLOY_PATH }}
-          strip_components: 4
+          strip_components: 1

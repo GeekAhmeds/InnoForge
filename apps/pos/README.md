@@ -39,6 +39,13 @@ Everything runs locally: data lives in a SQLite file on the machine, so you don'
 - **Barcode labels**: 38×25, 50×30, 58×40 mm or A4 sheets, EAN-13 / Code 128, and automatic barcodes for products without one.
 - **Excel**: import products, customers and suppliers from a template or your own sheet (Arabic or English headers, any order, row-by-row preview); export products, customers, suppliers, invoices and reports.
 - **WhatsApp & PDF**: send invoices, quotes and statements to the customer's WhatsApp or save them as A4 PDFs.
+- **Selling screens**: fast cashier, restaurant floor (tables, check, move/merge/split bill) and a trading sales-invoice screen — each business turns on the ones it needs.
+- **Collections**: numbered receipt vouchers (cash, card, wallet, bank transfer, cheque), allocation to invoices, settlement discounts, advances, cheque register (cleared / bounced), payment terms and due dates.
+- **Trade terms**: standing customer discounts, supplier line discounts and bonus units, supplier rebate agreements with targets.
+- **Kitchen**: stations with their own printers, and a kitchen display screen on this PC or on tablets over the local network.
+- **Scales**: label-printing scale barcodes (weight or price) and scales connected by cable.
+
+> Developers: start with [`CLAUDE.md`](CLAUDE.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/FEATURES.md`](docs/FEATURES.md). Arabic overview: [`docs/SYSTEM-AR.md`](docs/SYSTEM-AR.md).
 - **Device licensing**: installed copies only run on the one computer they were activated for, for a period you choose.
 - Arabic (RTL) and English UI.
 - One-click backup & restore of the database file.
@@ -149,6 +156,8 @@ Key design decisions:
 - للشركات التجارية: قوائم أسعار (جملة)، ووحدات (كرتونة/قطعة)، وعروض أسعار تتحول لفواتير، وفاتورة A4 باللوجو، وأعمار ديون، ومرتجع للمورد، وجرد، وتواريخ صلاحية، وسيريال.
 - عروض تلقائية (خصم أو اشتري 2 وخد 1) ونقاط ولاء للعملاء.
 - طباعة ملصقات باركود، ورفع وتنزيل الأصناف والعملاء والموردين بشيت إكسيل، وإرسال الفواتير واتساب أو PDF.
+- 3 شاشات بيع (كاشير، صالة مطعم، فاتورة شركات)، وسندات قبض وشيكات وتواريخ استحقاق، وخصم دائم للعميل وبونص الموردين، وأقسام مطبخ بطابعاتها وشاشة مطبخ على تابلت، وميزان إلكتروني.
+- تعريف السيستم للمبرمجين: [`docs/SYSTEM-AR.md`](docs/SYSTEM-AR.md).
 
 **التشغيل:**
 
