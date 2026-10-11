@@ -779,3 +779,86 @@ test('treasury: cash box and bank, transfers, receipts into the bank, cheques bo
   const ov = s.treasury.overview();
   assert.deepEqual([ov.cash, ov.bank, ov.chequesOut.n], [54000, 509500, 0]);
 });
+
+test('warehouses: stock per warehouse, transfers keep totals, sales and purchases use the right warehouse', () => {
+  const { s, db } = setup({ tax_rate: 0, allow_negative_stock: false });
+  const id = s.products.save({ name: 'Rice', price: 1000, cost: 600, stock: 10 });
+  assert.equal(s.warehouses.list().length, 1);
+  const store = s.warehouses.save({ name: 'Store room' });
+  const by = () => s.warehouses.stock().find((p) => p.id === id).by;
+  assert.deepEqual(by(), { 1: 10 });
+  // Goods bought into the store room do not reach the shop shelf.
+  s.purchases.create({ items: [{ product_id: id, qty: 20, unit_cost: 600 }], warehouseId: store });
+  assert.deepEqual(by(), { 1: 10, [store]: 20 });
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 30);
+  s.shifts.open({ openingCash: 0 });
+  const cart = (qty) => ({ items: [{ product_id: id, qty }], payments: [{ method: 'cash', amount: qty * 1000 }] });
+  assert.equal(tryCode(() => s.orders.checkout(cart(12))), 'OUT_OF_STOCK'); // only 10 in the selling warehouse
+  assert.equal(tryCode(() => s.warehouses.transfer({ fromId: store, toId: 1, items: [{ product_id: id, qty: 25 }] })), 'OUT_OF_STOCK');
+  assert.equal(tryCode(() => s.warehouses.transfer({ fromId: 1, toId: 1, items: [{ product_id: id, qty: 1 }] })), 'INVALID_WAREHOUSE');
+  const tr = s.warehouses.transfer({ fromId: store, toId: 1, items: [{ product_id: id, qty: 5 }] });
+  assert.equal(tr.items[0].qty, 5);
+  assert.deepEqual(by(), { 1: 15, [store]: 15 });
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 30);
+  s.orders.checkout(cart(12));
+  assert.deepEqual(by(), { 1: 3, [store]: 15 });
+  // A count of the store room only touches the store room.
+  const c = s.stockCounts.start({ warehouseId: store });
+  assert.equal(c.items[0].expected, 15);
+  s.stockCounts.set({ id: c.id, productId: id, counted: 14 });
+  s.stockCounts.apply(c.id);
+  assert.deepEqual(by(), { 1: 3, [store]: 14 });
+  assert.equal(db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock, 17);
+  // Selling from the store room computer.
+  s.settings.save({ sale_warehouse_id: store });
+  s.orders.checkout(cart(4));
+  assert.deepEqual(by(), { 1: 3, [store]: 10 });
+  assert.equal(s.warehouses.transfers().length, 1);
+});
+
+test('installments: schedule splits the debt, collections pay the earliest first, overdue shows per installment', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const id = s.products.save({ name: 'Fridge', price: 1000000, cost: 700000, stock: 3 });
+  const cust = s.customers.save({ name: 'Hassan', phone: '0122', credit_limit: 5000000 });
+  s.shifts.open({ openingCash: 0 });
+  const order = s.orders.checkout({ items: [{ product_id: id, qty: 1 }], customer_id: cust, payments: [{ method: 'cash', amount: 100000 }] });
+  assert.equal(order.credit, 900000);
+  const plan = s.installments.create({ orderId: order.id, count: 4, periodMonths: 1, firstDue: '2020-01-31' });
+  assert.equal(plan.down_payment, 100000);
+  assert.deepEqual(plan.items.map((i) => [i.due_date, i.amount]), [['2020-01-31', 225000], ['2020-02-29', 225000], ['2020-03-31', 225000], ['2020-04-30', 225000]]);
+  assert.equal(tryCode(() => s.installments.create({ orderId: order.id, count: 2 })), 'PLAN_EXISTS');
+  // Collect one installment and a bit: it settles the first and part of the second.
+  s.customers.collect({ customerId: cust, amount: 300000 });
+  const after = s.installments.get(order.id);
+  assert.deepEqual(after.items.map((i) => i.open), [0, 150000, 225000, 225000]);
+  assert.equal(after.items[0].status, 'paid');
+  assert.equal(after.items[1].status, 'overdue');
+  // The collection screen sees one line for the invoice.
+  const inv = s.customers.openInvoices(cust);
+  assert.equal(inv.open.length, 1);
+  assert.equal(inv.open[0].open, 600000);
+  assert.equal(s.installments.due({ days: 7 }).length, 3); // all three remaining are overdue (2020)
+  assert.equal(s.installments.plans({ openOnly: true })[0].count_left, 3);
+  // Allocating more than the invoice owes is refused; exactly the rest is fine.
+  assert.equal(tryCode(() => s.customers.collect({ customerId: cust, amount: 700000, allocations: [{ order_id: order.id, amount: 700000 }] })), 'ALLOCATION_EXCEEDS_DUE');
+  s.customers.collect({ customerId: cust, amount: 600000, allocations: [{ order_id: order.id, amount: 600000 }] });
+  assert.equal(s.installments.get(order.id).open, 0);
+  assert.equal(s.installments.plans({ openOnly: true }).length, 0);
+});
+
+test('installments: only for a customer credit invoice; cancelling restores a plain invoice', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const id = s.products.save({ name: 'TV', price: 600000, cost: 1, stock: 5 });
+  const cust = s.customers.save({ name: 'Mona', credit_limit: 5000000 });
+  s.shifts.open({ openingCash: 0 });
+  const cash = s.orders.checkout({ items: [{ product_id: id, qty: 1 }], payments: [{ method: 'cash', amount: 600000 }] });
+  assert.equal(tryCode(() => s.installments.create({ orderId: cash.id, count: 3 })), 'NOT_CREDIT_SALE');
+  const o = s.orders.checkout({ items: [{ product_id: id, qty: 1 }], customer_id: cust, payments: [] });
+  assert.equal(tryCode(() => s.installments.create({ orderId: o.id, count: 0 })), 'INVALID_INSTALLMENTS');
+  const plan = s.installments.create({ orderId: o.id, count: 7 });
+  assert.equal(plan.items.reduce((sum, i) => sum + i.amount, 0), 600000);
+  assert.equal(plan.items.length, 7);
+  s.installments.cancel(o.id);
+  assert.equal(s.installments.get(o.id), null);
+  assert.equal(s.customers.openInvoices(cust).open[0].open, 600000);
+});

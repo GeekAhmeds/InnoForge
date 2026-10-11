@@ -248,7 +248,7 @@ function Users() {
 }
 
 // Detail fields holding money (stored in minor units) and how to label every field.
-const AUDIT_MONEY = new Set(['amount', 'discount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to']);
+const AUDIT_MONEY = new Set(['amount', 'discount', 'price', 'cost', 'opening_cash', 'expected', 'counted', 'difference', 'total', 'paid', 'cash', 'from', 'to', 'financed']);
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6];
 

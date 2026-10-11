@@ -494,3 +494,17 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid 
 .card.acct { margin: 0; display: flex; flex-direction: column; gap: 6px; border-top: 4px solid var(--good); }
 .card.acct.bank { border-top-color: var(--brand); }
 .acct-balance { font-size: 26px; font-weight: 800; direction: ltr; text-align: end; }
+
+/* installments */
+button.link { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; cursor: pointer; font: inherit; }
+.inst-fields { border: 1px dashed var(--line, #ddd); border-radius: 10px; padding: 8px 10px; margin-top: 8px; }
+.badge.inst-paid { background: #d1fae5; color: #065f46; }
+.badge.inst-overdue { background: #fee2e2; color: #991b1b; }
+.badge.inst-partial { background: #fef3c7; color: #92400e; }
+
+/* warehouses */
+.wh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 12px; }
+.wh-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.wh-card.on { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft, #e8efff); }
+.wh-card.dim { opacity: .55; }
+.nowrap-head h3, .nowrap-head label { white-space: nowrap; }

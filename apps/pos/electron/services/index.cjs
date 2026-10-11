@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
   drawer_pin: 0, // ESC/POS drawer connector: 0 = pin 2, 1 = pin 5
   display_message: '', // customer display: line shown when idle (offers, welcome)
   customer_display: false, // open the customer-facing screen with the cashier
+  sale_warehouse_id: 1, // the warehouse this computer sells from (and returns go back to)
 };
 
 class PosError extends Error {
@@ -457,7 +458,12 @@ function createServices(db) {
         params.push(q, q, q);
       }
       const sql = `${PRODUCT_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.name LIMIT 500`;
-      const rows = withUnitsAndPrices(plainAll(db.prepare(sql).all(...params)));
+      let rows = withUnitsAndPrices(plainAll(db.prepare(sql).all(...params)));
+      // The selling screens show what this computer's warehouse holds.
+      if ((forSale || top) && multiWarehouse()) {
+        const wh = saleWarehouse();
+        rows = rows.map((r) => (r.track_stock ? { ...r, total_stock: r.stock, stock: whQty(wh, r.id) } : r));
+      }
       return can('view_cost') ? rows : rows.map(({ cost, ...r }) => r);
     },
     get(id) {
@@ -594,16 +600,39 @@ function createServices(db) {
     },
   };
 
+  // ---------- warehouses ----------
+  // products.stock is the total; warehouse_stock splits it per warehouse. With a single
+  // warehouse the two are the same figure.
+  function saleWarehouse() {
+    const id = int(getSettings().sale_warehouse_id) || 1;
+    return db.prepare('SELECT 1 FROM warehouses WHERE id = ? AND active = 1').get(id) ? id : 1;
+  }
+  const multiWarehouse = () => db.prepare('SELECT COUNT(*) AS n FROM warehouses').get().n > 1;
+  function whAdd(warehouseId, productId, qty) {
+    db.prepare(`INSERT INTO warehouse_stock (warehouse_id, product_id, qty) VALUES (?, ?, ?)
+      ON CONFLICT(warehouse_id, product_id) DO UPDATE SET qty = qty + excluded.qty`).run(warehouseId, productId, qty);
+  }
+  const whQty = (warehouseId, productId) => db.prepare('SELECT qty FROM warehouse_stock WHERE warehouse_id = ? AND product_id = ?').get(warehouseId, productId)?.qty ?? 0;
+  /** Puts any difference between the total and the warehouse split into the main warehouse (1). */
+  function syncMainWarehouse() {
+    db.prepare(`INSERT INTO warehouse_stock (warehouse_id, product_id, qty)
+      SELECT 1, p.id, p.stock - COALESCE((SELECT SUM(qty) FROM warehouse_stock w WHERE w.product_id = p.id AND w.warehouse_id != 1), 0)
+      FROM products p WHERE p.track_stock = 1
+      ON CONFLICT(warehouse_id, product_id) DO UPDATE SET qty = excluded.qty`).run();
+  }
+
   /**
    * Changes on-hand stock (base units) and, for expiry-tracked products, the batches:
    * removals consume the earliest expiry first; additions go to the given batch, or
    * back onto the latest-expiring batch when none is named (e.g. customer returns).
    */
-  function moveStock(productId, qty, reason, refId, userId, batch = null) {
+  function moveStock(productId, qty, reason, refId, userId, batch = null, warehouseId = null) {
     if (!qty) return;
+    const wh = warehouseId || saleWarehouse();
     db.prepare('UPDATE products SET stock = stock + ? WHERE id = ? AND track_stock = 1').run(qty, productId);
-    db.prepare('INSERT INTO stock_moves (product_id, qty, reason, ref_id, user_id) VALUES (?, ?, ?, ?, ?)').run(productId, qty, reason, refId, userId);
+    db.prepare('INSERT INTO stock_moves (product_id, qty, reason, ref_id, user_id, warehouse_id) VALUES (?, ?, ?, ?, ?, ?)').run(productId, qty, reason, refId, userId, wh);
     const p = db.prepare('SELECT track_expiry, track_stock FROM products WHERE id = ?').get(productId);
+    if (p?.track_stock) whAdd(wh, productId, qty);
     if (!p?.track_expiry || !p.track_stock) return;
     if (qty < 0) {
       let left = -qty;
@@ -735,7 +764,8 @@ function createServices(db) {
     order.customer_balance = order.customer_id ? customerBalance(order.customer_id) : null;
     order.customer = order.customer_id ? plain(db.prepare('SELECT id, name, phone, address, tax_number, points FROM customers WHERE id = ?').get(order.customer_id)) : null;
     if (order.customer_id && order.credit > 0 && order.status === 'completed') {
-      order.open_amount = openItems(order.customer_id).debts.find((x) => x.order_id === order.id)?.open ?? 0;
+      order.open_amount = openItems(order.customer_id).debts.filter((x) => x.order_id === order.id).reduce((sum, x) => sum + x.open, 0);
+      order.installments = installmentSchedule(order.id);
     }
     return order;
   }
@@ -1052,7 +1082,9 @@ function createServices(db) {
         if (!priced.settings.allow_negative_stock) {
           const need = new Map();
           for (const l of priced.lines) if (l.track_stock) need.set(l.product_id, (need.get(l.product_id) || 0) + l.qty * l.unit_factor);
-          for (const l of priced.lines) if (l.track_stock && need.get(l.product_id) > l.stock) throw new PosError('OUT_OF_STOCK', l.name);
+          // With several warehouses only what is in this computer's warehouse can be sold.
+          const wh = multiWarehouse() ? saleWarehouse() : null;
+          for (const l of priced.lines) if (l.track_stock && need.get(l.product_id) > (wh ? whQty(wh, l.product_id) : l.stock) + 1e-9) throw new PosError('OUT_OF_STOCK', l.name);
         }
 
         // Serial-tracked items need one serial number per piece sold.
@@ -1395,8 +1427,8 @@ function createServices(db) {
     get(id) {
       requirePerm('purchases');
       const p = plain(db.prepare(`
-        SELECT p.*, s.name AS supplier_name, u.name AS user_name FROM purchases p
-        LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id WHERE p.id = ?`).get(id));
+        SELECT p.*, s.name AS supplier_name, u.name AS user_name, w.name AS warehouse_name FROM purchases p
+        LEFT JOIN suppliers s ON s.id = p.supplier_id JOIN users u ON u.id = p.user_id LEFT JOIN warehouses w ON w.id = p.warehouse_id WHERE p.id = ?`).get(id));
       if (!p) throw new PosError('NOT_FOUND');
       p.items = plainAll(db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id));
       p.returns = plainAll(db.prepare('SELECT r.*, u.name AS user_name FROM purchase_returns r JOIN users u ON u.id = r.user_id WHERE r.purchase_id = ? ORDER BY r.id').all(id));
@@ -1407,9 +1439,11 @@ function createServices(db) {
      * Receives goods: adds stock, re-averages product cost and optionally pays now.
      * Anything unpaid stays on the supplier's balance.
      */
-    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [], poId = null, accountId = null, cheque = null } = {}) {
+    create({ supplierId = null, refNo = '', items = [], discount = 0, paid = 0, method = 'cash', fromDrawer = false, notes = '', updatePrices = [], poId = null, accountId = null, cheque = null, warehouseId = null } = {}) {
       const u = requirePerm('purchases').user;
       if (!items.length) throw new PosError('EMPTY_CART');
+      const wh = int(warehouseId) || saleWarehouse();
+      if (!db.prepare('SELECT 1 FROM warehouses WHERE id = ? AND active = 1').get(wh)) throw new PosError('NOT_FOUND');
       if (supplierId && !db.prepare('SELECT 1 FROM suppliers WHERE id = ?').get(supplierId)) throw new PosError('NOT_FOUND');
       return transaction(db, () => {
         const lines = items.map((it) => {
@@ -1435,8 +1469,8 @@ function createServices(db) {
         const paidNow = Math.min(Math.max(0, int(paid)), total);
         if (paidNow > 0 && !supplierId) throw new PosError('SUPPLIER_REQUIRED');
 
-        const purchaseId = Number(db.prepare('INSERT INTO purchases (supplier_id, ref_no, user_id, subtotal, discount, total, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(supplierId, str(refNo), u.id, subtotal, disc, total, str(notes)).lastInsertRowid);
+        const purchaseId = Number(db.prepare('INSERT INTO purchases (supplier_id, ref_no, user_id, subtotal, discount, total, notes, warehouse_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(supplierId, str(refNo), u.id, subtotal, disc, total, str(notes), wh).lastInsertRowid);
         // Spread the invoice discount over the lines so product cost reflects what was really paid.
         const factor = subtotal > 0 ? total / subtotal : 1;
         for (const l of lines) {
@@ -1450,7 +1484,7 @@ function createServices(db) {
           const onHand = current.track_stock ? Math.max(0, current.stock) : 0;
           const newCost = onHand > 0 ? Math.round((onHand * current.cost + baseQty * effective) / (onHand + baseQty)) : effective;
           db.prepare('UPDATE products SET cost = ? WHERE id = ?').run(newCost, l.product.id);
-          if (current.track_stock) moveStock(l.product.id, baseQty, 'purchase', purchaseId, u.id, { batchNo: l.batchNo, expiry: l.expiry, purchaseId });
+          if (current.track_stock) moveStock(l.product.id, baseQty, 'purchase', purchaseId, u.id, { batchNo: l.batchNo, expiry: l.expiry, purchaseId }, wh);
           // Remember who supplies the product (used for sales-based rebates).
           if (supplierId) db.prepare('UPDATE products SET supplier_id = ? WHERE id = ? AND supplier_id IS NULL').run(supplierId, l.product.id);
         }
@@ -1553,10 +1587,21 @@ function createServices(db) {
     const paid = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ? AND status = 'posted'").get(customerId).t;
     const allocTotal = [...allocated.values()].reduce((s, v) => s + v, 0);
     pool += paid - allocTotal;
+    const plans = new Map(db.prepare('SELECT p.order_id, p.id FROM installment_plans p WHERE p.customer_id = ?').all(customerId).map((r) => [r.order_id, r.id]));
     for (const o of db.prepare("SELECT id, invoice_no, completed_at, due_date, total, credit FROM orders WHERE customer_id = ? AND status = 'completed' AND credit > 0 ORDER BY completed_at, id").all(customerId)) {
       const a = allocated.get(o.id) || 0;
       pool += Math.max(0, a - o.credit);
-      debts.push({ order_id: o.id, invoice_no: o.invoice_no, date: o.completed_at, due_date: o.due_date || addDays(o.completed_at, terms), total: o.total, amount: o.credit, open: Math.max(0, o.credit - a) });
+      const base = { order_id: o.id, invoice_no: o.invoice_no, date: o.completed_at, total: o.total };
+      if (!plans.has(o.id)) {
+        debts.push({ ...base, due_date: o.due_date || addDays(o.completed_at, terms), amount: o.credit, open: Math.max(0, o.credit - a) });
+        continue;
+      }
+      // An installment invoice owes each installment on its own date; payments to the
+      // invoice settle the earliest installments first.
+      for (const i of installmentSplit(plans.get(o.id), o.credit)) {
+        const paidHere = Math.min(Math.max(0, a - i.before), i.amount);
+        debts.push({ ...base, due_date: i.due_date, amount: i.amount, open: i.amount - paidHere, installment: i.seq, installments: i.count });
+      }
     }
     for (const d of debts) {
       const take = Math.min(pool, d.open);
@@ -1564,6 +1609,133 @@ function createServices(db) {
       pool -= take;
     }
     return { customer: plain(c), debts, open: debts.filter((d) => d.open > 0), advance: pool };
+  }
+
+  /**
+   * The installments of a plan scaled to what the invoice now owes on credit (returns
+   * lower it): later installments shrink first. `before` = total of earlier installments.
+   */
+  function installmentSplit(planId, credit) {
+    const rows = db.prepare('SELECT seq, due_date, amount FROM installments WHERE plan_id = ? ORDER BY seq').all(planId);
+    let extra = credit - rows.reduce((s, r) => s + r.amount, 0);
+    if (extra > 0 && rows.length) rows[rows.length - 1].amount += extra;
+    for (let k = rows.length - 1; k >= 0 && extra < 0; k--) {
+      const cut = Math.min(rows[k].amount, -extra);
+      rows[k].amount -= cut;
+      extra += cut;
+    }
+    let before = 0;
+    return rows.filter((r) => r.amount > 0).map((r, _i, arr) => { const out = { ...r, before, count: arr.length }; before += r.amount; return out; });
+  }
+
+  function addMonths(date, n) {
+    const [y, m, d] = String(date).slice(0, 10).split('-').map(Number);
+    const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
+  }
+
+  /** A plan with each installment's paid/open state, or null when the invoice has none. */
+  function installmentSchedule(orderId) {
+    const plan = plain(db.prepare(`SELECT p.*, o.invoice_no, o.total, o.credit, c.name AS customer_name, c.phone AS customer_phone
+      FROM installment_plans p JOIN orders o ON o.id = p.order_id JOIN customers c ON c.id = p.customer_id WHERE p.order_id = ?`).get(orderId));
+    if (!plan) return null;
+    const open = new Map(openItems(plan.customer_id).debts.filter((d) => d.order_id === orderId).map((d) => [d.installment, d.open]));
+    const today = new Date().toLocaleDateString('en-CA');
+    plan.items = installmentSplit(plan.id, plan.credit).map((i) => {
+      const left = open.get(i.seq) ?? 0;
+      return { seq: i.seq, due_date: i.due_date, amount: i.amount, open: left, paid: i.amount - left, status: left <= 0 ? 'paid' : i.due_date < today ? 'overdue' : left < i.amount ? 'partial' : 'due' };
+    });
+    plan.open = plan.items.reduce((sum, i) => sum + i.open, 0);
+    plan.paid_count = plan.items.filter((i) => i.status === 'paid').length;
+    return plan;
+  }
+
+  const installments = {
+    /**
+     * Splits what a credit invoice still owes into `count` installments, the first on
+     * `firstDue` and then every `periodMonths` months. What was paid at the sale is the
+     * down payment.
+     */
+    create({ orderId, count, periodMonths = 1, firstDue = '', notes = '', approval = null } = {}) {
+      const u = requirePerm('credit_sale', approval).user;
+      const n = int(count);
+      const every = int(periodMonths) || 1;
+      if (!(n >= 1 && n <= 120) || every < 1 || every > 12) throw new PosError('INVALID_INSTALLMENTS');
+      const order = db.prepare("SELECT * FROM orders WHERE id = ? AND status = 'completed'").get(int(orderId));
+      if (!order || !order.customer_id || !(order.credit > 0)) throw new PosError('NOT_CREDIT_SALE');
+      if (db.prepare('SELECT 1 FROM installment_plans WHERE order_id = ?').get(order.id)) throw new PosError('PLAN_EXISTS');
+      const first = /^\d{4}-\d{2}-\d{2}$/.test(str(firstDue)) ? str(firstDue) : addMonths(new Date().toLocaleDateString('en-CA'), every);
+      const financed = openItems(order.customer_id).debts.filter((d) => d.order_id === order.id).reduce((sum, d) => sum + d.open, 0);
+      if (!(financed > 0)) throw new PosError('NOT_CREDIT_SALE');
+      return transaction(db, () => {
+        const planId = Number(db.prepare(`INSERT INTO installment_plans (order_id, customer_id, down_payment, financed, count, period_months, first_due, notes, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(order.id, order.customer_id, order.total - order.credit, financed, n, every, first, str(notes), u.id).lastInsertRowid);
+        // Anything already paid toward the invoice counts against the first installments.
+        const paidBefore = order.credit - financed;
+        const each = Math.floor(financed / n);
+        const ins = db.prepare('INSERT INTO installments (plan_id, seq, due_date, amount) VALUES (?, ?, ?, ?)');
+        for (let k = 0; k < n; k++) {
+          const amount = (k === 0 ? paidBefore : 0) + (k === n - 1 ? financed - each * (n - 1) : each);
+          ins.run(planId, k + 1, addMonths(first, k * every), amount);
+        }
+        db.prepare('UPDATE orders SET due_date = ? WHERE id = ?').run(addMonths(first, (n - 1) * every), order.id);
+        audit('installment_plan', { entity: 'order', entityId: order.id, details: { invoice: order.invoice_no, financed, count: n, every } });
+        return installmentSchedule(order.id);
+      });
+    },
+    get(orderId) {
+      requireUser();
+      return installmentSchedule(int(orderId));
+    },
+    /** Plans with their progress (optionally one customer's, or only the unfinished ones). */
+    plans({ customerId = null, openOnly = false } = {}) {
+      requireUser();
+      const ids = db.prepare(`SELECT order_id FROM installment_plans ${customerId ? 'WHERE customer_id = ?' : ''} ORDER BY id DESC LIMIT 1000`)
+        .all(...(customerId ? [int(customerId)] : [])).map((r) => r.order_id);
+      return ids.map(installmentSchedule).filter((p) => !openOnly || p.open > 0)
+        .map(({ items, ...p }) => ({ ...p, count: items.length, count_left: items.filter((i) => i.open > 0).length, next: items.find((i) => i.open > 0) || null, overdue: items.filter((i) => i.status === 'overdue').reduce((sum, i) => sum + i.open, 0) }));
+    },
+    /** Installments still open and due within `days` days (overdue ones included). */
+    due({ days = 7 } = {}) {
+      requireUser();
+      const until = addDays(new Date().toLocaleDateString('en-CA'), int(days));
+      const today = new Date().toLocaleDateString('en-CA');
+      const out = [];
+      for (const { customer_id: cid } of db.prepare('SELECT DISTINCT customer_id FROM installment_plans').all()) {
+        const { debts, customer } = openItems(cid);
+        for (const d of debts) {
+          if (!d.installment || d.open <= 0 || d.due_date > until) continue;
+          out.push({ ...d, customer_id: cid, customer_name: customer.name, customer_phone: customer.phone, overdue: d.due_date < today });
+        }
+      }
+      return out.sort((a, b) => a.due_date.localeCompare(b.due_date));
+    },
+    /** Removes the schedule: the invoice becomes an ordinary credit invoice again. */
+    cancel(orderId) {
+      requirePerm('customers_edit');
+      const plan = db.prepare('SELECT * FROM installment_plans WHERE order_id = ?').get(int(orderId));
+      if (!plan) throw new PosError('NOT_FOUND');
+      transaction(db, () => {
+        db.prepare('DELETE FROM installments WHERE plan_id = ?').run(plan.id);
+        db.prepare('DELETE FROM installment_plans WHERE id = ?').run(plan.id);
+        audit('installment_cancel', { entity: 'order', entityId: plan.order_id });
+      });
+      return true;
+    },
+  };
+
+  /** Open debts with one line per invoice (installments of the same invoice summed; earliest due date). */
+  function openByInvoice(open) {
+    const out = [];
+    const byOrder = new Map();
+    for (const d of open) {
+      const prev = d.order_id && byOrder.get(d.order_id);
+      if (prev) { prev.open += d.open; prev.amount += d.amount; continue; }
+      const row = { ...d };
+      if (d.order_id) byOrder.set(d.order_id, row);
+      out.push(row);
+    }
+    return out;
   }
 
   const pendingCheques = (customerId) => db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ? AND method = 'cheque' AND status = 'posted' AND cheque_status = 'pending'").get(customerId).t;
@@ -1664,7 +1836,7 @@ function createServices(db) {
     openInvoices(id) {
       requireUser();
       const { open, advance, customer } = openItems(id);
-      return { open, advance, balance: customerBalance(id), terms_days: termsOf(customer) };
+      return { open: openByInvoice(open), advance, balance: customerBalance(id), terms_days: termsOf(customer) };
     },
     /** Manual points correction (e.g. a welcome bonus); needs customers_edit. */
     adjustPoints({ customerId, points, reason = '' } = {}) {
@@ -1702,7 +1874,7 @@ function createServices(db) {
           approvedBy = requirePerm('discount', approval, (p) => pct <= (p.max_discount ?? 0) + 1e-9).approvedBy;
         }
         // Validate requested allocations against what each invoice still owes.
-        const { open } = openItems(customerId);
+        const open = openByInvoice(openItems(customerId).open);
         const wanted = (Array.isArray(allocations) ? allocations : [])
           .map((a) => ({ order_id: int(a.order_id), amount: Math.max(0, int(a.amount)) })).filter((a) => a.order_id && a.amount > 0);
         for (const a of wanted) {
@@ -2045,7 +2217,7 @@ function createServices(db) {
       for (const l of lines) {
         db.prepare('INSERT INTO purchase_return_items (return_id, purchase_item_id, qty, amount) VALUES (?, ?, ?, ?)').run(id, l.line.id, l.qty, l.amount);
         db.prepare('UPDATE purchase_items SET returned_qty = returned_qty + ? WHERE id = ?').run(l.qty, l.line.id);
-        if (l.line.product_id) moveStock(l.line.product_id, -l.qty * (l.line.unit_factor || 1), 'purchase_return', id, u.id);
+        if (l.line.product_id) moveStock(l.line.product_id, -l.qty * (l.line.unit_factor || 1), 'purchase_return', id, u.id, null, pur.warehouse_id);
       }
       db.prepare('UPDATE purchases SET returned = returned + ? WHERE id = ?').run(amount, purchaseId);
       // The supplier now owes us this much less (recorded like a payment that moves no cash).
@@ -2060,7 +2232,7 @@ function createServices(db) {
 
   // ---------- stock counts ----------
   function getCount(id) {
-    const c = plain(db.prepare('SELECT s.*, u.name AS user_name FROM stock_counts s JOIN users u ON u.id = s.user_id WHERE s.id = ?').get(id));
+    const c = plain(db.prepare('SELECT s.*, u.name AS user_name, w.name AS warehouse_name FROM stock_counts s JOIN users u ON u.id = s.user_id LEFT JOIN warehouses w ON w.id = s.warehouse_id WHERE s.id = ?').get(id));
     if (!c) throw new PosError('NOT_FOUND');
     c.items = plainAll(db.prepare(`SELECT i.*, p.name, p.barcode, p.cost, p.unit FROM stock_count_items i JOIN products p ON p.id = i.product_id
       WHERE i.count_id = ? ORDER BY (i.counted IS NULL), p.name`).all(id));
@@ -2069,21 +2241,114 @@ function createServices(db) {
     if (!can('view_cost')) { c.items = c.items.map(({ cost, ...i }) => i); c.difference_value = null; }
     return c;
   }
+  const warehouses = {
+    list({ includeInactive = true } = {}) {
+      requireUser();
+      const showCost = can('view_cost');
+      return plainAll(db.prepare(`SELECT w.*,
+          (SELECT COUNT(*) FROM warehouse_stock s WHERE s.warehouse_id = w.id AND s.qty > 0) AS items,
+          (SELECT COALESCE(SUM(s.qty * p.cost), 0) FROM warehouse_stock s JOIN products p ON p.id = s.product_id WHERE s.warehouse_id = w.id AND s.qty > 0) AS value
+        FROM warehouses w ${includeInactive ? '' : 'WHERE w.active = 1'} ORDER BY w.id`).all())
+        .map((w) => ({ ...w, value: showCost ? Math.round(w.value) : null, is_sale: w.id === saleWarehouse() }));
+    },
+    save({ id = null, name, active = true } = {}) {
+      requirePerm('products');
+      if (!str(name)) throw new PosError('NAME_REQUIRED');
+      return transaction(db, () => {
+        if (id) {
+          // The main warehouse absorbs differences, so it always stays active.
+          db.prepare('UPDATE warehouses SET name = ?, active = ? WHERE id = ?').run(str(name), id === 1 || active ? 1 : 0, id);
+          return id;
+        }
+        syncMainWarehouse();
+        const newId = Number(db.prepare('INSERT INTO warehouses (name) VALUES (?)').run(str(name)).lastInsertRowid);
+        audit('warehouse_add', { entity: 'warehouse', entityId: newId, details: { name: str(name) } });
+        return newId;
+      });
+    },
+    /** Stock of every tracked product in each warehouse (one column per warehouse). */
+    stock({ search = '', warehouseId = null } = {}) {
+      requireUser();
+      const q = `%${str(search)}%`;
+      const rows = plainAll(db.prepare(`SELECT id, name, barcode, unit, stock, min_stock, cost FROM products
+        WHERE track_stock = 1 AND active = 1 AND (name LIKE ? OR barcode LIKE ?) ORDER BY name LIMIT 1000`).all(q, q));
+      const split = new Map();
+      for (const r of db.prepare('SELECT warehouse_id, product_id, qty FROM warehouse_stock').all()) {
+        if (!split.has(r.product_id)) split.set(r.product_id, {});
+        split.get(r.product_id)[r.warehouse_id] = r.qty;
+      }
+      const showCost = can('view_cost');
+      return rows
+        .map((r) => ({ ...r, cost: showCost ? r.cost : null, by: split.get(r.id) || {} }))
+        .filter((r) => !warehouseId || Math.abs(r.by[warehouseId] || 0) > 1e-9);
+    },
+    /** Moves goods from one warehouse to another (the product totals do not change). */
+    transfer({ fromId, toId, items = [], notes = '' } = {}) {
+      const u = requirePerm('products').user;
+      const from = int(fromId);
+      const to = int(toId);
+      if (!from || !to || from === to) throw new PosError('INVALID_WAREHOUSE');
+      for (const w of [from, to]) if (!db.prepare('SELECT 1 FROM warehouses WHERE id = ? AND active = 1').get(w)) throw new PosError('INVALID_WAREHOUSE');
+      const lines = items.map((i) => ({ product_id: int(i.product_id), qty: num(i.qty) })).filter((i) => i.product_id && i.qty > 0);
+      if (!lines.length) throw new PosError('EMPTY_CART');
+      return transaction(db, () => {
+        const allowNegative = getSettings().allow_negative_stock;
+        const id = Number(db.prepare('INSERT INTO stock_transfers (from_id, to_id, notes, user_id) VALUES (?, ?, ?, ?)').run(from, to, str(notes), u.id).lastInsertRowid);
+        const insMove = db.prepare("INSERT INTO stock_moves (product_id, qty, reason, ref_id, user_id, warehouse_id) VALUES (?, ?, 'transfer', ?, ?, ?)");
+        for (const l of lines) {
+          const p = db.prepare('SELECT id, name, track_stock FROM products WHERE id = ?').get(l.product_id);
+          if (!p) throw new PosError('PRODUCT_NOT_FOUND');
+          if (!p.track_stock) continue;
+          if (!allowNegative && l.qty > whQty(from, p.id) + 1e-9) throw new PosError('OUT_OF_STOCK', p.name);
+          db.prepare('INSERT INTO stock_transfer_items (transfer_id, product_id, name, qty) VALUES (?, ?, ?, ?)').run(id, p.id, p.name, l.qty);
+          whAdd(from, p.id, -l.qty);
+          whAdd(to, p.id, l.qty);
+          insMove.run(p.id, -l.qty, id, u.id, from);
+          insMove.run(p.id, l.qty, id, u.id, to);
+        }
+        const names = (wid) => db.prepare('SELECT name FROM warehouses WHERE id = ?').get(wid).name;
+        audit('stock_transfer', { entity: 'transfer', entityId: id, details: { route: `${names(from)} → ${names(to)}`, items: lines.length } });
+        return warehouses.getTransfer(id);
+      });
+    },
+    transfers({ from, to } = {}) {
+      requireUser();
+      const [f, t] = dateRange(from, to);
+      return plainAll(db.prepare(`SELECT x.*, a.name AS from_name, b.name AS to_name, u.name AS user_name,
+          (SELECT COUNT(*) FROM stock_transfer_items i WHERE i.transfer_id = x.id) AS items,
+          (SELECT COALESCE(SUM(qty), 0) FROM stock_transfer_items i WHERE i.transfer_id = x.id) AS qty
+        FROM stock_transfers x JOIN warehouses a ON a.id = x.from_id JOIN warehouses b ON b.id = x.to_id JOIN users u ON u.id = x.user_id
+        WHERE x.created_at >= ? AND x.created_at < date(?, '+1 day') ORDER BY x.id DESC LIMIT 500`).all(f, t));
+    },
+    getTransfer(id) {
+      requireUser();
+      const x = plain(db.prepare(`SELECT x.*, a.name AS from_name, b.name AS to_name, u.name AS user_name FROM stock_transfers x
+        JOIN warehouses a ON a.id = x.from_id JOIN warehouses b ON b.id = x.to_id JOIN users u ON u.id = x.user_id WHERE x.id = ?`).get(id));
+      if (!x) throw new PosError('NOT_FOUND');
+      x.items = plainAll(db.prepare('SELECT i.*, p.barcode, p.unit FROM stock_transfer_items i JOIN products p ON p.id = i.product_id WHERE i.transfer_id = ? ORDER BY i.id').all(id));
+      return x;
+    },
+  };
+
   const stockCounts = {
     list() {
       requirePerm('purchases');
-      return plainAll(db.prepare(`SELECT s.*, u.name AS user_name, (SELECT COUNT(*) FROM stock_count_items i WHERE i.count_id = s.id) AS items,
+      return plainAll(db.prepare(`SELECT s.*, u.name AS user_name, (SELECT name FROM warehouses w WHERE w.id = s.warehouse_id) AS warehouse_name, (SELECT COUNT(*) FROM stock_count_items i WHERE i.count_id = s.id) AS items,
         (SELECT COUNT(*) FROM stock_count_items i WHERE i.count_id = s.id AND i.counted IS NOT NULL) AS counted
         FROM stock_counts s JOIN users u ON u.id = s.user_id ORDER BY s.id DESC LIMIT 100`).all());
     },
     /** Snapshots expected quantities for all tracked products (optionally one category). */
-    start({ categoryId = null, notes = '' } = {}) {
+    start({ categoryId = null, notes = '', warehouseId = null } = {}) {
       const u = requirePerm('purchases').user;
       if (db.prepare("SELECT 1 FROM stock_counts WHERE status = 'open'").get()) throw new PosError('COUNT_OPEN');
+      const wh = int(warehouseId) || saleWarehouse();
       return transaction(db, () => {
-        const id = Number(db.prepare('INSERT INTO stock_counts (notes, user_id) VALUES (?, ?)').run(str(notes), u.id).lastInsertRowid);
+        const id = Number(db.prepare('INSERT INTO stock_counts (notes, user_id, warehouse_id) VALUES (?, ?, ?)').run(str(notes), u.id, wh).lastInsertRowid);
+        // One warehouse: the product total. Several: what this warehouse holds.
+        const expected = multiWarehouse() ? 'COALESCE((SELECT qty FROM warehouse_stock w WHERE w.product_id = products.id AND w.warehouse_id = ?), 0)' : 'stock';
         db.prepare(`INSERT INTO stock_count_items (count_id, product_id, expected)
-          SELECT ?, id, stock FROM products WHERE active = 1 AND track_stock = 1 ${categoryId ? 'AND category_id = ?' : ''}`).run(...[id, ...(categoryId ? [categoryId] : [])]);
+          SELECT ?, id, ${expected} FROM products WHERE active = 1 AND track_stock = 1 ${categoryId ? 'AND category_id = ?' : ''}`)
+          .run(...[id, ...(multiWarehouse() ? [wh] : []), ...(categoryId ? [categoryId] : [])]);
         audit('count_start', { entity: 'count', entityId: id });
         return getCount(id);
       });
@@ -2121,11 +2386,8 @@ function createServices(db) {
         for (const i of c.items) {
           if (i.counted == null) continue;
           // Sales made during the count moved stock too, so adjust against the current figure.
-          const now = db.prepare('SELECT stock FROM products WHERE id = ?').get(i.product_id).stock;
-          const sold = i.expected - now;
           const diff = i.counted - i.expected;
-          if (Math.abs(diff) > 1e-9) { moveStock(i.product_id, diff, 'count', id, u.id); changed++; }
-          void sold;
+          if (Math.abs(diff) > 1e-9) { moveStock(i.product_id, diff, 'count', id, u.id, null, c.warehouse_id); changed++; }
         }
         db.prepare("UPDATE stock_counts SET status = 'applied', applied_at = datetime('now', 'localtime') WHERE id = ?").run(id);
         audit('count_apply', { entity: 'count', entityId: id, details: { changed, value: c.difference_value } });
@@ -2870,7 +3132,7 @@ function createServices(db) {
 
   return {
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
-    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, requireAdmin, requirePerm, audit, can,
+    auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, requireAdmin, requirePerm, audit, can,
   };
 }
 

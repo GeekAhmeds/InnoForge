@@ -707,6 +707,66 @@ const MIGRATIONS = [
   ALTER TABLE supplier_payments ADD COLUMN void_reason TEXT NOT NULL DEFAULT '';
   ALTER TABLE shifts ADD COLUMN deposited INTEGER NOT NULL DEFAULT 0;
   `,
+  // v15: several warehouses (shop floor, store room, a second branch's store) with stock
+  // per warehouse and transfers between them; installment plans for credit sales.
+  `
+  CREATE TABLE warehouses (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  INSERT INTO warehouses (id, name) VALUES (1, 'المخزن الرئيسي');
+  -- products.stock stays the total over all warehouses; this table splits it.
+  CREATE TABLE warehouse_stock (
+    warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+    product_id   INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    qty          REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (warehouse_id, product_id)
+  );
+  INSERT INTO warehouse_stock (warehouse_id, product_id, qty) SELECT 1, id, stock FROM products WHERE track_stock = 1;
+  ALTER TABLE stock_moves ADD COLUMN warehouse_id INTEGER;
+  ALTER TABLE purchases ADD COLUMN warehouse_id INTEGER;
+  ALTER TABLE stock_counts ADD COLUMN warehouse_id INTEGER;
+  CREATE TABLE stock_transfers (
+    id         INTEGER PRIMARY KEY,
+    from_id    INTEGER NOT NULL REFERENCES warehouses(id),
+    to_id      INTEGER NOT NULL REFERENCES warehouses(id),
+    notes      TEXT NOT NULL DEFAULT '',
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE stock_transfer_items (
+    id          INTEGER PRIMARY KEY,
+    transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+    product_id  INTEGER NOT NULL REFERENCES products(id),
+    name        TEXT NOT NULL,
+    qty         REAL NOT NULL
+  );
+
+  -- An installment plan splits what a credit invoice leaves unpaid into dated installments.
+  CREATE TABLE installment_plans (
+    id            INTEGER PRIMARY KEY,
+    order_id      INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+    customer_id   INTEGER NOT NULL REFERENCES customers(id),
+    down_payment  INTEGER NOT NULL DEFAULT 0,
+    financed      INTEGER NOT NULL,
+    count         INTEGER NOT NULL,
+    period_months INTEGER NOT NULL DEFAULT 1,
+    first_due     TEXT NOT NULL,
+    notes         TEXT NOT NULL DEFAULT '',
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE TABLE installments (
+    id       INTEGER PRIMARY KEY,
+    plan_id  INTEGER NOT NULL REFERENCES installment_plans(id) ON DELETE CASCADE,
+    seq      INTEGER NOT NULL,
+    due_date TEXT NOT NULL,
+    amount   INTEGER NOT NULL
+  );
+  CREATE INDEX idx_installments_plan ON installments(plan_id, seq);
+  `,
 ];
 
 function openDatabase(file) {

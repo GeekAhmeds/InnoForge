@@ -4,6 +4,7 @@ import { openWhatsApp, quoteText, reminderText, statementText } from '../lib/sha
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { a4Html, statementHtml } from '../lib/receipt.js';
 import { Cheques, CollectModal, ReceiptModal, Receipts } from '../components/Collect.jsx';
+import { InstallmentsTab } from '../components/Installments.jsx';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 
@@ -21,6 +22,7 @@ export default function Customers() {
           <button className={tab === 'aging' ? 'on' : ''} onClick={() => setTab('aging')}>{t('aging.title')}{overdue > 0 && <span className="count-badge">{overdue}</span>}</button>
           <button className={tab === 'receipts' ? 'on' : ''} onClick={() => setTab('receipts')}>{t('collect.receipts')}</button>
           <button className={tab === 'cheques' ? 'on' : ''} onClick={() => setTab('cheques')}>{t('cheques.title')}</button>
+          <button className={tab === 'installments' ? 'on' : ''} onClick={() => setTab('installments')}>{t('inst.title')}</button>
           <button className={tab === 'quotes' ? 'on' : ''} onClick={() => setTab('quotes')}>{t('quotes.title')}</button>
         </div>
       </div>
@@ -28,6 +30,7 @@ export default function Customers() {
       {tab === 'aging' && <Aging />}
       {tab === 'receipts' && <Receipts />}
       {tab === 'cheques' && <Cheques />}
+      {tab === 'installments' && <InstallmentsTab />}
       {tab === 'quotes' && <Quotes />}
     </div>
   );

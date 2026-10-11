@@ -319,3 +319,25 @@ export function poHtml(po, settings, t, lang) {
   <p class="muted" style="margin-top:30px">${t('collect.signature')}: ....................</p>
   </body></html>`;
 }
+
+/** A4 installment schedule: the customer signs it at the sale and keeps a copy. */
+export function installmentsHtml(plan, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 14mm; } body { font: 13px/1.5 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
+    h1 { font-size: 20px; margin: 0; } .muted { color: #555; } .head { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: start; } th { background: #eee; } .n { text-align: end; }
+    .sum { display: flex; gap: 24px; flex-wrap: wrap; margin: 10px 0; } .sign { display: flex; justify-content: space-between; margin-top: 40px; }
+  </style></head><body>
+  <div class="head"><div><h1>${esc(settings.business_name)}</h1><div class="muted">${esc(settings.address)} ${settings.phone ? ltr(settings.phone) : ''}</div></div>
+  <div><b>${t('inst.schedule')}</b><div class="muted">${t('receipt.invoice')} #${plan.invoice_no} · ${ltr(String(plan.created_at).slice(0, 10))}</div></div></div>
+  <p>${t('pos.customer')}: <b>${esc(plan.customer_name)}</b> ${plan.customer_phone ? ltr(plan.customer_phone) : ''}</p>
+  <div class="sum"><span>${t('common.total')}: <b>${m(plan.total)}</b></span><span>${t('inst.downPayment')}: <b>${m(plan.down_payment)}</b></span>
+    <span>${t('inst.financed')}: <b>${m(plan.credit)}</b></span><span>${t('inst.count')}: <b>${plan.items.length}</b></span></div>
+  <table><thead><tr><th>#</th><th>${t('inst.dueDate')}</th><th class="n">${t('inst.amount')}</th><th class="n">${t('inst.paid')}</th><th class="n">${t('inst.left')}</th><th>${t('inst.customerSign')}</th></tr></thead><tbody>
+  ${plan.items.map((i) => `<tr><td>${i.seq}</td><td>${ltr(i.due_date)}</td><td class="n">${m(i.amount)}</td><td class="n">${i.paid ? m(i.paid) : ''}</td><td class="n">${i.open ? m(i.open) : '✓'}</td><td></td></tr>`).join('')}
+  </tbody></table>
+  ${plan.notes ? `<p>${esc(plan.notes)}</p>` : ''}
+  <div class="sign"><span>${t('inst.customerSign')}: ....................</span><span>${t('collect.signature')}: ....................</span></div>
+  </body></html>`;
+}

@@ -13,7 +13,7 @@ const METHODS = ['cash', 'card', 'wallet', 'bank', 'cheque'];
  * and which invoices it pays — automatically the oldest, or picked by hand.
  * `orderId` opens it on one invoice (from the invoices page).
  */
-export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
+export function CollectModal({ customerId, orderId = null, presetAmount = null, onClose, onDone }) {
   const { t, tErr, notify, settings, printDoc, lang, withApproval, user, can } = useApp();
   const d = settings.decimals;
   const m = (v) => formatMoney(v, settings);
@@ -25,14 +25,15 @@ export function CollectModal({ customerId, orderId = null, onClose, onDone }) {
     if (!data || f) return;
     const [customer, inv] = data;
     const target = orderId ? inv.open.find((x) => x.order_id === orderId) : null;
-    const amount = target ? target.open : Math.max(0, customer.balance);
+    // presetAmount: one installment of the invoice rather than all it still owes.
+    const amount = target ? Math.min(target.open, presetAmount ?? target.open) : Math.max(0, customer.balance);
     setF({
       amount: amount ? fromMinor(amount, d) : '', method: 'cash', discount: '', notes: '',
       chequeNo: '', bank: '', due: '', collectorId: user?.id || '', accountId: null,
-      manual: !!target, picks: target ? { [target.order_id]: fromMinor(target.open, d) } : {},
+      manual: !!target, picks: target ? { [target.order_id]: fromMinor(amount, d) } : {},
       print: true, whatsapp: false,
     });
-  }, [data, f, orderId, d, user]);
+  }, [data, f, orderId, presetAmount, d, user]);
 
   const [customer, inv, people] = data || [];
   const value = f ? toMinor(f.amount, d) : 0;

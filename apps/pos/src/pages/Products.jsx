@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { WarehousesTab, WarehouseSelect } from '../components/Warehouses.jsx';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
@@ -31,6 +32,7 @@ export default function Products() {
           <button className={tab === 'products' ? 'on' : ''} onClick={() => setTab('products')}>{t('products.title')}</button>
           <button className={tab === 'categories' ? 'on' : ''} onClick={() => setTab('categories')}>{t('products.categories')}</button>
           {can('purchases') && <button className={tab === 'counts' ? 'on' : ''} onClick={() => setTab('counts')}>{t('counts.title')}</button>}
+          <button className={tab === 'warehouses' ? 'on' : ''} onClick={() => setTab('warehouses')}>{t('wh.title')}</button>
           <button className={tab === 'expiry' ? 'on' : ''} onClick={() => setTab('expiry')}>{t('expiry.title')}</button>
           {sellScreens(settings).includes('restaurant') && can('products') && <button className={tab === 'modifiers' ? 'on' : ''} onClick={() => setTab('modifiers')}>{t('mods.title')}</button>}
         </div>
@@ -50,6 +52,7 @@ export default function Products() {
       </div>
 
       {tab === 'counts' && <StockCounts categories={categories || []} />}
+      {tab === 'warehouses' && <WarehousesTab />}
       {tab === 'expiry' && <Expiring />}
       {tab === 'modifiers' && <ModifierGroups />}
       {tab === 'categories' ? (
@@ -325,6 +328,7 @@ function StockCounts({ categories }) {
   const [list, reload] = useLoad(() => api.stockCounts.list(), []);
   const [openId, setOpenId] = useState(null);
   const [categoryId, setCategoryId] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
   const run = async (fn) => { try { await fn(); } catch (err) { notify(tErr(err), 'error'); } };
   const open = list?.find((c) => c.status === 'open');
   return (
@@ -338,7 +342,8 @@ function StockCounts({ categories }) {
                 <option value="">{t('counts.allProducts')}</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <button className="primary" onClick={() => run(async () => { const c = await api.stockCounts.start({ categoryId: Number(categoryId) || null }); reload(); setOpenId(c.id); })}>+ {t('counts.start')}</button>
+              <WarehouseSelect label={false} value={warehouseId} onChange={setWarehouseId} />
+              <button className="primary" onClick={() => run(async () => { const c = await api.stockCounts.start({ categoryId: Number(categoryId) || null, warehouseId: Number(warehouseId) || null }); reload(); setOpenId(c.id); })}>+ {t('counts.start')}</button>
             </div>
           )}
         </div>
@@ -378,7 +383,7 @@ function CountSheet({ id, onClose }) {
   };
   const items = count.items.filter((i) => !filter || i.name.includes(filter) || (i.barcode || '').includes(filter));
   return (
-    <Modal title={`${t('counts.title')} #${count.id} — ${t(`counts.status.${count.status}`)}`} onClose={onClose} width={900}
+    <Modal title={`${t('counts.title')} #${count.id}${count.warehouse_name && count.warehouse_id !== 1 ? ` · ${count.warehouse_name}` : ''} — ${t(`counts.status.${count.status}`)}`} onClose={onClose} width={900}
       footer={<>
         <span>{t('counts.progress')}: <b>{count.counted} / {count.items.length}</b>{count.difference_value != null && <> · {t('counts.value')}: <b className={count.difference_value < 0 ? 'warn' : 'good'}>{formatMoney(count.difference_value, settings)}</b></>}</span>
         <span className="spacer" />

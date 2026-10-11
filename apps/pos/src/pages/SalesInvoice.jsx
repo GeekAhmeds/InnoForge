@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
-import { a4Html } from '../lib/receipt.js';
+import { a4Html, installmentsHtml } from '../lib/receipt.js';
 import { invoiceText, openWhatsApp } from '../lib/share.js';
 import { Empty, Field, Toggle, useApp } from '../components/ui.jsx';
+import { InstallmentFields, newInstallmentForm } from '../components/Installments.jsx';
 import { NoShift } from './Pos.jsx';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 
@@ -26,6 +27,7 @@ export default function SalesInvoice() {
   const m = (v) => formatMoney(v, settings);
   const [customer, setCustomer] = useState(null);
   const [lines, setLines] = useState([]);
+  const [inst, setInst] = useState(null); // installment plan form, when selling in installments
   const [head, setHead] = useState({ price_list_id: '', salesperson_id: '', due_date: '', note: '', discount: '', quote_id: null, quote_no: null });
   const [pay, setPay] = useState({ amount: '', method: 'cash', touched: false });
   const [opts, setOpts] = useState({ print: true, whatsapp: false });
@@ -139,6 +141,7 @@ export default function SalesInvoice() {
     setLines([]);
     setHead({ price_list_id: '', salesperson_id: '', due_date: '', note: '', discount: '', quote_id: null, quote_no: null });
     setPay({ amount: '', method: 'cash', touched: false });
+    setInst(null);
     setSaved(keepSaved);
   }
 
@@ -153,8 +156,18 @@ export default function SalesInvoice() {
         reset();
       } else {
         const payments = paidNow > 0 ? [{ method: pay.method, amount: paidNow }] : [];
-        const order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval, due_date: onAccount > 0 ? head.due_date : null }));
+        let order = await withApproval((approval) => api.orders.checkout({ ...cart, payments, approval, due_date: onAccount > 0 ? head.due_date : null }));
         notify(t('pay.done', { n: order.invoice_no }));
+        if (inst && order.credit > 0) {
+          try {
+            const plan = await withApproval((approval) => api.installments.create({ orderId: order.id, count: Number(inst.count), periodMonths: Number(inst.period), firstDue: inst.firstDue, approval }));
+            if (opts.print) await printDoc(installmentsHtml(plan, settings, t, lang), settings.a4_printer_name);
+            order = await api.orders.get(order.id);
+          } catch (err) {
+            // The sale is saved; the plan can still be made from the invoice.
+            if (err.code !== 'CANCELLED') notify(tErr(err), 'error');
+          }
+        }
         if (opts.print) await printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name);
         if (opts.whatsapp && (order.customer?.phone || order.customer_phone)) openWhatsApp(order.customer?.phone || order.customer_phone, invoiceText(order, settings, t));
         reset(order);
@@ -285,6 +298,12 @@ export default function SalesInvoice() {
             </p>
           )}
           {!customer && paidNow < total && <p className="warn">{t('invoice.needCustomer')}</p>}
+          {customer && onAccount > 0 && (
+            <>
+              <Toggle checked={!!inst} onChange={(v) => setInst(v ? newInstallmentForm() : null)} label={`📆 ${t('inst.sellInInstallments')}`} />
+              {inst && <InstallmentFields value={inst} onChange={setInst} amount={onAccount} />}
+            </>
+          )}
         </div>
         <div className="card inv-totals">
           <div className="trow"><span>{t('pos.subtotal')}</span><span>{m(quote?.subtotal)}</span></div>

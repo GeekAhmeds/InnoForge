@@ -7,6 +7,7 @@ import { today } from './Orders.jsx';
 import { openWhatsApp } from '../lib/share.js';
 import { poHtml } from '../lib/receipt.js';
 import { AccountSelect } from './Treasury.jsx';
+import { WarehouseSelect } from '../components/Warehouses.jsx';
 
 export default function Purchases() {
   const { t } = useApp();
@@ -140,6 +141,7 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
       await api.purchases.create({
         supplierId: Number(form.supplierId) || null,
         refNo: form.refNo,
+        warehouseId: Number(form.warehouseId) || null,
         notes: form.notes,
         discount: toMinor(form.discount, d),
         paid: toMinor(form.paid, d),
@@ -180,6 +182,7 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
           </select>
         </Field>
         <Field label={t('purchases.refNo')}><input value={form.refNo} onChange={set('refNo')} /></Field>
+        <WarehouseSelect value={form.warehouseId} onChange={(v) => setForm((f) => ({ ...f, warehouseId: v }))} />
         <Field label={t('pos.note')}><input value={form.notes} onChange={set('notes')} /></Field>
       </div>
 
@@ -285,7 +288,7 @@ function PurchaseView({ id, onClose }) {
         <><span className="spacer" /><button className="danger-ghost" onClick={() => setReturning(true)}>↩ {t('purchases.returnToSupplier')}</button></>
       )}>
       <div className="meta">
-        <span>{p.created_at}</span><span>{p.supplier_name || '—'}</span>{p.ref_no && <span className="mono">{p.ref_no}</span>}<span>{p.user_name}</span>
+        <span>{p.created_at}</span><span>{p.supplier_name || '—'}</span>{p.ref_no && <span className="mono">{p.ref_no}</span>}<span>{p.user_name}</span>{p.warehouse_name && p.warehouse_id !== 1 && <span>🏬 {p.warehouse_name}</span>}
       </div>
       <table className="grid">
         <thead><tr><th>{t('receipt.item')}</th><th className="num">{t('pos.qty')}</th><th className="num">{t('purchases.unitCost')}</th><th className="num">{t('common.total')}</th><th className="num">{returning ? t('orders.returnQty') : t('orders.alreadyReturned')}</th></tr></thead>

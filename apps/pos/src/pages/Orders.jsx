@@ -6,6 +6,7 @@ import { a4Html, receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { CollectModal } from '../components/Collect.jsx';
+import { MakePlanModal, ScheduleModal } from '../components/Installments.jsx';
 
 export const today = () => new Date().toLocaleDateString('en-CA');
 
@@ -87,8 +88,10 @@ function OrderModal({ id, onClose, onChanged }) {
   const [reason, setReason] = useState('');
   const [refunding, setRefunding] = useState(false);
   const [collecting, setCollecting] = useState(false);
+  const [plan, setPlan] = useState(null); // 'make' | 'view'
   const m = (v) => formatMoney(v, settings);
   if (!order) return null;
+  const refresh = async () => { setOrder(await api.orders.get(order.id)); onChanged(); };
 
   async function doRefund() {
     try {
@@ -122,6 +125,8 @@ function OrderModal({ id, onClose, onChanged }) {
         <>
           {canRefund && <button className="danger-ghost" onClick={() => setRefunding(true)}>↩ {t('orders.refund')}</button>}
           <span className="spacer" />
+          {order.installments ? <button onClick={() => setPlan('view')}>📆 {t('inst.schedule')}</button>
+            : order.open_amount > 0 && <button onClick={() => setPlan('make')}>📆 {t('inst.make')}</button>}
           {order.open_amount > 0 && <button className="primary" onClick={() => setCollecting(true)}>💵 {t('customers.collect')}</button>}
           <button onClick={() => openWhatsApp(order.customer?.phone || order.customer_phone, invoiceText(order, settings, t))}>💬 {t('share.whatsapp')}</button>
           <button onClick={() => savePdf({ html: a4Html(order, 'invoice', settings, t, lang), name: `${t('receipt.invoice')} ${order.invoice_no}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
@@ -183,6 +188,8 @@ function OrderModal({ id, onClose, onChanged }) {
         )}
         {!!order.refunded && <div className="trow warn"><span>{t('orders.refunded')}</span><span>{m(order.refunded)}</span></div>}
       </div>
+      {plan === 'make' && <MakePlanModal order={order} onClose={() => setPlan(null)} onDone={async () => { await refresh(); setPlan('view'); }} />}
+      {plan === 'view' && <ScheduleModal orderId={order.id} onClose={() => setPlan(null)} onChanged={refresh} />}
       {collecting && <CollectModal customerId={order.customer_id} orderId={order.id} onClose={() => setCollecting(false)} onDone={async () => { setCollecting(false); setOrder(await api.orders.get(order.id)); onChanged(); }} />}
       {order.returns.map((r) => (
         <p key={r.id} className="muted">↩ {r.created_at} — {r.user_name} — {m(r.amount)} {r.reason && `— ${r.reason}`}</p>
