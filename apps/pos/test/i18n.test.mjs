@@ -4,11 +4,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ar = (await import(path.join(root, 'src/i18n/ar.js'))).default;
-const en = (await import(path.join(root, 'src/i18n/en.js'))).default;
+// import() needs a file:// URL (a bare C:\ path fails on Windows).
+const load = async (f) => (await import(pathToFileURL(path.join(root, f)).href)).default;
+const ar = await load('src/i18n/ar.js');
+const en = await load('src/i18n/en.js');
 
 function usedKeys(dir) {
   const keys = new Set();
