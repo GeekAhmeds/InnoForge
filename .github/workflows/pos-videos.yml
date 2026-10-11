@@ -1,23 +1,30 @@
 name: POS videos
 
 # Records the tutorial videos and the promo from the real app, then adds an Egyptian-Arabic
-# voice-over (Microsoft neural voices through edge-tts) and subtitles. Run it by hand from
-# the Actions tab; download the "InnoForge-POS-videos" artifact when it finishes.
+# voice-over and subtitles. Voice: Google AI Studio (Gemini TTS, Cairene accent) when the
+# GEMINI_API_KEY secret is set, else Microsoft's free voices; defaults in
+# apps/pos/tools/videos/voice-settings.json. Download the "InnoForge-POS-videos" artifact
+# (videos + voice-samples/) when it finishes.
 on:
   workflow_dispatch:
     inputs:
-      voice:
-        description: Voice
+      engine:
+        description: Voice engine (gemini = Google AI Studio, needs the GEMINI_API_KEY secret; edge = free Microsoft voices)
         type: choice
-        options:
-          - ar-EG-SalmaNeural
-          - ar-EG-ShakirNeural
-        default: ar-EG-SalmaNeural
-      rate:
-        description: Speaking speed (e.g. +0%, +10%, -5%)
-        default: '+0%'
-  # Also re-made automatically when the video scripts change (manual runs need the
-  # workflow on the default branch).
+        options: [settings-file, gemini, edge]
+        default: settings-file
+      voice:
+        description: Voice (Gemini — Kore, Aoede, Leda, Zephyr, Puck, Charon, Orus…; edge — ar-EG-SalmaNeural / ar-EG-ShakirNeural). Empty = settings file
+        default: ''
+      only:
+        description: Only these videos (e.g. 00-promo,01-first-sale). Empty = all
+        default: ''
+      samples_only:
+        description: Only make short samples of every voice (to choose one)
+        type: boolean
+        default: false
+  # Also re-made automatically when the video scripts or tools/videos/voice-settings.json
+  # change (manual runs need the workflow on the default branch).
   push:
     paths:
       - 'apps/pos/tools/videos/**'
@@ -26,10 +33,12 @@ on:
 jobs:
   videos:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: apps/pos
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,25 +50,66 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Voice settings
+        id: voice
+        run: |
+          cfg=tools/videos/voice-settings.json
+          engine="${{ inputs.engine }}"; voice="${{ inputs.voice }}"
+          if [ -z "$engine" ] || [ "$engine" = settings-file ]; then engine=$(jq -r .engine $cfg); fi
+          if [ -z "$voice" ]; then voice=$(jq -r .voice $cfg); fi
+          if [ "$engine" = gemini ] && [ -z "$GEMINI_API_KEY" ]; then
+            echo "::warning::GEMINI_API_KEY secret is not set — using the free Microsoft voice instead"
+            engine=edge; voice=ar-EG-SalmaNeural
+          fi
+          if [ "$engine" = edge ] && [[ "$voice" != ar-* ]]; then voice=ar-EG-SalmaNeural; fi
+          samples=$(jq -r .samples $cfg)
+          echo "engine=$engine" >> $GITHUB_OUTPUT
+          echo "voice=$voice" >> $GITHUB_OUTPUT
+          echo "model=$(jq -r .model $cfg)" >> $GITHUB_OUTPUT
+          echo "samples=$samples" >> $GITHUB_OUTPUT
+          echo "Engine: $engine, voice: $voice"
+
+      # Lines already spoken (same text, voice, engine) are reused instead of paid for again.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/innoforge-voice
+          key: voice-${{ steps.voice.outputs.engine }}-${{ steps.voice.outputs.voice }}-${{ github.run_id }}
+          restore-keys: voice-${{ steps.voice.outputs.engine }}-${{ steps.voice.outputs.voice }}-
+
       - name: System packages (virtual display, ffmpeg, Arabic fonts)
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb ffmpeg fonts-noto-core fonts-noto-color-emoji fonts-kacst
+      - run: pip install edge-tts
+
+      - name: Voice samples (the same sentence in every voice)
+        if: steps.voice.outputs.samples == 'true' || inputs.samples_only
+        run: python3 tools/videos/voiceover.py --samples release/videos/voiced/voice-samples --engine ${{ steps.voice.outputs.engine }} --model "${{ steps.voice.outputs.model }}"
+
       - run: npm ci
+        if: ${{ !inputs.samples_only }}
       - name: Playwright + Chromium (for the promo)
+        if: ${{ !inputs.samples_only }}
         run: |
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
-      - run: pip install edge-tts
       - run: npm run build
+        if: ${{ !inputs.samples_only }}
 
       - name: Record tutorials
+        if: ${{ !inputs.samples_only }}
         run: xvfb-run -a --server-args="-screen 0 1280x800x24" node tools/videos/record.cjs release/videos
       - name: Record promo
+        if: ${{ !inputs.samples_only }}
         run: node tools/videos/promo.cjs tools/videos/promo-assets release/videos/00-promo.mp4
       - name: Egyptian voice-over
-        run: python3 tools/videos/voiceover.py release/videos --voice "${{ inputs.voice || 'ar-EG-SalmaNeural' }}" --rate "${{ inputs.rate || '+0%' }}" --out release/videos/voiced
+        if: ${{ !inputs.samples_only }}
+        run: >
+          python3 tools/videos/voiceover.py release/videos --out release/videos/voiced
+          --engine ${{ steps.voice.outputs.engine }} --voice "${{ steps.voice.outputs.voice }}"
+          --model "${{ steps.voice.outputs.model }}" --only "${{ inputs.only }}"
       - name: Subtitles next to the voiced videos
+        if: ${{ !inputs.samples_only }}
         run: cp release/videos/*.srt release/videos/voiced/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4

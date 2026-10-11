@@ -1,0 +1,6 @@
+{
+  "engine": "gemini",
+  "voice": "Kore",
+  "model": "gemini-2.5-flash-preview-tts",
+  "samples": true
+}
