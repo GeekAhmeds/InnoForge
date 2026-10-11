@@ -3,8 +3,10 @@
 // Records the tutorial videos by driving the real app (Playwright + Electron), with Arabic
 // captions, a visible cursor and title cards drawn on top of the window, then converts
 // them to MP4 with ffmpeg. Needs: npm run build first, ffmpeg on PATH, and on Linux a
-// display (xvfb-run). Usage:
+// display (xvfb-run). Each video also gets <id>.captions.json (for the Egyptian voice-over,
+// tools/videos/voiceover.py) and <id>.srt subtitles. Usage:
 //   xvfb-run -a node tools/videos/record.cjs [outDir] [only-this-video-id]
+// The GitHub workflow "POS videos" runs all of it (recording + voice-over) in one click.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -34,8 +36,22 @@ const OVERLAY_CSS = `
 #__card h1{font-size:50px;margin:0} #__card p{font-size:26px;margin:0;opacity:.95} #__card small{font-size:18px;opacity:.8}
 #__card .band{width:140px;height:6px;border-radius:3px;background:linear-gradient(90deg,#fff,#f7a531)}`;
 
-function director(w) {
+// Spoken form of a caption for the Egyptian voice-over (tools/videos/voiceover.py).
+function speakable(text) {
+  return String(text || '')
+    .replace(/InnoForge POS/g, 'إنوفورج بي أو إس').replace(/InnoForge/g, 'إنوفورج').replace(/Inno Source/g, 'إنو سورس')
+    .replace(/innovationsrc\.com/g, 'إنوفيشن سورس دوت كوم')
+    .replace(/\bF(\d)\b/g, (_, n) => `إف ${['صفر', 'واحد', 'اتنين', 'تلاتة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'تمانية', 'تسعة'][n]}`)
+    .replace(/Excel/gi, 'إكسيل').replace(/PDF/g, 'بي دي إف').replace(/\bA4\b/g, 'إيه فور')
+    .replace(/[«»✓]/g, '').replace(/[—•]/g, '، ').replace(/←/g, ' وبعدين ').replace(/\s+/g, ' ').trim();
+}
+// Rough Egyptian speech length, so captions stay up long enough to be spoken.
+const speechMs = (say) => (say ? 700 + say.length * 75 : 0);
+
+function director(w, t0 = Date.now()) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const timeline = [];
+  const mark = (text, say) => timeline.push({ start: Math.max(0, (Date.now() - t0) / 1000), text, say: say ?? speakable(text) });
   const ensure = () => w.evaluate((css) => {
     if (document.getElementById('__cap')) return;
     const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
@@ -44,13 +60,20 @@ function director(w) {
   }, OVERLAY_CSS);
   const d = {
     sleep,
-    async cap(text, ms = 1800) {
+    timeline,
+    /** Shows a caption; `ms` = how long to hold before going on (0 = continue while it shows). */
+    async cap(text, ms = 1800, say = undefined) {
       await ensure();
       await w.evaluate((t) => { const c = document.getElementById('__cap'); c.textContent = t; c.style.opacity = t ? '1' : '0'; }, text || '');
-      if (ms) await sleep(ms);
+      if (text) mark(text, say);
+      const hold = Math.max(ms, ms ? speechMs(say ?? speakable(text)) : 0);
+      if (hold) await sleep(hold);
     },
     async card(title, sub = '', small = '', ms = 2600) {
       await ensure();
+      const say = speakable([title, sub].filter(Boolean).join('. '));
+      mark([title, sub].filter(Boolean).join(' — '), say);
+      ms = Math.max(ms, speechMs(say) + 400);
       await w.evaluate(([t, s, m]) => {
         let c = document.getElementById('__card');
         if (!c) { c = document.createElement('div'); c.id = '__card'; document.body.appendChild(c); }
@@ -91,6 +114,7 @@ function director(w) {
 }
 
 async function launch(dataDir, { record = true, edition = null } = {}) {
+  const t0 = Date.now();
   const app = await _electron.launch({
     executablePath: ELECTRON,
     args: [APP, '--no-sandbox'],
@@ -105,7 +129,7 @@ async function launch(dataDir, { record = true, edition = null } = {}) {
     dialog.showSaveDialog = async () => ({ canceled: true });
   });
   const call = (ns, m, a) => w.evaluate(([n, mm, aa]) => window.posBridge.call(n, mm, aa), [ns, m, a]).then((r) => { if (!r.ok) throw new Error(`${ns}.${m}: ${r.code}`); return r.data; });
-  return { app, w, call };
+  return { app, w, call, t0 };
 }
 
 async function setup(w, { type = null, name = 'ماركت النور', cash = '500' } = {}) {
@@ -139,7 +163,7 @@ async function make(id, { prep, scene, edition = null }) {
     await p.app.close();
   }
   const r = await launch(dir, { edition });
-  const d = director(r.w);
+  const d = director(r.w, r.t0);
   try {
     await scene({ ...r, d });
     await d.sleep(800);
@@ -149,9 +173,17 @@ async function make(id, { prep, scene, edition = null }) {
     const webm = await video.path();
     const mp4 = path.join(OUT, `${id}.mp4`);
     execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm, '-c:v', 'libx264', '-preset', 'medium', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4]);
+    writeCaptions(path.join(OUT, id), d.timeline);
     console.log(`✓ ${mp4} (${Math.round(fs.statSync(mp4).size / 1024)} KB)`);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** <id>.captions.json (for the voice-over) and <id>.srt (subtitles for YouTube/players). */
+function writeCaptions(base, timeline) {
+  fs.writeFileSync(`${base}.captions.json`, JSON.stringify({ events: timeline }, null, 2));
+  const ts = (x) => { const ms = Math.round(x * 1000); const h = Math.floor(ms / 3600000); const m = Math.floor(ms / 60000) % 60; const s = Math.floor(ms / 1000) % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
+  fs.writeFileSync(`${base}.srt`, timeline.map((e, i) => `${i + 1}\n${ts(e.start)} --> ${ts(timeline[i + 1]?.start ?? e.start + 4)}\n${e.text}\n`).join('\n'));
 }
 
 const nav = (d, text) => d.click(`.sidebar nav button:has-text("${text}")`, 1000);

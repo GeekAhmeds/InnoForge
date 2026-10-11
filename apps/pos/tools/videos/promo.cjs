@@ -24,6 +24,8 @@ const out = path.resolve(process.argv[3] || path.join(__dirname, '..', '..', 're
   const page = await ctx.newPage();
   await page.goto(`file://${path.join(work, 'promo.html')}`);
   await page.waitForFunction(() => window.PROMO_DONE === true, null, { timeout: 120000, polling: 500 });
+  // Slide start times (minus the 0.4 s trimmed below) for the voice-over.
+  const events = (await page.evaluate(() => window.PROMO_CAPTIONS)).map((e) => ({ ...e, start: Math.max(0, e.start - 0.4 + 0.3) }));
   await page.waitForTimeout(400);
   const video = page.video();
   await ctx.close();
@@ -31,6 +33,7 @@ const out = path.resolve(process.argv[3] || path.join(__dirname, '..', '..', 're
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // Drop the first moments (blank page while loading) and encode for the web.
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', '0.4', '-i', await video.path(), '-c:v', 'libx264', '-preset', 'medium', '-crf', '22', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]);
+  fs.writeFileSync(out.replace(/\.mp4$/, '.captions.json'), JSON.stringify({ events }, null, 2));
   console.log(`✓ ${out} (${Math.round(fs.statSync(out).size / 1024)} KB)`);
   fs.rmSync(work, { recursive: true, force: true });
 })().catch((err) => { console.error(err); process.exit(1); });
