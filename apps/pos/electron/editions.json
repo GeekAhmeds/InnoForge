@@ -71,6 +71,10 @@
     "commissions": {
       "ar": "عمولات الكاشير والمندوبين",
       "en": "Cashier and sales-rep commissions"
+    },
+    "eta": {
+      "ar": "الفاتورة والإيصال الإلكتروني (مصلحة الضرائب)",
+      "en": "Egyptian e-invoice and e-receipt (ETA)"
     }
   },
   "limits": {
@@ -147,7 +151,8 @@
         "batches",
         "commissions",
         "labels",
-        "excel"
+        "excel",
+        "eta"
       ],
       "limits": {
         "users": 10,

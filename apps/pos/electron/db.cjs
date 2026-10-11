@@ -887,6 +887,33 @@ const MIGRATIONS = [
   ALTER TABLE shifts ADD COLUMN device_id TEXT NOT NULL DEFAULT 'local';
   ALTER TABLE orders ADD COLUMN device_id TEXT NOT NULL DEFAULT 'local';
   `,
+  // v18: Egyptian e-invoice / e-receipt (ETA): the submission queue, item codes, buyer details.
+  `
+  CREATE TABLE eta_documents (
+    id            INTEGER PRIMARY KEY,
+    order_id      INTEGER NOT NULL REFERENCES orders(id),
+    return_id     INTEGER REFERENCES returns(id),
+    kind          TEXT NOT NULL CHECK (kind IN ('invoice', 'receipt')),
+    doc_type      TEXT NOT NULL, -- I invoice, C credit note, S sale receipt, R return receipt
+    device_id     TEXT NOT NULL DEFAULT 'local',
+    status        TEXT NOT NULL DEFAULT 'pending', -- pending | submitted | valid | invalid | rejected | error | cancelled | skipped
+    uuid          TEXT,
+    long_id       TEXT,
+    submission_id TEXT,
+    payload       TEXT, -- the JSON sent (built when it is first sent)
+    error         TEXT NOT NULL DEFAULT '',
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    submitted_at  TEXT
+  );
+  CREATE INDEX idx_eta_status ON eta_documents(status);
+  CREATE INDEX idx_eta_order ON eta_documents(order_id);
+  ALTER TABLE products ADD COLUMN eta_item_type TEXT NOT NULL DEFAULT ''; -- GS1 | EGS ('' = the general setting)
+  ALTER TABLE products ADD COLUMN eta_item_code TEXT NOT NULL DEFAULT '';
+  ALTER TABLE products ADD COLUMN eta_unit TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customers ADD COLUMN eta TEXT NOT NULL DEFAULT ''; -- JSON { type B|P|F, id, governate, regionCity, street, buildingNumber }
+  `,
 ];
 
 function openDatabase(file) {

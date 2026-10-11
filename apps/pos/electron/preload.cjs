@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('posBridge', {
   networkServe: (opts) => ipcRenderer.invoke('pos:networkServe', opts),
   networkConnect: (opts) => ipcRenderer.invoke('pos:networkConnect', opts),
   networkDisconnect: () => ipcRenderer.invoke('pos:networkDisconnect'),
+  etaRun: () => ipcRenderer.invoke('pos:etaRun'),
+  etaTest: () => ipcRenderer.invoke('pos:etaTest'),
   copy: (text) => ipcRenderer.invoke('pos:copy', text),
   version: () => ipcRenderer.invoke('pos:version'),
   excelTemplate: (kind) => ipcRenderer.invoke('pos:excelTemplate', kind),

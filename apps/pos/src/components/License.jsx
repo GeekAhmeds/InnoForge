@@ -5,7 +5,7 @@ import { Modal, useApp } from './ui.jsx';
 
 // Every feature a license can include, in the order they are listed.
 export const FEATURES = ['restaurant', 'delivery', 'trading', 'rebates', 'installments', 'treasury', 'warehouses', 'purchase_orders', 'employees',
-  'promotions', 'coupons', 'scale', 'labels', 'batches', 'customer_display', 'lan', 'excel', 'commissions'];
+  'promotions', 'coupons', 'scale', 'labels', 'batches', 'customer_display', 'lan', 'excel', 'commissions', 'eta'];
 
 /** Settings → License: who it is for, the edition, what it includes and its limits; update the key. */
 export default function LicenseTab() {

@@ -15,6 +15,7 @@ const { exportSheets } = require('./export-sheets.cjs');
 const { createDeviceStore } = require('./device.cjs');
 const { createRemote } = require('./remote.cjs');
 const { createLanServer } = require('./lan-server.cjs');
+const { createEtaSubmitter } = require('./eta-submitter.cjs');
 
 
 // Lets a portable install or tests keep data in a chosen folder.
@@ -26,6 +27,7 @@ let devices; // device.json: standalone / server / client
 let remote = null; // client mode: the main computer
 let remoteInfo = null; // client mode: what the main computer said last (license, version)
 let lanServer = null; // server mode
+let etaSubmitter = null; // e-invoices go out from the computer that holds the data
 let mainWindow;
 let licenses;
 let license;
@@ -115,6 +117,9 @@ function boot() {
     db.prepare("UPDATE devices SET name = ? WHERE id = 'local' AND name = ''").run(dev.name);
     autoBackup('daily');
     if (dev.mode === 'server') startLanServer();
+    etaSubmitter = createEtaSubmitter({ queue: services.etaQueue, log: (...a) => console.error(...a) });
+    etaSubmitter.start();
+    setTimeout(() => { if (licenseOk() && services.settings.get().eta_auto) etaSubmitter.run(); }, 20000).unref?.();
   }
   kdsServer = createKdsServer({ services: svc, customerState: () => customerState });
   kdsServer.start().catch((err) => console.error('kitchen screen server', err));
@@ -408,6 +413,30 @@ ipcMain.handle('pos:networkDisconnect', async () => {
   }
 });
 
+// ---------- Egyptian e-invoice ----------
+ipcMain.handle('pos:etaRun', async () => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
+    services.requirePerm('reports');
+    services.license.requireFeature('eta');
+    return ok(await etaSubmitter.run());
+  } catch (err) {
+    return fail(err);
+  }
+});
+ipcMain.handle('pos:etaTest', async () => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    services.requirePerm('settings');
+    services.license.requireFeature('eta');
+    etaSubmitter.clearTokens();
+    return ok({ ...(await etaSubmitter.test(services.deviceId)), last: etaSubmitter.state() });
+  } catch (err) {
+    return fail(err);
+  }
+});
+
 ipcMain.handle('pos:printers', async () => {
   try {
     return ok((await mainWindow.webContents.getPrintersAsync()).map((p) => ({ name: p.name, displayName: p.displayName || p.name, isDefault: p.isDefault })));
@@ -608,6 +637,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     kdsServer?.stop();
     lanServer?.stop();
+    etaSubmitter?.stop();
     try { db?.close(); } catch { /* already closed */ }
     app.quit();
   });

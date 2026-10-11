@@ -5,6 +5,7 @@ const { computeTotals } = require('./totals.cjs');
 const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = require('./permissions.cjs');
 const { FULL, toJSON } = require('../editions.cjs');
 const { buildCatalog } = require('./report-catalog.cjs');
+const etaDoc = require('../eta.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -59,7 +60,41 @@ const DEFAULT_SETTINGS = {
   display_message: '', // customer display: line shown when idle (offers, welcome)
   customer_display: false, // open the customer-facing screen with the cashier
   sale_warehouse_id: 1, // the warehouse this computer sells from (and returns go back to)
+  // Egyptian e-invoice (B2B) / e-receipt (B2C) — Settings → E-invoice.
+  eta_enabled: false,
+  eta_env: 'preprod', // preprod | prod
+  eta_invoice: false, // send e-invoices (customers with a tax number)
+  eta_receipt: false, // send e-receipts (everyone else)
+  eta_auto: true, // send in the background as soon as there is internet
+  eta_rin: '', // the taxpayer's registration number
+  eta_name: '',
+  eta_activity: '', // activity code
+  eta_branch: '0',
+  eta_country: 'EG',
+  eta_governate: '',
+  eta_city: '',
+  eta_street: '',
+  eta_building: '',
+  eta_client_id: '', // ERP credentials (e-invoices)
+  eta_client_secret: '',
+  eta_item_type: 'EGS', // default codes for items without their own
+  eta_item_code: '',
+  eta_unit: 'EA',
+  eta_tax_subtype: 'V009',
+  eta_tax_subtype_zero: 'V003',
+  eta_signer: 'none', // none | url | command — signs e-invoices with the company's USB token
+  eta_signer_url: '',
+  eta_signer_cmd: '',
+  // This POS as registered on the ETA portal (e-receipts) — per computer.
+  eta_pos_serial: '',
+  eta_pos_os: 'Windows',
+  eta_pos_model: '1',
+  eta_pos_client_id: '',
+  eta_pos_client_secret: '',
+  eta_pos_key: '', // pre-shared key
 };
+// Never sent to the window: settings.get shows "<key>_set" instead.
+const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key'];
 
 class PosError extends Error {
   constructor(code, message) {
@@ -81,6 +116,7 @@ function verifyPin(pin, stored) {
 
 const plain = (row) => (row ? { ...row } : row);
 const plainAll = (rows) => rows.map(plain);
+const parseJson = (text, fallback) => { try { return text ? JSON.parse(text) : fallback; } catch { return fallback; } };
 const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : d);
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const str = (v) => (v == null ? '' : String(v).trim());
@@ -100,7 +136,7 @@ function dateRange(from, to) {
  */
 // Settings that belong to one computer rather than the business: with several devices on
 // one database each keeps its own printers, drawer, scale, selling warehouse, screens, language.
-const DEVICE_KEYS = ['printer_name', 'kitchen_printer_name', 'a4_printer_name', 'label_printer_name', 'silent_print', 'paper_width', 'label_size',
+const DEVICE_KEYS = ['eta_pos_serial', 'eta_pos_os', 'eta_pos_model', 'eta_pos_client_id', 'eta_pos_client_secret', 'eta_pos_key', 'printer_name', 'kitchen_printer_name', 'a4_printer_name', 'label_printer_name', 'silent_print', 'paper_width', 'label_size',
   'invoice_format', 'cash_drawer', 'drawer_pin', 'scale_serial', 'scale_port', 'scale_baud', 'scale_request', 'customer_display', 'sale_warehouse_id',
   'sell_screens', 'language'];
 
@@ -169,7 +205,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
   }
 
   // ---------- settings ----------
-  function getSettings() {
+  /** All settings for this computer; `withSecrets` only inside the main process. */
+  function getSettings(withSecrets = false) {
     const out = { ...DEFAULT_SETTINGS };
     const put = ({ key, value }) => {
       if (!(key in DEFAULT_SETTINGS)) return;
@@ -180,6 +217,10 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     // This computer's own values win over the shared ones.
     db.prepare('SELECT key, value FROM device_settings WHERE device_id = ?').all(deviceId).forEach(put);
     out.device_id = deviceId;
+    for (const k of SECRET_KEYS) {
+      out[`${k}_set`] = !!out[k];
+      if (!withSecrets) out[k] = '';
+    }
     return out;
   }
 
@@ -190,6 +231,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     const devStmt = db.prepare('INSERT INTO device_settings (device_id, key, value) VALUES (?, ?, ?) ON CONFLICT(device_id, key) DO UPDATE SET value = excluded.value');
     for (const [key, raw] of Object.entries(patch || {})) {
       if (!(key in DEFAULT_SETTINGS) || key === 'setup_done') continue;
+      // An empty secret means "keep the saved one" (the form never receives it).
+      if (SECRET_KEYS.includes(key) && !str(raw)) continue;
       const def = DEFAULT_SETTINGS[key];
       const value = typeof def === 'boolean' ? (raw ? '1' : '0') : typeof def === 'number' ? String(num(raw, def)) : str(raw);
       if (DEVICE_KEYS.includes(key)) devStmt.run(deviceId, key, value);
@@ -198,7 +241,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
   }
 
   const settings = {
-    get: getSettings,
+    get: () => getSettings(),
     // UI language is a harmless display preference, so it is allowed before login/setup.
     setLanguage(language) {
       if (!['ar', 'en'].includes(language)) throw new PosError('INVALID_LANGUAGE');
@@ -215,6 +258,9 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.customer_display) requireFeature('customer_display');
       if (patch?.scale_barcodes || patch?.scale_serial) requireFeature('scale');
       if (patch?.loyalty_enabled) requireFeature('promotions');
+      if (patch?.eta_enabled) requireFeature('eta');
+      if (patch && 'eta_env' in patch && !['preprod', 'prod'].includes(patch.eta_env)) throw new PosError('INVALID_SETTING', 'eta_env');
+      if (patch && 'eta_signer' in patch && !['none', 'url', 'command'].includes(patch.eta_signer)) throw new PosError('INVALID_SETTING', 'eta_signer');
       // The kitchen screen key only changes through newKdsKey (forms send stale copies of it).
       const { kds_key: _key, ...rest } = patch || {};
       transaction(db, () => writeSettings(rest));
@@ -580,6 +626,11 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         track_serial: p.track_serial ? 1 : 0,
         active: p.active === false ? 0 : 1,
       };
+      // E-invoice item codes: kept as they are when the form does not send them.
+      for (const k of ['eta_item_type', 'eta_item_code', 'eta_unit']) {
+        fields[k] = k in p ? str(p[k]) : p.id ? db.prepare(`SELECT ${k} FROM products WHERE id = ?`).get(p.id)?.[k] ?? '' : '';
+      }
+      if (fields.eta_item_type && !['GS1', 'EGS'].includes(fields.eta_item_type)) fields.eta_item_type = '';
       if (fields.barcode) {
         const dup = db.prepare('SELECT id FROM products WHERE barcode = ? AND id != ?').get(fields.barcode, p.id || 0)
           || db.prepare('SELECT id FROM product_units WHERE barcode = ? AND product_id != ?').get(fields.barcode, p.id || 0);
@@ -1233,6 +1284,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
           db.prepare('UPDATE orders SET points_earned = ?, points_redeemed = ? WHERE id = ?').run(earned, redeem, orderId);
         }
         if (cart.quote_id) db.prepare("UPDATE quotes SET status = 'invoiced', order_id = ? WHERE id = ? AND status IN ('quote', 'order')").run(orderId, cart.quote_id);
+        etaEnqueue(orderId);
         for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
         // Orders paid straight away (takeaway, counter) still have to reach the kitchen.
         const tickets = priced.settings.kitchen_auto_send ? dispatchKitchen(getOrder(orderId)) : [];
@@ -1303,6 +1355,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
           if (l.line.product_id) consumeStock(l.line.product_id, l.qty, l.line.unit_factor || 1, l.line.modifiers, +1, 'return', returnId, u.id);
         }
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
+        etaEnqueue(orderId, returnId);
         if (order.customer_id && order.points_earned > 0 && order.total > 0) {
           const back = Math.min(order.points_earned, Math.round((order.points_earned * amount) / order.total));
           if (back) {
@@ -1855,6 +1908,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       c.balance = customerBalance(id);
       c.pending_cheques = pendingCheques(id);
       c.terms_days = termsOf(c);
+      c.eta = parseJson(c.eta, {});
       return c;
     },
     /** Cashiers can add/edit contact details; credit limits, terms, discounts and price lists need customers_edit. */
@@ -1873,12 +1927,16 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       const terms = admin ? Math.max(0, int(c.payment_terms)) : existing?.payment_terms ?? 0;
       const discountPct = admin ? Math.min(100, Math.max(0, num(c.discount_percent))) : existing?.discount_percent ?? 0;
       if (existing && existing.discount_percent !== discountPct) audit('customer_discount_change', { entity: 'customer', entityId: c.id, details: { name: str(c.name), pct: discountPct } });
-      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct];
+      // Buyer details for the e-invoice (type B company / P person / F foreign, ID, address parts).
+      const eta = c.eta && typeof c.eta === 'object'
+        ? JSON.stringify(Object.fromEntries(['type', 'id', 'governate', 'regionCity', 'street', 'buildingNumber'].map((k) => [k, str(c.eta[k])]).filter(([, v]) => v)))
+        : existing?.eta ?? '';
+      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct, eta];
       if (c.id) {
-        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ? WHERE id = ?').run(...vals, c.id);
+        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ?, eta = ? WHERE id = ?').run(...vals, c.id);
         return c.id;
       }
-      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent, eta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
     },
     /** Invoices, receipts, discounts, bounced cheques and returns in date order with a running balance. */
     statement({ id, from = null, to = null } = {}) {
@@ -3537,6 +3595,193 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       return true;
     },
   };
+
+  // ---------- Egyptian e-invoice / e-receipt (ETA) ----------
+  // Selling never waits for the tax authority: every sale (and return) is queued here and
+  // the main process (eta-submitter.cjs) builds, signs and sends the documents when online.
+  function etaKindFor(order, s) {
+    const taxNo = order.customer_id ? db.prepare('SELECT tax_number FROM customers WHERE id = ?').get(order.customer_id)?.tax_number : '';
+    if (s.eta_invoice && (taxNo || !s.eta_receipt)) return 'invoice';
+    return s.eta_receipt ? 'receipt' : null;
+  }
+
+  /** Queues the e-document for a sale, or for a return of it (credit note / return receipt). */
+  function etaEnqueue(orderId, returnId = null) {
+    try {
+      const s = getSettings();
+      if (!s.eta_enabled || !has('eta')) return;
+      const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+      let kind;
+      if (returnId) {
+        kind = db.prepare("SELECT kind FROM eta_documents WHERE order_id = ? AND return_id IS NULL AND status NOT IN ('skipped', 'cancelled') ORDER BY id DESC").get(orderId)?.kind;
+      } else {
+        kind = etaKindFor(order, s);
+      }
+      if (!kind) return;
+      const docType = kind === 'invoice' ? (returnId ? 'C' : 'I') : (returnId ? 'R' : 'S');
+      db.prepare('INSERT INTO eta_documents (order_id, return_id, kind, doc_type, device_id) VALUES (?, ?, ?, ?, ?)').run(orderId, returnId, kind, docType, order.device_id || 'local');
+    } catch (err) {
+      console.error('e-invoice queue', err); // never blocks a sale
+    }
+  }
+
+  /** Settings with secrets, plus the POS registration of the computer that made the sale. */
+  function etaSettings(devId = 'local') {
+    const out = getSettings(true);
+    for (const r of db.prepare("SELECT key, value FROM device_settings WHERE device_id = ? AND key LIKE 'eta_pos%'").all(devId)) out[r.key] = r.value;
+    if (devId !== deviceId) for (const k of DEVICE_KEYS.filter((x) => x.startsWith('eta_pos'))) if (!db.prepare('SELECT 1 FROM device_settings WHERE device_id = ? AND key = ?').get(devId, k)) out[k] = DEFAULT_SETTINGS[k];
+    for (const k of SECRET_KEYS) out[`${k}_set`] = !!out[k];
+    return out;
+  }
+
+  /** The ETA JSON for a queued row (or a preview); throws ETA_MISSING / ETA_WAIT. */
+  function etaBuild(doc) {
+    const s = etaSettings(doc.device_id);
+    const missing = etaDoc.missingSettings(s, doc.kind);
+    if (missing.length) throw new PosError('ETA_MISSING', missing.join(','));
+    const order = plain(db.prepare('SELECT * FROM orders WHERE id = ?').get(doc.order_id));
+    if (!order || order.status !== 'completed') throw new PosError('ORDER_NOT_COMPLETED');
+    let items = plainAll(db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(doc.order_id));
+    let o = order;
+    let original = null;
+    if (doc.return_id) {
+      original = db.prepare("SELECT uuid FROM eta_documents WHERE order_id = ? AND return_id IS NULL AND uuid IS NOT NULL AND status NOT IN ('skipped', 'cancelled', 'rejected') ORDER BY id DESC").get(doc.order_id);
+      if (!original) throw new PosError('ETA_WAIT'); // the sale itself is not accepted yet
+      const ret = db.prepare('SELECT * FROM returns WHERE id = ?').get(doc.return_id);
+      items = db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(doc.return_id).map((r) => {
+        const it = items.find((i) => i.id === r.order_item_id);
+        return { ...it, qty: r.qty, discount: Math.round((it.discount * r.qty) / it.qty), line_total: Math.round((it.line_total * r.qty) / it.qty) };
+      });
+      o = { ...order, total: ret.amount, tax: order.total > 0 ? Math.round((order.tax * ret.amount) / order.total) : 0, service: 0, delivery_fee: 0, completed_at: ret.created_at, invoice_no: `${order.invoice_no}-R${ret.id}` };
+    }
+    const products = {};
+    for (const id of new Set(items.map((i) => i.product_id).filter(Boolean))) products[id] = db.prepare('SELECT id, barcode, eta_item_type, eta_item_code, eta_unit FROM products WHERE id = ?').get(id);
+    const customer = order.customer_id ? plain(db.prepare('SELECT * FROM customers WHERE id = ?').get(order.customer_id)) : null;
+    if (customer) customer.eta = parseJson(customer.eta, {});
+    const ctx = { order: o, items, products, customer, settings: s };
+    if (doc.kind === 'invoice') {
+      if (customer?.eta?.type === 'B' && !customer.tax_number) throw new PosError('ETA_MISSING', 'customer.tax_number');
+      return etaDoc.buildInvoice({ ...ctx, type: doc.doc_type, references: original ? [original.uuid] : undefined });
+    }
+    const prev = db.prepare('SELECT uuid FROM eta_documents WHERE kind = ? AND device_id = ? AND uuid IS NOT NULL AND id < ? ORDER BY id DESC').get('receipt', doc.device_id, doc.id || 1e15);
+    return etaDoc.buildReceipt({ ...ctx, device: { serial: s.eta_pos_serial }, previousUUID: prev?.uuid || '', type: doc.doc_type, referenceUUID: original?.uuid || '' });
+  }
+
+  const etaRow = (r) => r && { ...plain(r), payload: undefined, has_payload: !!r.payload };
+  const ETA_OPEN = "('pending', 'error')";
+
+  const eta = {
+    /** The queue at a glance, and what is missing in the settings. */
+    summary() {
+      requirePerm('reports');
+      const s = etaSettings(deviceId);
+      const counts = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM eta_documents GROUP BY status').all().map((r) => [r.status, r.n]));
+      return {
+        enabled: s.eta_enabled, env: s.eta_env, invoice: s.eta_invoice, receipt: s.eta_receipt, counts,
+        missing: { invoice: s.eta_invoice ? etaDoc.missingSettings(s, 'invoice') : [], receipt: s.eta_receipt ? etaDoc.missingSettings(s, 'receipt') : [] },
+        last_error: plain(db.prepare("SELECT id, error, updated_at FROM eta_documents WHERE status IN ('error', 'rejected', 'invalid') ORDER BY updated_at DESC LIMIT 1").get()) || null,
+      };
+    },
+    list({ status = '', from = null, to = null, search = '' } = {}) {
+      requirePerm('reports');
+      const where = ['1 = 1'];
+      const args = [];
+      if (status === 'open') where.push(`d.status IN ${ETA_OPEN}`);
+      else if (status) { where.push('d.status = ?'); args.push(str(status)); }
+      if (from) { where.push('d.created_at >= ?'); args.push(str(from)); }
+      if (to) { where.push("d.created_at < date(?, '+1 day')"); args.push(str(to)); }
+      if (str(search)) { where.push('(CAST(o.invoice_no AS TEXT) = ? OR d.uuid LIKE ?)'); args.push(str(search), `${str(search)}%`); }
+      return db.prepare(`SELECT d.*, o.invoice_no, o.total, o.customer_name, c.name AS customer FROM eta_documents d JOIN orders o ON o.id = d.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id WHERE ${where.join(' AND ')} ORDER BY d.id DESC LIMIT 500`).all(...args).map(etaRow);
+    },
+    get(id) {
+      requirePerm('reports');
+      const r = db.prepare('SELECT d.*, o.invoice_no FROM eta_documents d JOIN orders o ON o.id = d.order_id WHERE d.id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      const s = getSettings();
+      return { ...plain(r), payload: parseJson(r.payload, null), portal: r.uuid ? etaDoc.portalUrl(s.eta_env, r.kind, r.uuid, r.long_id || '') : '' };
+    },
+    /** Sends a failed / rejected document again (rebuilt from the sale and current settings). */
+    retry(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM eta_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!['error', 'rejected', 'invalid', 'skipped'].includes(r.status)) throw new PosError('ETA_NOT_RETRYABLE');
+      // A receipt keeps its place (UUID) in the device chain only if ETA never saw it.
+      db.prepare("UPDATE eta_documents SET status = 'pending', error = '', payload = CASE WHEN kind = 'receipt' AND status = 'error' THEN payload ELSE NULL END, uuid = CASE WHEN kind = 'receipt' AND status = 'error' THEN uuid ELSE NULL END, updated_at = datetime('now', 'localtime') WHERE id = ?").run(r.id);
+      audit('eta_retry', { entity: 'order', entityId: r.order_id, details: { doc: r.id } });
+      return true;
+    },
+    /** Never send this one (e.g. a test sale). */
+    skip(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM eta_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!['pending', 'error', 'rejected', 'invalid'].includes(r.status)) throw new PosError('ETA_NOT_RETRYABLE');
+      db.prepare("UPDATE eta_documents SET status = 'skipped', updated_at = datetime('now', 'localtime') WHERE id = ?").run(r.id);
+      audit('eta_skip', { entity: 'order', entityId: r.order_id, details: { doc: r.id } });
+      return true;
+    },
+    /** Queues an older invoice (made before the e-invoice was switched on). */
+    add({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const o = db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo));
+      if (!o) throw new PosError('NOT_FOUND');
+      if (db.prepare("SELECT 1 FROM eta_documents WHERE order_id = ? AND return_id IS NULL AND status != 'skipped'").get(o.id)) throw new PosError('ETA_ALREADY_QUEUED');
+      const s = getSettings();
+      if (!s.eta_enabled) throw new PosError('ETA_DISABLED');
+      etaEnqueue(o.id);
+      return true;
+    },
+    /** The JSON a sale would be sent as, to check the settings before going live. */
+    preview({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const o = invoiceNo
+        ? db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo))
+        : db.prepare("SELECT * FROM orders WHERE status = 'completed' ORDER BY id DESC LIMIT 1").get();
+      if (!o) throw new PosError('NOT_FOUND');
+      const s = getSettings();
+      const kind = etaKindFor(o, s) || 'receipt';
+      const doc = etaBuild({ order_id: o.id, kind, doc_type: kind === 'invoice' ? 'I' : 'S', device_id: o.device_id });
+      return { kind, invoice_no: o.invoice_no, document: doc, serialized: etaDoc.serialize(doc).slice(0, 4000) };
+    },
+  };
+
+  /** For eta-submitter.cjs (main process only — not reachable from a window or the network). */
+  const etaQueue = {
+    settings: etaSettings,
+    /** Builds the JSON of queued documents, oldest first (keeps each device's receipt chain in order). */
+    prepare(limit = 200) {
+      for (const r of db.prepare('SELECT * FROM eta_documents WHERE status = ? AND payload IS NULL ORDER BY id LIMIT ?').all('pending', limit)) {
+        try {
+          const doc = etaBuild(r);
+          db.prepare("UPDATE eta_documents SET payload = ?, uuid = ?, updated_at = datetime('now', 'localtime') WHERE id = ?").run(JSON.stringify(doc), doc.header?.uuid || null, r.id);
+        } catch (err) {
+          if (err.code === 'ETA_WAIT') continue;
+          db.prepare("UPDATE eta_documents SET status = 'error', error = ?, updated_at = datetime('now', 'localtime') WHERE id = ?").run(`${err.code || 'ERROR'}${err.message && err.message !== err.code ? `: ${err.message}` : ''}`, r.id);
+        }
+      }
+    },
+    /** Built documents waiting to be sent. */
+    ready(kind, limit = 50) {
+      return db.prepare("SELECT * FROM eta_documents WHERE status = 'pending' AND payload IS NOT NULL AND kind = ? ORDER BY id LIMIT ?").all(kind, limit)
+        .map((r) => ({ ...plain(r), payload: JSON.parse(r.payload) }));
+    },
+    setPayload(id, doc) {
+      db.prepare("UPDATE eta_documents SET payload = ?, updated_at = datetime('now', 'localtime') WHERE id = ?").run(JSON.stringify(doc), id);
+    },
+    /** Records what ETA answered. */
+    result(id, { status, uuid, long_id: longId, submission_id: submissionId, error = '' }) {
+      db.prepare(`UPDATE eta_documents SET status = ?, uuid = COALESCE(?, uuid), long_id = COALESCE(?, long_id), submission_id = COALESCE(?, submission_id),
+        error = ?, attempts = attempts + 1, submitted_at = COALESCE(submitted_at, CASE WHEN ? IN ('submitted', 'valid') THEN datetime('now', 'localtime') END),
+        updated_at = datetime('now', 'localtime') WHERE id = ?`).run(status, uuid || null, longId || null, submissionId || null, String(error).slice(0, 2000), status, id);
+    },
+    /** Sent and waiting for ETA's validation. */
+    toPoll(limit = 50) {
+      return plainAll(db.prepare("SELECT id, kind, uuid, submission_id, device_id FROM eta_documents WHERE status = 'submitted' ORDER BY id LIMIT ?").all(limit));
+    },
+  };
+
   /** Called by the main computer's network server for every request from another computer. */
   function admitDevice(id, name) {
     const dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
@@ -3554,7 +3799,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
     auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
     license: { get: () => toJSON(entitlements()), has, requireFeature },
-    devices, admitDevice, deviceId,
+    devices, admitDevice, deviceId, eta, etaQueue,
   };
   // Whole namespaces that belong to a licensed feature. Read-only methods other screens rely
   // on stay open, so data made under a bigger license can still be seen.
@@ -3563,7 +3808,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     delivery: ['delivery'], priceLists: ['trading', ['list']], quotes: ['trading'], rebates: ['rebates'],
     installments: ['installments', ['get']], treasury: ['treasury', ['accounts']], warehouses: ['warehouses', ['list']],
     purchaseOrders: ['purchase_orders'], employees: ['employees'], promotions: ['promotions'], coupons: ['coupons'], giftCards: ['coupons'],
-    importer: ['excel'], commissions: ['commissions'],
+    importer: ['excel'], commissions: ['commissions'], eta: ['eta'],
   };
   for (const [ns, [feature, open = []]] of Object.entries(LOCKED)) {
     for (const [name, fn] of Object.entries(api[ns])) {
