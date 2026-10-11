@@ -40,6 +40,14 @@ A single factory returns namespaces. Those listed in `EXPOSED` (main.cjs) are ca
 | `priceLists`, `promotions`, `quotes`, `stockCounts`, `importer` | trading tools, automatic promotions, quotations, stock taking, Excel import |
 | `kitchenStations` | kitchen stations, printers, category routing |
 | `kds` *(not exposed)* | kitchen display state / bump / recall — only the local HTTP server calls it |
+| `purchaseOrders` | purchase orders, low-stock suggestions, receive into a purchase |
+| `modifiers`, `delivery` | sizes/extras groups; delivery zones, drivers, board, dispatch, driver settlement |
+| `treasury` | cash boxes / bank accounts, `moneyMove()` ledger, transfers, adjustments, cheques issued |
+| `warehouses` | warehouses, stock per warehouse, transfers; `saleWarehouse()` = setting `sale_warehouse_id` |
+| `installments` | plans on credit invoices (`create`, `get`, `plans`, `due`, `cancel`) |
+| `employees` | staff, `punch` (any user), attendance grid, advances/bonuses/deductions, payroll `pay`/`unpay` |
+| `coupons`, `giftCards` | coupon codes (applied in `priceCart`), prepaid cards (paid with at checkout) |
+| `drawer` *(not exposed)* | permission check before main kicks the cash drawer |
 
 Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra)`, `audit(...)`, `PosError(code)`, `transaction(db, fn)`, helpers `int / num / str / plain / plainAll`, `dateRange(from, to)`.
 
@@ -58,6 +66,11 @@ Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra
 | v9 | `quote_items.manual_discount` |
 | v10 | `orders.guests/check_printed_at`, `kitchen_stations`, `categories/products.station_id`, `kitchen_tickets` |
 | v11 | `products.by_weight`, `products.plu` |
+| v12 | `purchase_orders(+_items)`, `purchases.po_id` |
+| v13 | `modifier_groups`, `modifier_options`, `product_modifier_groups`, `order_items.modifiers/modifiers_price`, `recipe_items`, `products.is_ingredient`, `delivery_zones`, `drivers`, delivery columns on `orders` |
+| v14 | `money_accounts`, `money_moves` (treasury ledger), `account_id` on receipts/expenses/supplier payments, supplier cheque fields, `shifts.deposited` |
+| v15 | `warehouses`, `warehouse_stock`, `stock_transfers(+_items)`, `warehouse_id` on `stock_moves/purchases/stock_counts`; `installment_plans`, `installments` |
+| v16 | `employees`, `attendance`, `employee_moves`, `payrolls`; `coupons`, `orders.coupon_id/coupon_discount`; `gift_cards`, `gift_card_moves` |
 
 Key relationships: an **order** is a cart that is `open` (held cart / table) then `completed` (gets `invoice_no`) or `void`. `orders.credit` is the part left on the customer's account. Stock is always in **base units** (`unit_factor` converts cartons). `stock_moves` is the stock ledger; `batches` hold expiry-tracked stock (FEFO).
 
@@ -66,7 +79,7 @@ Key relationships: an **order** is a cart that is `open` (held cart / table) the
 ### Selling (`orders.checkout`)
 1. `priceCart(cart)` — re-prices every line from the DB: unit price (unit / price list / base), customer standing discount, manual discount, best automatic promotion; then `computeTotals` (tax inclusive/exclusive, service for dine-in).
 2. Stock check (if negative stock is off), serial numbers for serial-tracked items.
-3. Payments: methods `cash / card / wallet / bank / other` + loyalty `points`. Unpaid remainder → **credit sale** (needs a customer, `credit_sale` permission, credit limit); due date = explicit, customer terms, or `overdue_days`.
+3. Payments: methods `cash / card / wallet / bank / other` + loyalty `points` + `gift_card`. Unpaid remainder → **credit sale** (needs a customer, `credit_sale` permission, credit limit); due date = explicit, customer terms, or `overdue_days`.
 4. `authorizeCart` — manual discounts within `max_discount`, price overrides, credit; otherwise `APPROVAL_REQUIRED`.
 5. Persist order + lines, invoice number, payments (change comes out of cash), stock moves, loyalty, quote → invoiced, audit, auto kitchen tickets.
 
@@ -75,6 +88,16 @@ Key relationships: an **order** is a cart that is `open` (held cart / table) the
 - `openItems(customerId)`: payments **allocated** to invoices settle those first; everything else (unallocated money, credit opening balance, over-allocations) settles the oldest debts; what is left is an **advance**.
 - Receipt voucher = rows sharing a `receipt_no` (money row + optional `discount` row). Cheques reduce the balance when received; *bounced* reverses them (and their discount). Voiding needs `void` + reason; cash from a closed shift cannot be voided.
 - Aging buckets by invoice age; *overdue* = past its due date.
+- **Installments:** an invoice with a plan owes one debt per installment (its own due date); payments to the invoice settle the earliest installments first. Collection screens see one line per invoice (`openByInvoice`), aging/overdue/dashboard see each installment.
+
+### Warehouses
+`products.stock` is the total; `warehouse_stock` splits it. Every `moveStock` names a warehouse (default: this computer's `sale_warehouse_id`). Purchases choose a warehouse; counts are per warehouse; transfers move between warehouses without changing the total. With one warehouse everything behaves as before. Adding a warehouse first syncs warehouse 1 with the totals.
+
+### Staff money
+Advances and salaries go out through `expenses.create` (category "سلف موظفين" / "مرتبات"), so the drawer, treasury and profit reports stay right. Paying a month (`payrolls` row) locks its advances/bonuses/deductions; `unpay` removes the salary expense.
+
+### Coupons and gift cards
+A coupon is an extra invoice discount computed in `priceCart` (`coupon_discount`) — it does not count as the cashier's discount. A gift card is a payment (`payments.method = 'gift_card'`) taken from the card balance; selling/topping up a card is money in during the shift (`shiftSummary.giftCash`), not a sale.
 
 ### Restaurant
 Floor → table (guests) → cashier screen with the table's open order → `sendToKitchen` splits unsent kitchen items into **tickets per station** (product station → category station → first station) → printed per station and shown on the KDS → chef bumps new → preparing → ready (✅ on the floor) → served. Check (pre-bill), transfer, merge, split are in `floor`.

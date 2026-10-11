@@ -49,11 +49,12 @@ electron/
   license.cjs, license-public.cjs   Ed25519 device licensing
   updater.cjs         signed updates (generic provider)
   excel.cjs           sheet templates / parsing / export
-  kds-server.cjs, kds.html   kitchen display (local HTTP server + standalone page)
+  kds-server.cjs, kds.html, customer.html   kitchen display + customer display (local HTTP server + standalone pages)
+  rawprint.cjs        raw ESC/POS bytes to a printer (cash drawer kick)
 src/
   App.jsx             shell, sidebar, context (settings, user, shift, t, withApproval, ask, printDoc…)
-  pages/              one file per sidebar page (Pos, Floor, SalesInvoice, Orders, Customers, Products, Purchases, Reports, Shift, Settings…)
-  components/         shared UI (ui.jsx primitives, Collect, Kitchen, Devices, Labels, ExcelImport, Approval…)
+  pages/              one file per sidebar page (Pos, Floor, SalesInvoice, Delivery, Dashboard, Orders, Customers, Products, Purchases, Treasury, Employees, Reports, Shift, Settings…)
+  components/         shared UI (ui.jsx primitives, Collect, Installments, Warehouses, Coupons, Kitchen, Modifiers, Devices, Labels, ExcelImport, Approval…)
   lib/                api.js (IPC proxy), receipt.js (printable HTML), share.js (WhatsApp), money.js, barcode.js, scale*.js, screens.js
   i18n/ar.js, en.js   flat key → text dictionaries; `{name}` placeholders
 test/                 node:test suites (services, license, updater, excel, scale parser, i18n)
@@ -66,8 +67,8 @@ docs/                 guide.html + developer docs
 
 1. **Money is integer minor units** (piasters) everywhere in the DB and services. Convert only at the UI edge with `toMinor` / `fromMinor` / `formatMoney` (`src/lib/money.js`). Quantities are REAL (weights, cartons).
 2. **The server prices everything.** The renderer sends product ids, quantities, units and *flags* (e.g. `price_override`); `priceCart()` re-reads prices, price lists, customer discounts and promotions from the DB. Never trust a total from the UI.
-3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v11**.
-4. **Every service method checks access first**: `requireUser()` or `requirePerm('perm', approval, extra)`. Restricted-but-approvable actions (`discount`, `price_override`, `credit_sale`, `refund`, `void`, `expenses`) throw `APPROVAL_REQUIRED`; the UI wraps calls in `withApproval(fn)` to get a supervisor PIN and retry.
+3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v16**.
+4. **Every service method checks access first**: `requireUser()` or `requirePerm('perm', approval, extra)`. Restricted-but-approvable actions (`discount`, `price_override`, `credit_sale`, `refund`, `void`, `expenses`, `open_drawer`) throw `APPROVAL_REQUIRED`; the UI wraps calls in `withApproval(fn)` to get a supervisor PIN and retry.
 5. **Audit sensitive actions** with `audit('action_name', { entity, entityId, details, approvedBy })` and add `audit.action_name` (+ any `auditKey.*`) to both dictionaries.
 6. **Errors are `PosError(CODE)`**; the UI shows `t('err.CODE')`. Add new codes to both `ar.js` and `en.js`.
 7. **Every UI string goes through `t()`** and must exist in both languages — `test/i18n.test.mjs` fails otherwise.

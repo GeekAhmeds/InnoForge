@@ -54,6 +54,32 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | Label-printing scale barcodes (weight or price) | ✅ | `scaleBarcode()`, Settings → Devices |
 | Scale on a serial/USB cable (live weight) | 🟡 | `lib/scale.js`, `lib/scale-parse.js` — parser tested; check with the customer's scale model |
 
+## Batches A–E (the 14 additions)
+
+| Feature | Status | Code |
+|---|---|---|
+| Unfinished cart is kept (power cut, crash, restart) for 72 h | ✅ | `lib/drafts.js` (cashier + trading invoice) |
+| Cash drawer kick through the receipt printer (on cash sales, manual with `open_drawer`) | 🟡 | `electron/rawprint.cjs`, `pos:openDrawer`, Settings → Devices — check with the real printer/drawer |
+| Owner dashboard (today vs yesterday, month, drawer, receivables, alerts) | ✅ | `reports.dashboard`, `pages/Dashboard.jsx` |
+| Low stock → purchase orders → receive into a purchase | ✅ | `purchaseOrders.*`, Purchases → Purchase orders |
+| Customer-facing display (second screen or LAN tablet) | ✅ | `electron/customer.html`, `pos:display`, `kds-server.cjs` `/customer` |
+| Sizes / extras (modifier groups with min/max, price, ingredient) | ✅ | `modifiers.*`, `components/Modifiers.jsx`, `priceCart` |
+| Recipes: a dish consumes its ingredients' stock | ✅ | `recipe_items`, `consumeStock()` |
+| Delivery: zones with fees, drivers, board (waiting / out / delivered), driver settlement | ✅ | `delivery.*`, `pages/Delivery.jsx` |
+| Treasury: cash boxes and bank accounts, transfers, deposits, statements | ✅ | `treasury.*`, `moneyMove()`, `pages/Treasury.jsx` |
+| Cheques we give suppliers (pending → cleared / void) | ✅ | `treasury.issuedCheques/clearIssued/voidIssued` |
+| Several warehouses, stock per warehouse, transfers, counts per warehouse | ✅ | `warehouses.*`, `warehouse_stock`, `moveStock(…, warehouseId)`, Products → Warehouses |
+| Installment sales: schedule, per-installment due/overdue, reminders, collect, print | ✅ | `installments.*`, `openItems()` / `installmentSplit()`, `components/Installments.jsx` |
+| Employees: check-in board, monthly attendance, advances / bonuses / deductions, payroll | ✅ | `employees.*`, `pages/Employees.jsx` |
+| Coupon codes (percent / amount, minimum, uses, dates) | ✅ | `coupons.*`, `findCoupon()` in `priceCart` |
+| Gift cards (sell, top up, pay with, balance history) | ✅ | `giftCards.*`, checkout `gift_card`, Customers → Gift cards |
+
+Known limits (by design, for now):
+- **Warehouses:** expiry batches stay per product, not per warehouse. Returns go back to the selling warehouse of the computer that takes them.
+- **Installments:** no interest/markup field — price the goods for installment sale (or use a price list).
+- **Gift cards:** refunding an invoice paid by gift card pays back in cash, not onto the card.
+- **Payroll:** absence deduction is salary ÷ 30 per day marked *absent*; leave is paid; no overtime rules.
+
 ## Platform
 
 | Feature | Status | Code |
