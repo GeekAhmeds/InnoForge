@@ -1,0 +1,12 @@
+{% extends 'licensing/base.html' %}
+{% block title %}العملاء{% endblock %}
+{% block content %}
+<div class="head"><h1>🏪 العملاء</h1><a class="btn primary" href="{% url 'customer_new' %}">+ عميل جديد</a></div>
+<form class="card row"><input name="q" value="{{ q }}" placeholder="اسم، تليفون، أو رقم جهاز" style="max-width:360px"><button class="btn">بحث</button></form>
+<div class="card"><table>
+  <tr><th>العميل</th><th>التليفون</th><th>المدينة</th><th>النشاط</th>{% if is_vendor or me.children.exists %}<th>الشريك</th>{% endif %}<th>تراخيص</th></tr>
+  {% for c in page %}<tr><td><a href="{% url 'customer' c.pk %}"><b>{{ c.name }}</b></a></td><td class="mono">{{ c.phone }}</td><td>{{ c.city }}</td><td>{{ c.activity }}</td>{% if is_vendor or me.children.exists %}<td>{{ c.partner.code|default:"مباشر" }}</td>{% endif %}<td>{{ c.n }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="muted">مفيش عملاء</td></tr>{% endfor %}
+</table>
+{% include 'licensing/_pager.html' %}</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% load lic %}{% comment %}Edition, add-ons, limits (and durations unless no_days). Needs `choices`; optional `cur` (a License) for defaults.{% endcomment %}
+<label>الباقة<select name="edition" id="edition">{% for code, name, ed in choices.editions %}<option value="{{ code }}" {% if cur and cur.edition == code %}selected{% elif post.edition == code %}selected{% endif %}>{{ name }} — {{ ed.en }}</option>{% endfor %}</select></label>
+{% if not no_days %}<label>المدة<select name="days" id="days">{% for d, label in choices.durations %}<option value="{{ d }}" {% if d == 365 %}selected{% endif %}>{{ label }}</option>{% endfor %}<option value="custom">عدد أيام مخصص…</option></select></label>
+<label id="customWrap" hidden>عدد الأيام<input type="number" name="custom_days" min="1" value="60"></label>{% endif %}
+{% for k, name, cap in choices.limit_kinds %}<label>{{ name }}{% if cap %} (أقصى {{ cap }}){% endif %}<input type="number" min="{% if cap %}1{% else %}0{% endif %}" {% if cap %}max="{{ cap }}"{% endif %} name="lim_{{ k }}" class="lim" data-kind="{{ k }}" value="{% if cur %}{{ cur.limits|get:k|default_if_none:'' }}{% endif %}" placeholder="حسب الباقة"></label>{% endfor %}
+<div class="full"><div class="muted small" style="margin-bottom:6px">الإضافات (رمادي ✓ = جوه الباقة؛ باهت = مش مسموحة لحسابك)</div>
+  <div class="checks" id="addons">{% for code, name, ok in choices.addons %}<label data-code="{{ code }}" data-ok="{{ ok|yesno:'1,0' }}"><input type="checkbox" name="addons" value="{{ code }}" {% if cur and code in cur.addons %}checked{% endif %}> {{ name }}</label>{% endfor %}</div></div>
+{{ choices.edition_features|json_script:"edition-features" }}{{ choices.edition_limits|json_script:"edition-limits" }}

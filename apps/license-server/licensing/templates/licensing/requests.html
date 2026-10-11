@@ -1,0 +1,24 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}الطلبات{% endblock %}
+{% block content %}
+<div class="head"><h1>📨 طلبات التراخيص</h1></div>
+<div class="tabs">
+  <a class="{% if status == 'pending' %}on{% endif %}" href="?status=pending">مستنية</a>
+  <a class="{% if status == 'approved' %}on{% endif %}" href="?status=approved">اتوافق عليها</a>
+  <a class="{% if status == 'rejected' %}on{% endif %}" href="?status=rejected">اترفضت</a>
+</div>
+<div class="card"><table>
+  <tr><th>التاريخ</th><th>الشريك</th><th>العميل</th><th>الطلب</th><th>الجهاز</th><th>السعر</th><th></th></tr>
+  {% for r, price, ed, ads in rows %}<tr>
+    <td>{{ r.created_at|date:"Y-m-d H:i" }}</td><td>{{ r.partner.code }}<div class="small muted">{{ r.partner.name }}</div></td>
+    <td><a href="{% url 'customer' r.customer.pk %}">{{ r.customer.name }}</a></td>
+    <td>{{ r.get_kind_display }} — {{ ed }} — {{ r.days|days_label }}{% if ads %}<div class="small muted">+ {{ ads|join:"، " }}</div>{% endif %}{% if r.notes %}<div class="small">{{ r.notes }}</div>{% endif %}</td>
+    <td class="mono small">{{ r.machine }}</td>
+    <td>{% if price is not None %}{{ price|money }}{% else %}—{% endif %}</td>
+    <td>{% if r.status == 'pending' and is_vendor %}
+        <form method="post" action="{% url 'request_decide' r.pk 'approve' %}" style="display:inline">{% csrf_token %}<button class="btn primary">موافقة</button></form>
+        <form method="post" action="{% url 'request_decide' r.pk 'reject' %}" style="display:inline" onsubmit="this.note.value=prompt('سبب الرفض؟')||'';">{% csrf_token %}<input type="hidden" name="note"><button class="btn danger">رفض</button></form>
+      {% elif r.license %}<a href="{% url 'license' r.license.pk %}">المفتاح ←</a>{% elif r.decision_note %}<span class="small bad">{{ r.decision_note }}</span>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="7" class="muted">مفيش طلبات</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

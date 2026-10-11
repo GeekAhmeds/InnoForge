@@ -1,0 +1,38 @@
+{% extends 'licensing/base.html' %}
+{% block title %}شريك{% endblock %}
+{% block content %}
+<div class="head"><h1>🤝 {% if obj %}{{ obj }}{% else %}شريك جديد{% endif %}</h1></div>
+<form method="post">{% csrf_token %}
+  {% if form.non_field_errors %}<ul class="messages">{% for e in form.non_field_errors %}<li class="error">{{ e }}</li>{% endfor %}</ul>{% endif %}
+  <div class="card"><h2>البيانات</h2><div class="grid">
+    {% for f in form %}{% if f.name in 'code,name,kind,parent,phone,email,city,address' %}
+      <label>{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>
+    {% endif %}{% endfor %}
+  </div></div>
+  <div class="card"><h2>المسموح يبيعه</h2>
+    <div class="muted small" style="margin-bottom:6px">الباقات</div>
+    <div class="checks" style="margin-bottom:12px">
+      <label><input type="checkbox" name="allowed_editions" value="*" {% if not obj or '*' in obj.allowed_editions %}checked{% endif %}> <b>كل الباقات</b></label>
+      {% for code, name, ed in choices.editions %}<label><input type="checkbox" name="allowed_editions" value="{{ code }}" {% if obj and code in obj.allowed_editions %}checked{% endif %}> {{ name }}</label>{% endfor %}
+    </div>
+    <div class="muted small" style="margin-bottom:6px">الإضافات اللي يقدر يبيعها فوق الباقة</div>
+    <div class="checks" style="margin-bottom:12px">
+      <label><input type="checkbox" name="allowed_addons" value="*" {% if not obj or '*' in obj.allowed_addons %}checked{% endif %}> <b>كل الإضافات</b></label>
+      {% for code, name, ok in choices.addons %}{% if ok %}<label><input type="checkbox" name="allowed_addons" value="{{ code }}" {% if obj and code in obj.allowed_addons %}checked{% endif %}> {{ name }}</label>{% endif %}{% endfor %}
+    </div>
+    <div class="grid">
+      {% for f in form %}{% if f.name == 'max_days' %}<label>{{ f.label }}{{ f }}<span class="small">{{ f.help_text }}</span></label>{% endif %}{% endfor %}
+      {% for k, name, cap in choices.limit_kinds %}<label>أقصى {{ name }} في المفتاح{% if cap %} (≤ {{ cap }}){% endif %}<input type="number" min="1" {% if cap %}max="{{ cap }}"{% endif %} name="cap_{{ k }}" value="{% for kk, vv in obj.max_limits.items %}{% if kk == k %}{{ vv }}{% endif %}{% endfor %}" placeholder="من غير حد"></label>{% endfor %}
+    </div>
+  </div>
+  <div class="card"><h2>الصلاحيات والحساب</h2><div class="grid">
+    {% for f in form %}{% if f.name in 'active,can_issue_directly,can_manage_children,allow_trials' %}
+      <label style="flex-direction:row;gap:8px;color:#111827">{{ f }} {{ f.label }}{% if f.help_text %} <span class="small muted">— {{ f.help_text }}</span>{% endif %}</label>
+    {% endif %}{% endfor %}
+    {% for f in form %}{% if f.name in 'discount_percent,credit_limit,notes' %}
+      <label class="{% if f.name == 'notes' %}full{% endif %}">{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>
+    {% endif %}{% endfor %}
+  </div></div>
+  <div class="row"><button class="btn primary">حفظ</button><a class="btn" href="{% if obj %}{% url 'partner' obj.pk %}{% else %}{% url 'partners' %}{% endif %}">إلغاء</a></div>
+</form>
+{% endblock %}

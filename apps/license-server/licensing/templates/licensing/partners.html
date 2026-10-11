@@ -1,0 +1,15 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}الشركاء{% endblock %}
+{% block content %}
+<div class="head"><h1>🤝 {% if is_vendor %}الشركاء (موزّعين ووكلاء ومسوّقين){% else %}وكلائي{% endif %}</h1>{% if can_add %}<a class="btn primary" href="{% url 'partner_new' %}">+ شريك جديد</a>{% endif %}</div>
+<form class="card row"><input name="q" value="{{ q }}" placeholder="الاسم، الكود، أو التليفون" style="max-width:320px"><button class="btn">بحث</button></form>
+<div class="card"><table>
+  <tr><th>الكود</th><th>الاسم</th><th>النوع</th><th>تابع لـ</th><th>المدينة</th><th>الرصيد</th><th>مفاتيح آخر 30 يوم</th><th>الحالة</th></tr>
+  {% for p, balance, n in rows %}<tr>
+    <td class="mono"><a href="{% url 'partner' p.pk %}">{{ p.code }}</a></td><td><a href="{% url 'partner' p.pk %}"><b>{{ p.name }}</b></a><div class="small muted mono">{{ p.phone }}</div></td>
+    <td>{{ p.get_kind_display }}</td><td>{{ p.parent.code|default:"—" }}</td><td>{{ p.city }}</td>
+    <td class="{% if balance < 0 %}bad{% endif %}">{{ balance|money }}</td><td>{{ n }}</td>
+    <td>{% if p.active %}<span class="badge good">نشط</span>{% else %}<span class="badge bad">موقوف</span>{% endif %}{% if not p.can_issue_directly %} <span class="badge warn">بموافقة</span>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="8" class="muted">مفيش</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

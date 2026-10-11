@@ -1,0 +1,14 @@
+{% load lic %}<table>
+  <tr><th>اتعمل</th>{% if not hide_customer %}<th>العميل</th>{% endif %}<th>رقم الجهاز</th><th>النوع</th><th>الباقة</th><th>ينتهي</th><th>الحالة</th>{% if is_vendor %}<th>الشريك</th>{% endif %}<th>السعر</th></tr>
+  {% for l in rows %}<tr>
+    <td><a href="{% url 'license' l.pk %}">{{ l.issued_at|date:"Y-m-d" }}</a></td>
+    {% if not hide_customer %}<td><a href="{% url 'license' l.pk %}">{{ l.customer.name }}</a></td>{% endif %}
+    <td class="mono small">{{ l.machine }}</td>
+    <td>{{ l.get_kind_display }}</td>
+    <td>{{ l.edition|edition }}{% if l.addons %}<div class="small muted">+ {{ l.addons|features }}</div>{% endif %}</td>
+    <td>{% if not l.expires_at %}<span class="badge good">مدى الحياة</span>{% elif l.expired %}<span class="badge bad">{{ l.expires_at|date:"Y-m-d" }}</span>{% elif l.days_left < 30 %}<span class="badge warn">{{ l.expires_at|date:"Y-m-d" }}</span>{% else %}{{ l.expires_at|date:"Y-m-d" }}{% endif %}</td>
+    <td>{% if l.status == 'active' %}<span class="badge good">{{ l.get_status_display }}</span>{% elif l.status == 'revoked' %}<span class="badge bad">{{ l.get_status_display }}</span>{% else %}<span class="badge gray">{{ l.get_status_display }}</span>{% endif %}</td>
+    {% if is_vendor %}<td>{{ l.partner.code|default:"مباشر" }}</td>{% endif %}
+    <td>{{ l.price|money }}</td>
+  </tr>{% empty %}<tr><td colspan="9" class="muted">مفيش</td></tr>{% endfor %}
+</table>

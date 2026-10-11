@@ -146,6 +146,8 @@ function createLicenseStore({ file, publicKeyPem, machine = machineId() }) {
       expires: result.payload?.expires || null,
       issued: result.payload?.issued || null,
       reseller: result.reseller ? { id: result.reseller.id, name: result.reseller.name, phone: result.reseller.phone || '' } : null,
+      // Keys from the license server name the partner who sold them (the permit is the server's).
+      seller: result.valid && result.payload?.seller ? { code: String(result.payload.seller.code || ''), name: String(result.payload.seller.name || ''), phone: String(result.payload.seller.phone || '') } : null,
       ...toJSON(entitlements(result.valid ? result.payload : null)),
     };
   }

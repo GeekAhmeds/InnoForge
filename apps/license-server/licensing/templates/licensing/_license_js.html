@@ -1,0 +1,24 @@
+<script>
+(() => {
+  const features = JSON.parse(document.getElementById('edition-features').textContent);
+  const limits = JSON.parse(document.getElementById('edition-limits').textContent);
+  const ed = document.getElementById('edition');
+  const days = document.getElementById('days');
+  function refresh() {
+    const inc = new Set(features[ed.value] || []);
+    document.querySelectorAll('#addons label').forEach((l) => {
+      const box = l.querySelector('input');
+      const included = inc.has(l.dataset.code);
+      l.classList.toggle('inc', included);
+      l.classList.toggle('off', !included && l.dataset.ok !== '1');
+      box.disabled = included || l.dataset.ok !== '1';
+      if (included) box.checked = true; else if (box.disabled) box.checked = false;
+    });
+    document.querySelectorAll('.lim').forEach((i) => { const v = (limits[ed.value] || {})[i.dataset.kind]; i.placeholder = `${v || '∞'} (حسب الباقة)`; });
+    if (days) document.getElementById('customWrap').hidden = days.value !== 'custom';
+    if (window.onLicenseFormChange) window.onLicenseFormChange();
+  }
+  document.addEventListener('change', (e) => { if (e.target.closest('form.license-form')) refresh(); });
+  refresh();
+})();
+</script>

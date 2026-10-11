@@ -1,0 +1,12 @@
+{% extends 'licensing/base.html' %}
+{% block title %}عميل{% endblock %}
+{% block content %}
+<div class="head"><h1>🏪 {% if obj %}{{ obj.name }}{% else %}عميل جديد{% endif %}</h1></div>
+<form method="post" class="card">{% csrf_token %}
+  {% if form.non_field_errors %}<p class="bad">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+  <div class="grid">
+  {% for f in form %}<label class="{% if f.name == 'notes' %}full{% endif %}">{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>{% endfor %}
+  </div>
+  <div class="row" style="margin-top:14px"><button class="btn primary">حفظ</button><a class="btn" href="{% if obj %}{% url 'customer' obj.pk %}{% else %}{% url 'customers' %}{% endif %}">إلغاء</a></div>
+</form>
+{% endblock %}

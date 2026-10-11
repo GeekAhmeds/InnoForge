@@ -1,0 +1,18 @@
+{% extends 'licensing/base.html' %}
+{% block title %}التراخيص{% endblock %}
+{% block content %}
+<div class="head"><h1>🗝 التراخيص</h1><div class="row"><a class="btn" href="?{{ request.GET.urlencode }}&export=csv">⬇ Excel (CSV)</a><a class="btn primary" href="{% url 'license_new' %}">➕ مفتاح جديد</a></div></div>
+<div class="tabs">
+  <a class="{% if status == 'active' %}on{% endif %}" href="?status=active&q={{ q }}&partner={{ partner_id }}">الشغالة</a>
+  <a class="{% if status == 'expiring' %}on{% endif %}" href="?status=expiring&q={{ q }}&partner={{ partner_id }}">بتنتهي خلال 30 يوم</a>
+  <a class="{% if status == 'expired' %}on{% endif %}" href="?status=expired&q={{ q }}&partner={{ partner_id }}">منتهية</a>
+  <a class="{% if status == 'replaced' %}on{% endif %}" href="?status=replaced&q={{ q }}&partner={{ partner_id }}">اتستبدلت</a>
+  <a class="{% if status == 'revoked' %}on{% endif %}" href="?status=revoked&q={{ q }}&partner={{ partner_id }}">ملغية</a>
+  <a class="{% if status == 'all' %}on{% endif %}" href="?status=all&q={{ q }}&partner={{ partner_id }}">الكل</a>
+</div>
+<form class="card row"><input type="hidden" name="status" value="{{ status }}">
+  <input name="q" value="{{ q }}" placeholder="العميل، التليفون، أو رقم الجهاز" style="max-width:320px">
+  {% if partners %}<select name="partner" style="max-width:240px"><option value="">كل الشركاء</option>{% if is_vendor %}<option value="direct" {% if partner_id == 'direct' %}selected{% endif %}>Inno Source مباشرة</option>{% endif %}{% for p in partners %}<option value="{{ p.pk }}" {% if partner_id == p.pk|stringformat:"s" %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>{% endif %}
+  <button class="btn">بحث</button></form>
+<div class="card">{% include 'licensing/_license_rows.html' with rows=page %}{% include 'licensing/_pager.html' %}</div>
+{% endblock %}

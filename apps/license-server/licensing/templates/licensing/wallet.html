@@ -1,0 +1,10 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}الحسابات{% endblock %}
+{% block content %}
+<div class="head"><h1>💰 {% if me %}رصيدي{% else %}حسابات الشركاء{% endif %}</h1></div>
+<div class="stats">
+  {% if me %}<div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ currency }}</b></div>{% endif %}
+  {% for name, s in totals %}<div class="stat"><small>{{ name }}</small><b>{{ s|money }}</b></div>{% endfor %}
+</div>
+<div class="card">{% include 'licensing/_tx_rows.html' with rows=page show_partner=is_vendor %}{% include 'licensing/_pager.html' %}</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}الرئيسية{% endblock %}
+{% block content %}
+<div class="head"><h1>📊 {% if me %}أهلاً {{ me.name }}{% else %}لوحة Inno Source{% endif %}</h1><a class="btn primary" href="{% url 'license_new' %}">➕ مفتاح جديد</a></div>
+{% if is_vendor and not signing.ready %}
+  <ul class="messages"><li class="warning">⚠ السيرفر لسه مش جاهز يوقّع مفاتيح ({{ signing.reason }}). كمّل الإعداد من <a href="{% url 'signing' %}">توقيع السيرفر</a>.</li></ul>
+{% endif %}
+<div class="stats">
+  {% if me %}<div class="stat strong"><small>رصيدك</small><b>{{ balance|money }} {{ currency }}</b></div>{% else %}<div class="stat strong"><small>مبيعات الشهر (على الشركاء)</small><b>{{ month_sales|money }} {{ currency }}</b></div>{% endif %}
+  <div class="stat"><small>مفاتيح الشهر ده</small><b>{{ month_count }}</b></div>
+  <div class="stat"><small>تراخيص شغالة</small><b>{{ active_count }}</b></div>
+  <div class="stat"><small>العملاء</small><b>{{ customers_count }}</b></div>
+  <div class="stat {% if pending_requests %}bad{% endif %}"><small>طلبات مستنية</small><b>{{ pending_requests }}</b></div>
+  {% if not me %}<div class="stat"><small>شركاء نشطين</small><b>{{ partners_count }}</b></div>{% endif %}
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>⏳ بتنتهي خلال 30 يوم — كلّم العميل يجدد</h2>
+    <table><tr><th>العميل</th><th>الباقة</th><th>ينتهي</th></tr>
+    {% for l in expiring %}<tr><td><a href="{% url 'license' l.pk %}">{{ l.customer.name }}</a><div class="small muted">{{ l.customer.phone }}</div></td><td>{{ l.edition|edition }}</td><td><span class="badge warn">{{ l.expires_at|date:"Y-m-d" }}</span></td></tr>
+    {% empty %}<tr><td colspan="3" class="muted">مفيش</td></tr>{% endfor %}</table>
+  </div>
+  <div class="card">
+    <h2>❌ انتهت قريب</h2>
+    <table><tr><th>العميل</th><th>انتهى</th></tr>
+    {% for l in expired_recent %}<tr><td><a href="{% url 'license' l.pk %}">{{ l.customer.name }}</a></td><td><span class="badge bad">{{ l.expires_at|date:"Y-m-d" }}</span></td></tr>
+    {% empty %}<tr><td colspan="2" class="muted">مفيش</td></tr>{% endfor %}</table>
+  </div>
+</div>
+{% if top_partners %}
+<div class="card"><h2>🏆 أنشط الشركاء الشهر ده</h2>
+  <table><tr><th>الشريك</th><th>مفاتيح</th><th>الرصيد</th></tr>
+  {% for p in top_partners %}<tr><td><a href="{% url 'partner' p.pk %}">{{ p }}</a></td><td>{{ p.n }}</td><td>{{ p.balance|money }}</td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+<div class="card"><h2>آخر المفاتيح</h2>
+  <table><tr><th>التاريخ</th><th>العميل</th><th>النوع</th><th>الباقة</th>{% if not me %}<th>الشريك</th>{% endif %}<th>السعر</th></tr>
+  {% for l in recent %}<tr><td>{{ l.issued_at|date:"Y-m-d" }}</td><td><a href="{% url 'license' l.pk %}">{{ l.customer.name }}</a></td><td>{{ l.get_kind_display }}</td><td>{{ l.edition|edition }}</td>{% if not me %}<td>{{ l.partner.code|default:"مباشر" }}</td>{% endif %}<td>{{ l.price|money }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="muted">لسه مفيش مفاتيح</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}ترخيص {{ lic.customer.name }}{% endblock %}
+{% block content %}
+<div class="head"><h1>🗝 {{ lic.customer.name }}</h1>
+  <div class="row"><a class="btn" href="{% url 'customer' lic.customer.pk %}">صفحة العميل</a></div></div>
+{% if newer %}<ul class="messages"><li class="warning">ده مفتاح قديم — فيه نسخة أحدث: <a href="{% url 'license' newer.pk %}">افتحها</a></li></ul>{% endif %}
+<div class="card">
+  <h2>المفتاح — ابعته للعميل يلصقه في شاشة التفعيل</h2>
+  <div class="key" id="key">{{ lic.key }}</div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn primary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('key').textContent).then(()=>{this.textContent='✓ اتنسخ'})">نسخ المفتاح</button>
+    <a class="btn" href="{% url 'license_key' lic.pk %}">⬇ تنزيل كملف</a>
+    <a class="btn" target="_blank" rel="noreferrer" href="https://wa.me/{{ lic.customer.phone|cut:' '|cut:'+' }}?text={{ 'مفتاح تفعيل InnoForge POS:'|urlencode }}%0A{{ lic.key|urlencode }}">واتساب</a>
+  </div>
+</div>
+<div class="grid">
+  <div class="card"><h2>البيانات</h2><dl class="kv">
+    <dt>رقم الجهاز</dt><dd class="mono">{{ lic.machine }}</dd>
+    <dt>النوع</dt><dd>{{ lic.get_kind_display }}</dd>
+    <dt>الباقة</dt><dd>{{ edition_name }}</dd>
+    <dt>الإضافات</dt><dd>{{ addon_names|join:"، "|default:"—" }}</dd>
+    <dt>الحدود</dt><dd>{{ lic.limits|limits|default:"حسب الباقة" }}</dd>
+    <dt>اتعمل</dt><dd>{{ lic.issued_at|date:"Y-m-d H:i" }}{% if lic.issued_by %} — {{ lic.issued_by.username }}{% endif %}</dd>
+    <dt>ينتهي</dt><dd>{% if lic.expires_at %}{{ lic.expires_at|date:"Y-m-d" }}{% if lic.expired %} <span class="badge bad">منتهي</span>{% else %} <span class="muted">(باقي {{ lic.days_left }} يوم)</span>{% endif %}{% else %}مدى الحياة{% endif %}</dd>
+    <dt>الحالة</dt><dd>{{ lic.get_status_display }}</dd>
+    <dt>الشريك</dt><dd>{{ lic.partner|default:"Inno Source مباشرة" }}</dd>
+    <dt>السعر</dt><dd>{{ lic.price|money }} {{ currency }}{% if is_vendor and lic.list_price != lic.price %} <span class="muted small">(القائمة {{ lic.list_price|money }})</span>{% endif %}</dd>
+    {% if lic.notes %}<dt>ملاحظات</dt><dd>{{ lic.notes|linebreaksbr }}</dd>{% endif %}
+  </dl></div>
+  {% if lic.status == 'active' %}
+  <div class="card"><h2>إجراءات</h2>
+    {% if lic.expires_at %}
+    <details open><summary>🔄 تجديد</summary>
+      <form method="post" action="{% url 'license_action' lic.pk 'renew' %}" class="row" style="margin:10px 0">{% csrf_token %}
+        <select name="days" style="max-width:200px">{% for d, label in choices.durations %}{% if d and d != 14 %}<option value="{{ d }}" {% if d == 365 %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select>
+        <button class="btn primary">{% if can_issue %}جدّد{% else %}اطلب التجديد{% endif %}</button>
+      </form><p class="small muted">المدة الجديدة بتبدأ من نهاية المفتاح الحالي (أو من النهارده لو منتهي).</p>
+    </details>{% endif %}
+    <details><summary>⬆ ترقية (باقة / إضافات / حدود أكتر)</summary>
+      <form method="post" action="{% url 'license_action' lic.pk 'upgrade' %}" class="license-form grid" style="margin:10px 0">{% csrf_token %}
+        {% include 'licensing/_license_fields.html' with cur=lic no_days=1 %}
+        <div class="full"><button class="btn primary">{% if can_issue %}طوّر{% else %}اطلب الترقية{% endif %}</button>
+        <span class="small muted">بتدفع الفرق عن المدة الباقية بس. نفس تاريخ الانتهاء.</span></div>
+      </form>
+    </details>
+    <details><summary>💻 نقل لجهاز جديد</summary>
+      <form method="post" action="{% url 'license_action' lic.pk 'transfer' %}" class="row" style="margin:10px 0">{% csrf_token %}
+        <input name="machine" class="mono" placeholder="رقم الجهاز الجديد" required style="max-width:260px">
+        {% if is_vendor %}<input name="fee" type="number" step="0.01" min="0" placeholder="رسوم (اختياري)" style="max-width:150px">{% endif %}
+        <button class="btn">{% if can_issue %}انقل{% else %}اطلب النقل{% endif %}</button>
+      </form><p class="small muted">المفتاح القديم بيتسجل «اتستبدل». نفس الباقة ونفس تاريخ الانتهاء.</p>
+    </details>
+    {% if is_vendor %}<details><summary class="bad">⛔ إلغاء</summary>
+      <form method="post" action="{% url 'license_action' lic.pk 'revoke' %}" style="margin:10px 0" onsubmit="return confirm('إلغاء المفتاح ده؟')">{% csrf_token %}
+        <input name="note" placeholder="السبب" required>
+        <label style="flex-direction:row;gap:6px;margin:8px 0"><input type="checkbox" name="refund" value="1"> رجّع السعر لرصيد الشريك</label>
+        <button class="btn danger">إلغاء المفتاح</button>
+        <p class="small muted">المفاتيح بتشتغل من غير نت، فالإلغاء بيمنع التجديد والنقل ويتسجل عندنا، لكن المفتاح نفسه بيفضل شغال على جهاز العميل لحد ما مدته تخلص.</p>
+      </form></details>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% if history %}<div class="card"><h2>النسخ القديمة من المفتاح ده</h2>{% include 'licensing/_license_rows.html' with rows=history hide_customer=1 %}</div>{% endif %}
+{% endblock %}
+{% block scripts %}{% if lic.status == 'active' %}{% include 'licensing/_license_js.html' %}{% endif %}{% endblock %}

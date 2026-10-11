@@ -1,0 +1,26 @@
+# Run from apps/license-server:  docker compose up -d --build
+# Then: docker compose exec web python manage.py createsuperuser
+#       docker compose exec web python manage.py license_signing init
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/license-server/Dockerfile
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+    volumes:
+      - keys:/data/keys          # the server's signing key + permit — back this up
+    ports:
+      - "127.0.0.1:${PORT:-8020}:8000"   # nginx on the host proxies HTTPS to this
+    depends_on: [db]
+    restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+volumes:
+  keys:
+  pgdata:

@@ -1,0 +1,64 @@
+{% extends 'licensing/base.html' %}
+{% block title %}مفتاح جديد{% endblock %}
+{% block content %}
+<div class="head"><h1>➕ مفتاح تفعيل جديد</h1></div>
+{% if me and not me.can_issue_directly %}<ul class="messages"><li class="warning">حسابك بيبعت طلبات: المفتاح هيتعمل بعد موافقة Inno Source.</li></ul>{% endif %}
+<form method="post" class="license-form">{% csrf_token %}
+  <div class="card"><h2>1) العميل</h2>
+    <div class="grid">
+      <label>العميل<select name="customer" id="customer">
+        <option value="new">— عميل جديد —</option>
+        {% for c in customers %}<option value="{{ c.pk }}" {% if selected_customer == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}{% if c.phone %} — {{ c.phone }}{% endif %}</option>{% endfor %}
+      </select></label>
+      <div id="newCustomer" class="grid full" style="grid-column:1/-1">
+        <label>اسم العميل / النشاط<input name="new_name" value="{{ post.new_name }}"></label>
+        <label>التليفون<input name="new_phone" value="{{ post.new_phone }}"></label>
+        <label>المدينة<input name="new_city" value="{{ post.new_city }}"></label>
+        <label>النشاط<input name="new_activity" value="{{ post.new_activity }}" placeholder="سوبر ماركت، مطعم…"></label>
+        {% if partners %}<label>تبع شريك<select name="for_partner" id="forPartner"><option value="">Inno Source مباشرة</option>{% for p in partners %}<option value="{{ p.pk }}">{{ p }}</option>{% endfor %}</select></label>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="card"><h2>2) الجهاز والترخيص</h2>
+    <div class="grid">
+      <label>رقم الجهاز (من شاشة التفعيل عند العميل)<input name="machine" class="mono" required placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" value="{{ post.machine }}"></label>
+      {% include 'licensing/_license_fields.html' %}
+      <label class="full" style="flex-direction:row;gap:8px;color:#111827"><input type="checkbox" name="trial" id="trial" value="1"> مفتاح تجربة مجاني (أقصى 14 يوم، مرة واحدة لكل جهاز)</label>
+      <label class="full">ملاحظات<input name="notes" value="{{ post.notes }}"></label>
+    </div>
+  </div>
+  <div class="card row" style="justify-content:space-between">
+    <div class="price-box" id="price">…</div>
+    <button class="btn primary">{% if me and not me.can_issue_directly %}ابعت الطلب{% else %}إنشاء المفتاح{% endif %}</button>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+{% include 'licensing/_license_js.html' %}
+<script>
+(() => {
+  const form = document.querySelector('form.license-form');
+  const cust = document.getElementById('customer');
+  const box = document.getElementById('price');
+  const cur = '{{ currency }}';
+  const showNew = () => { document.getElementById('newCustomer').hidden = cust.value !== 'new'; };
+  cust.addEventListener('change', showNew); showNew();
+  document.getElementById('trial').addEventListener('change', (e) => { if (e.target.checked) { document.getElementById('days').value = '14'; } });
+  let timer;
+  window.onLicenseFormChange = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const params = new URLSearchParams(new FormData(form));
+      params.delete('csrfmiddlewaretoken');
+      const r = await fetch(`{% url 'quote' %}?${params}`).then((x) => x.json()).catch(() => null);
+      if (!r) return;
+      if (!r.ok) { box.innerHTML = `<span class="bad">${r.error}</span>`; return; }
+      box.innerHTML = `السعر: <b>${r.price} ${cur}</b>` + (r.list_price !== r.price ? ` <span class="muted small">(سعر القائمة ${r.list_price})</span>` : '') +
+        (r.available !== undefined ? ` <span class="muted small">— المتاح في رصيدك ${r.available}</span>` : '');
+    }, 250);
+  };
+  form.addEventListener('input', window.onLicenseFormChange);
+  window.onLicenseFormChange();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block content %}
+<div class="head"><h1>🤝 {{ p.name }} <span class="muted mono" style="font-size:15px">{{ p.code }}</span></h1>
+  {% if not is_me %}<a class="btn" href="{% url 'partner_edit' p.pk %}">✎ تعديل</a>{% endif %}</div>
+<div class="stats">
+  <div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ currency }}</b></div>
+  <div class="stat"><small>حد السحب على المكشوف</small><b>{{ p.credit_limit|money }}</b></div>
+  <div class="stat"><small>الخصم من سعر القائمة</small><b>{{ p.discount_percent }}%</b></div>
+  <div class="stat"><small>النوع</small><b style="font-size:17px">{{ p.get_kind_display }}</b>{% if p.parent %}<small>تابع لـ {{ p.parent }}</small>{% endif %}</div>
+</div>
+<div class="grid">
+  <div class="card"><h2>المسموح {% if is_me %}ليك{% endif %}</h2>
+    {% if rules.error %}<p class="bad">{{ rules.error }}</p>{% else %}
+    <dl class="kv">
+      <dt>الباقات</dt><dd>{% for n in edition_names %}<span class="badge">{{ n }}</span> {% endfor %}</dd>
+      <dt>الإضافات</dt><dd>{{ addon_names }}</dd>
+      <dt>أقصى مدة</dt><dd>{% if rules.max_days %}{{ rules.max_days }} يوم{% else %}من غير حد (مسموح مدى الحياة){% endif %}</dd>
+      <dt>أقصى حدود</dt><dd>{{ rules.max_limits|limits|default:"من غير حد" }}</dd>
+      <dt>المفاتيح</dt><dd>{% if p.can_issue_directly %}بيطلّعها على طول{% else %}بموافقة Inno Source{% endif %}{% if p.allow_trials %} · تجربة مجانية مسموحة{% endif %}{% if p.can_manage_children %} · يضيف وكلاء تحته{% endif %}</dd>
+      <dt>التواصل</dt><dd class="mono">{{ p.phone }} {{ p.email }}</dd>
+    </dl>{% endif %}
+  </div>
+  <div class="card"><h2>{% if is_vendor %}شحن / تسوية الرصيد{% elif can_transfer %}تحويل رصيد للوكيل ده{% else %}الرصيد{% endif %}</h2>
+    {% if is_vendor %}
+    <form method="post" action="{% url 'partner_topup' p.pk %}" class="grid">{% csrf_token %}
+      <label>المبلغ (بالسالب للتسوية)<input name="amount" type="number" step="0.01" required></label>
+      <label>المرجع (رقم تحويل / إيصال)<input name="reference"></label>
+      <label class="full">ملاحظة<input name="note"></label>
+      <div><button class="btn primary">سجّل</button></div>
+    </form>
+    {% elif can_transfer %}
+    <form method="post" action="{% url 'partner_transfer' p.pk %}" class="grid">{% csrf_token %}
+      <label>المبلغ<input name="amount" type="number" step="0.01" min="0.01" required></label>
+      <label>ملاحظة<input name="note"></label>
+      <div><button class="btn primary">حوّل من رصيدي</button></div>
+    </form>
+    {% else %}<p class="muted">لشحن الرصيد: حوّل لـ Inno Source وابعت إيصال التحويل، والرصيد بيتسجل هنا.</p>{% endif %}
+  </div>
+</div>
+<div class="card"><h2>حسابات الدخول</h2>
+  <table><tr><th>اسم الدخول</th><th>الاسم</th><th>الدور</th><th>الحالة</th><th></th></tr>
+  {% for u in users %}<tr><td class="mono">{{ u.user.username }}</td><td>{{ u.user.get_full_name }}</td><td>{{ u.get_role_display }}</td>
+    <td>{% if u.user.is_active %}<span class="badge good">شغال</span>{% else %}<span class="badge bad">موقوف</span>{% endif %}</td>
+    <td>{% if is_owner and u.user != user %}<form method="post" action="{% url 'partner_user_toggle' p.pk u.user.pk %}">{% csrf_token %}<button class="btn">{% if u.user.is_active %}إيقاف{% else %}تشغيل{% endif %}</button></form>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="5" class="muted">لسه مفيش — اعمل حساب تحت عشان يدخل البوابة</td></tr>{% endfor %}</table>
+  {% if is_owner %}<details style="margin-top:10px"><summary>+ حساب دخول جديد</summary>
+    <form method="post" action="{% url 'partner_user_add' p.pk %}" class="grid" style="margin-top:10px">{% csrf_token %}
+      {% for f in user_form %}<label>{{ f.label }}{{ f }}</label>{% endfor %}
+      <div><button class="btn primary">إنشاء</button></div>
+    </form></details>{% endif %}
+</div>
+<div class="card"><h2>آخر المفاتيح</h2>{% include 'licensing/_license_rows.html' with rows=licenses %}</div>
+<div class="card"><h2>كشف الرصيد</h2>{% include 'licensing/_tx_rows.html' with rows=transactions %}</div>
+{% endblock %}

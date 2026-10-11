@@ -1,0 +1,48 @@
+name: License server
+
+on:
+  push:
+    paths:
+      - 'apps/license-server/**'
+      - 'apps/pos/electron/editions.json'
+      - 'apps/pos/electron/license.cjs'
+      - 'apps/pos/electron/editions.cjs'
+      - '.github/workflows/license-server.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/license-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Node runs the POS app's own verifyLicense() on keys the server signs.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install -r requirements.txt
+      - run: python manage.py check
+        env: { DJANGO_TESTING: '1' }
+      - run: python manage.py makemigrations --check --dry-run
+        env: { DJANGO_TESTING: '1' }
+      - run: python manage.py test licensing
+        env: { DJANGO_TESTING: '1' }
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (not pushed)
+        run: docker build -f apps/license-server/Dockerfile -t innoforge-licenses .
+      - name: Smoke test
+        run: |
+          docker run -d --name lic -e DJANGO_SECRET_KEY=ci -e DJANGO_ALLOWED_HOSTS=localhost -e SECURE_COOKIES=0 -e SQLITE_PATH=/tmp/db.sqlite3 -p 8000:8000 innoforge-licenses
+          for i in $(seq 1 30); do curl -fs http://localhost:8000/healthz && break; sleep 1; done
+          curl -fs http://localhost:8000/login/ | grep -q InnoForge
+          docker logs lic | tail -5

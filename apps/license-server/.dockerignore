@@ -1,0 +1,8 @@
+**/__pycache__
+**/*.pyc
+**/db.sqlite3
+**/keys/
+**/.env
+**/staticfiles/
+**/node_modules/
+**/release/

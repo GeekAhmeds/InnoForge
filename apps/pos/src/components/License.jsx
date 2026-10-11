@@ -45,7 +45,7 @@ export default function LicenseTab() {
             <dt>{t('license.customer')}</dt><dd>{license.customer || '—'}</dd>
             <dt>{t('license.machineId')}</dt><dd className="mono" dir="ltr">{license.machine}</dd>
             <dt>{t('license.expires')}</dt><dd>{license.expires ? new Date(license.expires).toLocaleDateString('en-GB') : t('license.lifetime')}</dd>
-            <dt>{t('license.soldBy')}</dt><dd>{license.reseller ? `${license.reseller.name}${license.reseller.phone ? ` — ${license.reseller.phone}` : ''}` : VENDOR.name}</dd>
+            <dt>{t('license.soldBy')}</dt><dd>{(() => { const by = license.seller || license.reseller; return by ? `${by.name}${by.phone ? ` — ${by.phone}` : ''}` : VENDOR.name; })()}</dd>
             <dt>{t('limit.users')}</dt><dd>{limit('users')}</dd>
             <dt>{t('limit.warehouses')}</dt><dd>{limit('warehouses')}</dd>
             <dt>{t('limit.devices')}</dt><dd>{limit('devices')}</dd>

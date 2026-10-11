@@ -1,0 +1,20 @@
+{% extends 'licensing/base.html' %}
+{% block title %}توقيع السيرفر{% endblock %}
+{% block content %}
+<div class="head"><h1>🛡 توقيع السيرفر</h1></div>
+<div class="card">
+  {% if status.ready %}<p class="good"><b>✓ جاهز يوقّع مفاتيح</b> — التصريح <span class="mono">{{ status.permit.id }}</span> باسم «{{ status.permit.name }}»، ساري لحد {{ status.permit.expires|slice:":10" }}.</p>
+  {% else %}<p class="bad"><b>✕ مش جاهز</b> ({{ status.reason }})</p>{% endif %}
+  <p class="muted">السيرفر ده بيوقّع المفاتيح بمفتاح خاص بيه هو، و<b>مفتاح Inno Source الأصلي (pos-license-private.pem) عمره ما بيتحط على السيرفر</b>. إنت بتدّي السيرفر «تصريح» من صفحة المولّد عندك، زي أي موزّع. لو السيرفر اتسرق: وقّف التصريح ده (revoked_resellers) واعمل غيره، وكل المفاتيح القديمة بتفضل شغالة.</p>
+</div>
+<div class="card"><h2>الخطوات</h2>
+<ol>
+  <li>على السيرفر: <code>python manage.py license_signing init</code> (مرة واحدة).</li>
+  <li>انسخ المفتاح العام ده:{% if pub %}<div class="key" style="margin:6px 0">{{ pub }}</div>{% else %} <span class="bad">لسه مفيش — اعمل الخطوة 1</span>{% endif %}</li>
+  <li>افتح <code>license-generator.html</code> على جهازك ← «تصاريح الموزّعين»: الصق المفتاح العام، الكود <b>SERVER</b>، الاسم <b>Inno Source</b>، كل الباقات وكل الإضافات، أقصى مدة «من غير حد»، من غير حدود، ساري سنتين ← إنشاء التصريح.</li>
+  <li>افتح الملف اللي نزل (<code>reseller-SERVER.cert</code>) بالـ Notepad، والصق محتواه هنا:</li>
+</ol>
+<form method="post">{% csrf_token %}<textarea name="permit" rows="5" class="mono" placeholder="eyJ0eXBlIjoicmVzZWxsZXIi…"></textarea><button class="btn primary" style="margin-top:8px">حفظ التصريح</button></form>
+<p class="small muted">قبل ما التصريح يخلص بشهر: اعمل تصريح جديد بنفس المفتاح العام والصقه هنا.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends 'licensing/base.html' %}
+{% block title %}سجل النشاط{% endblock %}
+{% block content %}
+<div class="head"><h1>📜 سجل النشاط</h1></div>
+<div class="card"><table><tr><th>الوقت</th><th>المستخدم</th><th>الشريك</th><th>العملية</th><th>التفاصيل</th><th>IP</th></tr>
+{% for a in page %}<tr><td>{{ a.created_at|date:"Y-m-d H:i" }}</td><td>{{ a.user.username|default:"API" }}</td><td>{{ a.partner.code|default:"—" }}</td><td class="mono small">{{ a.action }}</td><td class="small">{% for k, v in a.details.items %}{{ k }}: {{ v }}{% if not forloop.last %} · {% endif %}{% endfor %}</td><td class="mono small">{{ a.ip|default:"" }}</td></tr>
+{% empty %}<tr><td colspan="6" class="muted">فاضي</td></tr>{% endfor %}</table>{% include 'licensing/_pager.html' %}</div>
+{% endblock %}

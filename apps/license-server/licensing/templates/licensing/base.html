@@ -1,0 +1,44 @@
+{% load static %}<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}التراخيص{% endblock %} — InnoForge</title>
+<link rel="stylesheet" href="{% static 'licensing/app.css' %}">
+</head>
+<body>
+{% if user.is_authenticated %}
+<div class="shell">
+  <aside class="side">
+    <div class="brand">🔑 InnoForge</div>
+    <div class="who">{% if me %}{{ me.name }} · {{ me.get_kind_display }}{% else %}Inno Source — الإدارة{% endif %}<br>{{ user.get_full_name|default:user.username }}</div>
+    {% with u=request.resolver_match.url_name %}
+    <nav>
+      <a href="{% url 'dashboard' %}" class="{% if u == 'dashboard' %}on{% endif %}">📊 الرئيسية</a>
+      <a href="{% url 'license_new' %}" class="{% if u == 'license_new' %}on{% endif %}">➕ مفتاح جديد</a>
+      <a href="{% url 'licenses' %}" class="{% if u == 'licenses' or u == 'license' %}on{% endif %}">🗝 التراخيص</a>
+      <a href="{% url 'customers' %}" class="{% if 'customer' in u %}on{% endif %}">🏪 العملاء</a>
+      <a href="{% url 'requests' %}" class="{% if u == 'requests' %}on{% endif %}">📨 الطلبات {% if pending_requests_nav %}<span class="count">{{ pending_requests_nav }}</span>{% endif %}</a>
+      {% if is_vendor or me.can_manage_children %}<a href="{% url 'partners' %}" class="{% if 'partner' in u %}on{% endif %}">🤝 {% if is_vendor %}الشركاء{% else %}وكلائي{% endif %}</a>{% endif %}
+      <a href="{% url 'wallet' %}" class="{% if u == 'wallet' %}on{% endif %}">💰 {% if is_vendor %}الحسابات{% else %}رصيدي{% endif %}</a>
+      <div class="sep"></div>
+      {% if me %}<a href="{% url 'account' %}">👤 حسابي وصلاحياتي</a>{% if is_owner %}<a href="{% url 'api_keys' %}">🔌 ربط API</a>{% endif %}{% endif %}
+      {% if is_vendor %}
+        <a href="{% url 'signing' %}" class="{% if u == 'signing' %}on{% endif %}">🛡 توقيع السيرفر</a>
+        <a href="{% url 'audit' %}" class="{% if u == 'audit' %}on{% endif %}">📜 سجل النشاط</a>
+        <a href="/django-admin/licensing/price/">🏷 قائمة الأسعار</a>
+        <a href="/django-admin/">⚙ الإدارة المتقدمة</a>
+      {% endif %}
+      <a href="{% url 'password' %}">🔒 تغيير كلمة السر</a>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>↩ خروج</button></form>
+    </nav>
+    {% endwith %}
+  </aside>
+  <main>
+    {% if messages %}<ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}{% block anon %}{% endblock %}{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

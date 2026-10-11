@@ -1,0 +1,6 @@
+{% load lic %}<table><tr><th>التاريخ</th>{% if show_partner %}<th>الشريك</th>{% endif %}<th>النوع</th><th>المبلغ</th><th>البيان</th><th>بواسطة</th></tr>
+{% for t in rows %}<tr><td>{{ t.created_at|date:"Y-m-d H:i" }}</td>{% if show_partner %}<td><a href="{% url 'partner' t.partner.pk %}">{{ t.partner.code }}</a></td>{% endif %}
+  <td>{{ t.get_kind_display }}</td><td class="{% if t.amount < 0 %}bad{% else %}good{% endif %}">{{ t.amount|money }}</td>
+  <td>{% if t.license %}<a href="{% url 'license' t.license.pk %}">{{ t.note }}</a>{% else %}{{ t.note }}{% endif %}{% if t.reference %} <span class="small muted">({{ t.reference }})</span>{% endif %}</td>
+  <td class="small muted">{{ t.created_by.username|default:"API" }}</td></tr>
+{% empty %}<tr><td colspan="6" class="muted">مفيش حركات</td></tr>{% endfor %}</table>

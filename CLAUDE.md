@@ -1,7 +1,8 @@
 # InnoForge
 
-Monorepo for InnoForge apps. The first (and currently only) app is **InnoForge POS** in
-`apps/pos` — an offline Electron point-of-sale sold by Inno Source.
+Monorepo for InnoForge apps:
+- **InnoForge POS** in `apps/pos` — an offline Electron point-of-sale sold by Inno Source.
+- **License server** in `apps/license-server` — Django portal where Inno Source and its partners issue POS license keys (read its `CLAUDE.md`).
 
 - Start with `apps/pos/CLAUDE.md` (rules, commands, layout), then `apps/pos/docs/ARCHITECTURE.md`
   and `apps/pos/docs/FEATURES.md`. An Arabic overview is in `apps/pos/docs/SYSTEM-AR.md`.
@@ -13,5 +14,5 @@ Monorepo for InnoForge apps. The first (and currently only) app is **InnoForge P
   - `pos-e2e-test` — driving the real app with Playwright to verify UI flows.
   - `pos-release` — versions, installers, signed updates, publishing to the update server.
   - `pos-license` — issuing and renewing customer license keys.
-- CI: `.github/workflows/pos-installer.yml` builds Windows and Linux installers on every push to `apps/pos`.
+- CI: `.github/workflows/pos-installer.yml` builds Windows and Linux installers on every push to `apps/pos`; `license-server.yml` tests the server and builds its Docker image.
 - Never commit `*.pem` files (the vendor private key signs licenses and updates).
