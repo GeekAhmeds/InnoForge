@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { api, savePdf } from '../lib/api.js';
-import { openWhatsApp, quoteText, statementText } from '../lib/share.js';
+import { openWhatsApp, quoteText, reminderText, statementText } from '../lib/share.js';
 import { formatMoney, formatQty, fromMinor, toMinor } from '../lib/money.js';
-import { a4Html, collectionHtml, statementHtml } from '../lib/receipt.js';
+import { a4Html, statementHtml } from '../lib/receipt.js';
+import { Cheques, CollectModal, ReceiptModal, Receipts } from '../components/Collect.jsx';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 
@@ -18,11 +19,15 @@ export default function Customers() {
         <div className="seg">
           <button className={tab === 'customers' ? 'on' : ''} onClick={() => setTab('customers')}>{t('nav.customers')}</button>
           <button className={tab === 'aging' ? 'on' : ''} onClick={() => setTab('aging')}>{t('aging.title')}{overdue > 0 && <span className="count-badge">{overdue}</span>}</button>
+          <button className={tab === 'receipts' ? 'on' : ''} onClick={() => setTab('receipts')}>{t('collect.receipts')}</button>
+          <button className={tab === 'cheques' ? 'on' : ''} onClick={() => setTab('cheques')}>{t('cheques.title')}</button>
           <button className={tab === 'quotes' ? 'on' : ''} onClick={() => setTab('quotes')}>{t('quotes.title')}</button>
         </div>
       </div>
       {tab === 'customers' && <CustomerList />}
       {tab === 'aging' && <Aging />}
+      {tab === 'receipts' && <Receipts />}
+      {tab === 'cheques' && <Cheques />}
       {tab === 'quotes' && <Quotes />}
     </div>
   );
@@ -82,28 +87,39 @@ function CustomerList() {
 
 function Aging() {
   const { t, settings } = useApp();
-  const [list] = useLoad(() => api.customers.aging({ overdueDays: settings.overdue_days || 30 }), []);
+  const [list, reload] = useLoad(() => api.customers.aging({}), []);
   const [statementId, setStatementId] = useState(null);
+  const [collectId, setCollectId] = useState(null);
   const m = (v) => formatMoney(v, settings);
   const sum = (k) => (list || []).reduce((s, r) => s + r[k], 0);
+  const remind = async (r) => {
+    const [c, inv] = await Promise.all([api.customers.get(r.id), api.customers.openInvoices(r.id)]);
+    openWhatsApp(c.phone, reminderText(c, inv.open, settings, t));
+  };
   return (
     <div className="card flush">
       <p className="muted small pad">{t('aging.hint', { d: settings.overdue_days || 30 })}</p>
       <table className="grid">
-        <thead><tr><th>{t('common.name')}</th><th>{t('settings.phone')}</th><th className="num">0–30</th><th className="num">31–60</th><th className="num">61–90</th><th className="num">+90</th><th className="num">{t('common.total')}</th><th className="num">{t('aging.oldest')}</th></tr></thead>
+        <thead><tr><th>{t('common.name')}</th><th className="num">0–30</th><th className="num">31–60</th><th className="num">61–90</th><th className="num">+90</th><th className="num">{t('common.total')}</th><th className="num">{t('aging.overdue')}</th><th>{t('collect.nextDue')}</th><th /></tr></thead>
         <tbody>{(list || []).map((r) => (
           <tr key={r.id} className={`clickable ${r.overdue > 0 ? 'audit-hot' : ''}`} onClick={() => setStatementId(r.id)}>
-            <td><b>{r.name}</b>{r.overdue > 0 && <small className="badge credit">{t('aging.overdue')} {m(r.overdue)}</small>}</td>
-            <td className="mono" dir="ltr">{r.phone}</td>
+            <td><b>{r.name}</b><div className="muted small" dir="ltr">{r.phone}</div></td>
             <td className="num">{r.b30 ? m(r.b30) : ''}</td><td className="num">{r.b60 ? m(r.b60) : ''}</td>
             <td className="num warn">{r.b90 ? m(r.b90) : ''}</td><td className="num warn"><b>{r.b90p ? m(r.b90p) : ''}</b></td>
-            <td className="num"><b>{m(r.total)}</b></td><td className="num">{t('aging.days', { d: r.oldest_days })}</td>
+            <td className="num"><b>{m(r.total)}</b></td>
+            <td className="num warn">{r.overdue ? <b>{m(r.overdue)}</b> : ''}</td>
+            <td>{r.next_due || ''}</td>
+            <td className="num nowrap" onClick={(e) => e.stopPropagation()}>
+              {r.phone && <button className="ghost sm" title={t('collect.remind')} onClick={() => remind(r)}>💬</button>}
+              <button className="ghost sm" onClick={() => setCollectId(r.id)}>💵 {t('customers.collect')}</button>
+            </td>
           </tr>
         ))}</tbody>
-        {!!list?.length && <tfoot><tr><td colSpan={2}>{list.length}</td><td className="num">{m(sum('b30'))}</td><td className="num">{m(sum('b60'))}</td><td className="num">{m(sum('b90'))}</td><td className="num">{m(sum('b90p'))}</td><td className="num">{m(sum('total'))}</td><td /></tr></tfoot>}
+        {!!list?.length && <tfoot><tr><td>{list.length}</td><td className="num">{m(sum('b30'))}</td><td className="num">{m(sum('b60'))}</td><td className="num">{m(sum('b90'))}</td><td className="num">{m(sum('b90p'))}</td><td className="num">{m(sum('total'))}</td><td className="num">{m(sum('overdue'))}</td><td colSpan={2} /></tr></tfoot>}
       </table>
       {list && !list.length && <Empty>{t('aging.none')}</Empty>}
-      {statementId && <Statement id={statementId} onClose={() => setStatementId(null)} />}
+      {statementId && <Statement id={statementId} onClose={() => { setStatementId(null); reload(); }} />}
+      {collectId && <CollectModal customerId={collectId} onClose={() => setCollectId(null)} onDone={() => { setCollectId(null); reload(); }} />}
     </div>
   );
 }
@@ -200,6 +216,12 @@ function CustomerModal({ customer, onClose, onSaved }) {
             {(priceLists || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </Field>
+        <Field label={t('collect.terms')} hint={t('collect.termsHint', { d: settings.overdue_days || 30 })}>
+          <input type="number" min="0" value={f.payment_terms || ''} onChange={set('payment_terms')} placeholder={String(settings.overdue_days || 30)} disabled={!isAdmin} />
+        </Field>
+        <Field label={t('customers.discountPercent')} hint={t('customers.discountHint')}>
+          <input type="number" min="0" max="100" step="0.5" value={f.discount_percent || ''} onChange={set('discount_percent')} placeholder="0" disabled={!isAdmin} />
+        </Field>
         <div className="span2"><Field label={t('pos.note')}><input value={f.notes} onChange={set('notes')} /></Field></div>
         {f.id && isAdmin && <Toggle checked={f.active} onChange={set('active')} label={t('common.active')} />}
         <button hidden />
@@ -209,72 +231,64 @@ function CustomerModal({ customer, onClose, onSaved }) {
 }
 
 function Statement({ id, onClose }) {
-  const { t, tErr, notify, settings, printDoc, lang, shift, can } = useApp();
+  const { t, tErr, notify, settings, printDoc, lang, can, ask } = useApp();
   const [data, reload] = useLoad(() => api.customers.statement({ id }), [id]);
-  const [pay, setPay] = useState(null);
+  const [collecting, setCollecting] = useState(false);
+  const [receiptNo, setReceiptNo] = useState(null);
   const m = (v) => formatMoney(v, settings);
   if (!data) return null;
   const { customer } = data;
+  const today = new Date().toLocaleDateString('en-CA');
+  const overdue = data.open.filter((x) => x.due_date < today).reduce((s, x) => s + x.open, 0);
 
-  async function collect(e) {
-    e?.preventDefault();
-    try {
-      const res = await api.customers.collect({ customerId: id, amount: toMinor(pay.amount, settings.decimals), method: pay.method, notes: pay.notes });
-      setPay(null);
-      notify(t('customers.collected'));
-      if (pay.print) await printDoc(collectionHtml(res.payment, res.customer, settings, t, lang));
-      reload();
-    } catch (err) {
-      notify(tErr(err), 'error');
-    }
-  }
-
-  const kindLabel = (r) => (r.kind === 'sale' ? `${t('customers.invoice')} #${r.ref}` : r.kind === 'return' ? t('customers.returnCredit') : `${t('customers.payment')} — ${t(`pay.${r.ref}`)}`);
+  const kindLabel = (r) => ({
+    sale: `${t('customers.invoice')} #${r.ref}`,
+    return: t('customers.returnCredit'),
+    discount: `${t('collect.discount')} — ${t('customers.receipt')} #${r.receipt_no}`,
+    bounced: `↩ ${t('cheques.bounced')} ${r.cheque_no}`,
+    payment: `${t('customers.receipt')} #${r.receipt_no ?? ''} — ${t(`pay.${r.ref}`)}${r.cheque_no ? ` ${r.cheque_no}` : ''}`,
+  }[r.kind]);
 
   return (
-    <Modal title={`${t('purchases.statement')} — ${customer.name}`} onClose={onClose} width={820}
-      footer={pay ? (
-        <form className="row grow" onSubmit={collect}>
-          <input className="w-amount" autoFocus inputMode="decimal" placeholder={t('reports.amount')} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
-          <select className="w-auto" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}>
-            {['cash', 'card', 'wallet', 'other'].map((x) => <option key={x} value={x}>{t(`pay.${x}`)}</option>)}
-          </select>
-          <input placeholder={t('pos.note')} value={pay.notes} onChange={(e) => setPay({ ...pay, notes: e.target.value })} />
-          <Toggle checked={pay.print} onChange={(v) => setPay({ ...pay, print: v })} label={t('common.print')} />
-          <span className="spacer" />
-          <button type="button" onClick={() => setPay(null)}>{t('common.cancel')}</button>
-          <button className="primary">{t('common.save')}</button>
-        </form>
-      ) : (
-        <>
-          <span>{t('customers.balance')}: <b className={customer.balance > 0 ? 'warn' : 'good'}>{m(customer.balance)}</b></span>
-          <span className="spacer" />
-          <button onClick={() => openWhatsApp(customer.phone, statementText(data, settings, t))}>💬 {t('share.whatsapp')}</button>
-          <button onClick={() => savePdf({ html: statementHtml(data, settings, t, lang), name: `${t('purchases.statement')} ${customer.name}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
-          <button onClick={() => printDoc(statementHtml(data, settings, t, lang), settings.a4_printer_name)}>🖨 {t('customers.printStatement')}</button>
-          <button className="primary" onClick={() => setPay({ amount: customer.balance > 0 ? fromMinor(customer.balance, settings.decimals) : '', method: 'cash', notes: '', print: true })}>💵 {t('customers.collect')}</button>
-        </>
-      )}>
+    <Modal title={`${t('purchases.statement')} — ${customer.name}`} onClose={onClose} width={860}
+      footer={<>
+        <span>{t('customers.balance')}: <b className={customer.balance > 0 ? 'warn' : 'good'}>{m(customer.balance)}</b></span>
+        <span className="spacer" />
+        {customer.phone && data.open.length > 0 && <button onClick={() => openWhatsApp(customer.phone, reminderText(customer, data.open, settings, t))}>🔔 {t('collect.remind')}</button>}
+        <button onClick={() => openWhatsApp(customer.phone, statementText(data, settings, t))}>💬 {t('share.whatsapp')}</button>
+        <button onClick={() => savePdf({ html: statementHtml(data, settings, t, lang), name: `${t('purchases.statement')} ${customer.name}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
+        <button onClick={() => printDoc(statementHtml(data, settings, t, lang), settings.a4_printer_name)}>🖨 {t('customers.printStatement')}</button>
+        <button className="primary" onClick={() => setCollecting(true)}>💵 {t('customers.collect')}</button>
+      </>}>
       <div className="meta">
         {customer.phone && <span dir="ltr">📞 {customer.phone}</span>}
         {customer.address && <span>📍 {customer.address}</span>}
         {customer.credit_limit > 0 && <span>{t('customers.limit')}: {m(customer.credit_limit)}</span>}
+        <span>{t('collect.terms')}: {t('aging.days', { d: customer.terms_days })}</span>
+        {customer.discount_percent > 0 && <span>{t('customers.discountPercent')}: {customer.discount_percent}%</span>}
         {settings.loyalty_enabled && <span>⭐ {t('loyalty.points')}: <b>{formatQty(customer.points || 0)}</b>
           {can('customers_edit') && <button className="ghost sm" onClick={async () => {
-            const v = window.prompt(t('loyalty.adjustPrompt'));
+            const v = await ask(t('loyalty.adjustPrompt'), { type: 'number' });
             if (v && Number(v)) { try { await api.customers.adjustPoints({ customerId: id, points: Number(v) }); reload(); } catch (err) { notify(tErr(err), 'error'); } }
           }}>±</button>}</span>}
+      </div>
+      <div className="stats">
+        <div className="stat strong"><small>{t('customers.balance')}</small><b>{m(customer.balance)}</b></div>
+        <div className="stat"><small>{t('collect.openInvoices')}</small><b>{data.open.length}</b></div>
+        {overdue > 0 && <div className="stat"><small>{t('aging.overdue')}</small><b className="warn">{m(overdue)}</b></div>}
+        {customer.pending_cheques > 0 && <div className="stat"><small>{t('collect.pendingCheques')}</small><b>{m(customer.pending_cheques)}</b></div>}
+        {data.advance > 0 && <div className="stat"><small>{t('collect.advance')}</small><b className="good">{m(data.advance)}</b></div>}
       </div>
       <table className="grid">
         <thead><tr><th>{t('orders.date')}</th><th>{t('orders.type')}</th><th className="num">{t('customers.debit')}</th><th className="num">{t('customers.credit')}</th><th className="num">{t('customers.balance')}</th></tr></thead>
         <tbody>
           {!!customer.opening_balance && (
-            <tr><td>—</td><td>{t('customers.opening')}</td><td className="num">{m(customer.opening_balance)}</td><td /><td className="num"><b>{m(customer.opening_balance)}</b></td></tr>
+            <tr><td>—</td><td>{t('customers.opening')}</td><td className="num">{customer.opening_balance > 0 ? m(customer.opening_balance) : ''}</td><td className="num">{customer.opening_balance < 0 ? m(-customer.opening_balance) : ''}</td><td className="num"><b>{m(customer.opening_balance)}</b></td></tr>
           )}
           {data.rows.map((r) => (
-            <tr key={`${r.kind}${r.id}`}>
+            <tr key={`${r.kind}${r.id}`} className={r.receipt_no ? 'clickable' : r.kind === 'bounced' ? 'audit-hot' : ''} onClick={() => r.receipt_no && setReceiptNo(r.receipt_no)}>
               <td>{r.created_at}</td>
-              <td>{kindLabel(r)}{r.kind === 'sale' && r.total !== r.debit && <small className="muted"> ({t('common.total')} {m(r.total)})</small>}{r.notes && <small className="muted"> — {r.notes}</small>}</td>
+              <td>{kindLabel(r)}{r.kind === 'sale' && r.total !== r.debit && <small className="muted"> ({t('common.total')} {m(r.total)})</small>}{r.kind === 'sale' && r.debit > 0 && r.due_date && <small className="muted"> · {t('collect.due')} {r.due_date}</small>}{r.notes && <small className="muted"> — {r.notes}</small>}</td>
               <td className="num">{r.debit ? m(r.debit) : ''}</td>
               <td className="num">{r.credit ? m(r.credit) : ''}</td>
               <td className="num"><b>{m(r.balance)}</b></td>
@@ -283,6 +297,8 @@ function Statement({ id, onClose }) {
         </tbody>
       </table>
       {!data.rows.length && <Empty>{t('common.none')}</Empty>}
+      {collecting && <CollectModal customerId={id} onClose={() => setCollecting(false)} onDone={() => { setCollecting(false); reload(); }} />}
+      {receiptNo && <ReceiptModal receiptNo={receiptNo} onClose={() => setReceiptNo(null)} onChanged={reload} />}
     </Modal>
   );
 }

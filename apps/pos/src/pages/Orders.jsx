@@ -5,6 +5,7 @@ import { formatMoney, formatQty } from '../lib/money.js';
 import { a4Html, receiptHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
+import { CollectModal } from '../components/Collect.jsx';
 
 export const today = () => new Date().toLocaleDateString('en-CA');
 
@@ -85,6 +86,7 @@ function OrderModal({ id, onClose, onChanged }) {
   const [refundQty, setRefundQty] = useState({});
   const [reason, setReason] = useState('');
   const [refunding, setRefunding] = useState(false);
+  const [collecting, setCollecting] = useState(false);
   const m = (v) => formatMoney(v, settings);
   if (!order) return null;
 
@@ -120,6 +122,7 @@ function OrderModal({ id, onClose, onChanged }) {
         <>
           {canRefund && <button className="danger-ghost" onClick={() => setRefunding(true)}>↩ {t('orders.refund')}</button>}
           <span className="spacer" />
+          {order.open_amount > 0 && <button className="primary" onClick={() => setCollecting(true)}>💵 {t('customers.collect')}</button>}
           <button onClick={() => openWhatsApp(order.customer?.phone || order.customer_phone, invoiceText(order, settings, t))}>💬 {t('share.whatsapp')}</button>
           <button onClick={() => savePdf({ html: a4Html(order, 'invoice', settings, t, lang), name: `${t('receipt.invoice')} ${order.invoice_no}` }).catch((err) => notify(tErr(err), 'error'))}>📑 PDF</button>
           <button onClick={() => printDoc(a4Html(order, 'invoice', settings, t, lang), settings.a4_printer_name)}>📄 {t('a4.printA4')}</button>
@@ -172,9 +175,15 @@ function OrderModal({ id, onClose, onChanged }) {
         {!!order.tax && <div className="trow"><span>{t('pos.tax')}</span><span>{m(order.tax)}</span></div>}
         <div className="trow big"><span>{t('pos.total')}</span><span>{m(order.total)}</span></div>
         {order.payments.map((p) => <div className="trow" key={p.id}><span>{t(`pay.${p.method}`)}</span><span>{m(p.amount)}</span></div>)}
-        {!!order.credit && <div className="trow"><span>{t('pay.onAccount')}</span><span>{m(order.credit)}</span></div>}
+        {!!order.credit && <div className="trow"><span>{t('pay.onAccount')}{order.due_date ? ` · ${t('collect.due')} ${order.due_date}` : ''}</span><span>{m(order.credit)}</span></div>}
+        {order.open_amount != null && order.credit > 0 && (
+          <div className={`trow ${order.open_amount > 0 ? (order.due_date < today() ? 'warn' : '') : 'good'}`}>
+            <span>{order.open_amount > 0 ? t('collect.remaining') : `✓ ${t('collect.paidOff')}`}</span><span>{m(order.open_amount)}</span>
+          </div>
+        )}
         {!!order.refunded && <div className="trow warn"><span>{t('orders.refunded')}</span><span>{m(order.refunded)}</span></div>}
       </div>
+      {collecting && <CollectModal customerId={order.customer_id} orderId={order.id} onClose={() => setCollecting(false)} onDone={async () => { setCollecting(false); setOrder(await api.orders.get(order.id)); onChanged(); }} />}
       {order.returns.map((r) => (
         <p key={r.id} className="muted">↩ {r.created_at} — {r.user_name} — {m(r.amount)} {r.reason && `— ${r.reason}`}</p>
       ))}

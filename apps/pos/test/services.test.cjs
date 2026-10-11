@@ -392,7 +392,8 @@ test('quotes become invoices; aging buckets; serials required and searchable; st
   assert.equal(s.orders.findSerial('IMEI-222')[0].invoice_no, o.invoice_no);
   assert.equal(s.orders.findSerial('IMEI-22').length, 0);
   // age the invoice by 45 days
-  db.prepare("UPDATE orders SET completed_at = datetime('now', 'localtime', '-45 days') WHERE id = ?").run(o.id);
+  assert.ok(o.due_date > o.completed_at.slice(0, 10)); // general terms (30 days)
+  db.prepare("UPDATE orders SET completed_at = datetime('now', 'localtime', '-45 days'), due_date = date('now', 'localtime', '-15 days') WHERE id = ?").run(o.id);
   s.customers.collect({ customerId: cust, amount: 200000, method: 'cash' });
   const ag = s.customers.aging({ overdueDays: 30 })[0];
   assert.deepEqual([ag.total, ag.b60, ag.overdue], [800000, 800000, 800000]);
@@ -448,4 +449,69 @@ test('loyalty: earn on paid amount, redeem as payment, minimums, reversal on ret
   s.orders.refund({ orderId: o1.id, items: [{ order_item_id: o1.items[0].id, qty: 1 }] });
   assert.equal(s.customers.get(cust).points, 0); // 25 points taken back, floored at 0
   assert.equal(tryCode(() => s.orders.checkout({ items: [{ product_id: p, qty: 1 }], redeem_points: 50, payments: [] })), 'LOYALTY_UNAVAILABLE');
+});
+
+test('collections: numbered receipts, invoice allocation, settlement discount, cheques, voids and advances', () => {
+  const { s, db } = setup({ tax_rate: 0 });
+  const p = s.products.save({ name: 'Box', price: 10000, stock: 100 });
+  const cust = s.customers.save({ name: 'Nour Trading', payment_terms: 15 });
+  s.shifts.open({ openingCash: 0 });
+  const inv1 = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 3 }], payments: [] }); // 300.00 on account
+  const inv2 = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 2 }], payments: [] }); // 200.00
+  const today = new Date(); today.setDate(today.getDate() + 15);
+  assert.equal(inv1.due_date, today.toLocaleDateString('en-CA')); // customer terms
+  assert.equal(s.customers.openInvoices(cust).open.length, 2);
+
+  // Pay the newer invoice explicitly; the older one stays open.
+  const r1 = s.customers.collect({ customerId: cust, amount: 20000, method: 'cash', allocations: [{ order_id: inv2.id, amount: 20000 }] });
+  assert.equal(r1.receipt.receipt_no, 1);
+  assert.deepEqual(r1.receipt.allocations.map((a) => a.invoice_no), [inv2.invoice_no]);
+  assert.equal(s.orders.get(inv2.id).open_amount, 0);
+  assert.equal(s.orders.get(inv1.id).open_amount, 30000);
+  assert.equal(tryCode(() => s.customers.collect({ customerId: cust, amount: 40000, allocations: [{ order_id: inv1.id, amount: 40000 }] })), 'ALLOCATION_EXCEEDS_DUE');
+
+  // A cheque for 260 with a 40 settlement discount (13%, above the cashier's 10%) closes invoice 1; cashier needs approval for the discount.
+  s.users.save({ name: 'Cash', username: 'cash', pin: '1111', role: 'cashier' });
+  s.users.save({ name: 'Sup', username: 'sup', pin: '2222', role: 'supervisor' });
+  s.auth.logout(); s.auth.login({ username: 'cash', pin: '1111' });
+  const chequeArgs = { customerId: cust, amount: 26000, discount: 4000, method: 'cheque', cheque: { no: 'CH-77', bank: 'NBE', due: '2026-12-01' } };
+  assert.equal(tryCode(() => s.customers.collect({ ...chequeArgs, cheque: { no: '' } })), 'CHEQUE_NO_REQUIRED');
+  assert.equal(tryCode(() => s.customers.collect(chequeArgs)), 'APPROVAL_REQUIRED');
+  const r2 = s.customers.collect({ ...chequeArgs, approval: { username: 'sup', pin: '2222' } });
+  assert.equal(r2.receipt.receipt_no, 2);
+  assert.equal(r2.receipt.discount, 4000);
+  assert.equal(r2.customer.balance, 0);
+  assert.equal(r2.customer.pending_cheques, 26000);
+  assert.equal(s.customers.aging().length, 0);
+
+  // The cheque bounces: the cheque and its discount come back on the balance.
+  s.auth.logout(); s.auth.login({ username: 'admin', pin: '1234' });
+  const chq = s.customers.cheques({})[0];
+  assert.equal(chq.cheque_no, 'CH-77');
+  const after = s.customers.bounceCheque({ id: chq.id, reason: 'insufficient funds' });
+  assert.equal(after.balance, 30000);
+  const st = s.customers.statement({ id: cust });
+  assert.ok(st.rows.some((r) => r.kind === 'bounced' && r.debit === 26000));
+  assert.equal(st.balance, 30000);
+
+  // Overpaying leaves an advance that settles the next credit sale.
+  const r3 = s.customers.collect({ customerId: cust, amount: 50000, method: 'cash' });
+  assert.equal(r3.customer.balance, -20000);
+  assert.equal(s.customers.openInvoices(cust).advance, 20000);
+  const inv3 = s.orders.checkout({ customer_id: cust, items: [{ product_id: p, qty: 1 }], payments: [] });
+  assert.equal(s.orders.get(inv3.id).open_amount, 0);
+  assert.equal(s.customers.get(cust).balance, -10000);
+
+  // Voiding a receipt needs a reason; the money leaves the drawer total.
+  const cashBefore = s.shifts.summary().expectedCash;
+  assert.equal(tryCode(() => s.customers.voidReceipt({ receiptNo: r3.receipt.receipt_no })), 'REASON_REQUIRED');
+  const v = s.customers.voidReceipt({ receiptNo: r3.receipt.receipt_no, reason: 'wrong customer' });
+  assert.equal(v.status, 'void');
+  assert.equal(v.customer.balance, 40000);
+  assert.equal(s.shifts.summary().expectedCash, cashBefore - 50000);
+  assert.equal(tryCode(() => s.customers.voidReceipt({ receiptNo: r3.receipt.receipt_no, reason: 'x' })), 'ALREADY_VOID');
+  const list = s.customers.receipts({});
+  assert.equal(list.rows.length, 3);
+  assert.equal(list.totals.amount, 20000); // posted only: receipt 1 (cheque bounced, receipt 3 void)
+  assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'receipt_void'").get());
 });

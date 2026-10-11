@@ -77,3 +77,16 @@ export function useLoad(loader, deps = []) {
 export function Empty({ children }) {
   return <div className="empty">{children}</div>;
 }
+
+/** Text/number question (Electron has no window.prompt). Resolves with the value, or null when cancelled. */
+export function AskModal({ req, onDone, t }) {
+  const [value, setValue] = useState(req.initial ?? '');
+  return (
+    <Modal title={req.title || req.label} onClose={() => onDone(null)} width={440}
+      footer={<><span className="spacer" /><button onClick={() => onDone(null)}>{t('common.cancel')}</button><button className="primary" disabled={req.required && !String(value).trim()} onClick={() => onDone(value)}>{t('common.confirm')}</button></>}>
+      <form onSubmit={(e) => { e.preventDefault(); if (!req.required || String(value).trim()) onDone(value); }}>
+        <Field label={req.label}><input autoFocus type={req.type || 'text'} inputMode={req.type === 'number' ? 'decimal' : undefined} value={value} onChange={(e) => setValue(e.target.value)} /></Field>
+      </form>
+    </Modal>
+  );
+}

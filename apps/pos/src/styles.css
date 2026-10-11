@@ -365,3 +365,14 @@ tr.dim td { opacity: .5; }
 .day-chip input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
 .label-preview { display: flex; justify-content: center; padding: 10px; background: #fff; border: 1px dashed #cfd5df; border-radius: 9px; margin-top: 10px; }
 .label-preview svg { width: 240px; max-width: 100%; height: auto; }
+
+/* Collections */
+.collect-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.collect-head > div { background: var(--bg, #f6f7f9); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; }
+.collect-head small { color: var(--muted, #6b7280); font-size: 12px; }
+.collect-head b { font-size: 18px; }
+input.strong-input { font-size: 20px; font-weight: 700; }
+.banner { padding: 10px 14px; border-radius: 9px; margin-bottom: 12px; font-weight: 600; }
+.banner.danger { background: #fde8e8; color: var(--danger); border: 1px solid #f5c2c2; }
+.row.end { justify-content: flex-end; gap: 6px; }
+table.grid.compact td, table.grid.compact th { padding: 6px 8px; }

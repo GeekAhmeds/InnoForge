@@ -481,6 +481,66 @@ const MIGRATIONS = [
   );
   CREATE INDEX idx_loyalty_customer ON loyalty_moves(customer_id);
   `,
+  // v8: receipt vouchers (numbered, bank/cheque details, voids, allocation to invoices),
+  // payment terms and due dates, customer discounts, supplier bonuses and rebates.
+  `
+  ALTER TABLE customer_payments ADD COLUMN receipt_no INTEGER;
+  ALTER TABLE customer_payments ADD COLUMN status TEXT NOT NULL DEFAULT 'posted'; -- posted | void | bounced
+  ALTER TABLE customer_payments ADD COLUMN cheque_no TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customer_payments ADD COLUMN bank TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customer_payments ADD COLUMN cheque_due TEXT;
+  ALTER TABLE customer_payments ADD COLUMN cheque_status TEXT NOT NULL DEFAULT ''; -- pending | cleared | bounced
+  ALTER TABLE customer_payments ADD COLUMN collector_id INTEGER REFERENCES users(id);
+  ALTER TABLE customer_payments ADD COLUMN void_reason TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customer_payments ADD COLUMN voided_at TEXT;
+  ALTER TABLE customer_payments ADD COLUMN voided_by INTEGER REFERENCES users(id);
+  UPDATE customer_payments SET receipt_no = id WHERE method != 'return';
+  CREATE INDEX idx_customer_payments_receipt ON customer_payments(receipt_no);
+
+  -- Which invoices a payment settles. Payments without allocations settle the oldest debts first.
+  CREATE TABLE payment_allocations (
+    id         INTEGER PRIMARY KEY,
+    payment_id INTEGER NOT NULL REFERENCES customer_payments(id) ON DELETE CASCADE,
+    order_id   INTEGER NOT NULL REFERENCES orders(id),
+    amount     INTEGER NOT NULL CHECK (amount > 0)
+  );
+  CREATE INDEX idx_alloc_payment ON payment_allocations(payment_id);
+  CREATE INDEX idx_alloc_order ON payment_allocations(order_id);
+  INSERT INTO payment_allocations (payment_id, order_id, amount)
+    SELECT id, order_id, amount FROM customer_payments WHERE method = 'return' AND order_id IS NOT NULL;
+
+  ALTER TABLE customers ADD COLUMN payment_terms INTEGER NOT NULL DEFAULT 0; -- days; 0 = the general setting
+  ALTER TABLE customers ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN due_date TEXT;
+  ALTER TABLE order_items ADD COLUMN customer_discount INTEGER NOT NULL DEFAULT 0;
+
+  ALTER TABLE products ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL;
+  ALTER TABLE purchase_items ADD COLUMN bonus_qty REAL NOT NULL DEFAULT 0;
+  ALTER TABLE purchase_items ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0;
+  UPDATE products SET supplier_id = (
+    SELECT pu.supplier_id FROM purchase_items pi JOIN purchases pu ON pu.id = pi.purchase_id
+    WHERE pi.product_id = products.id AND pu.supplier_id IS NOT NULL ORDER BY pu.id DESC LIMIT 1);
+
+  -- Volume rebates agreed with a supplier: a percentage (or fixed amount) of what we
+  -- bought from them, or sold of their products, in a period, once a target is reached.
+  CREATE TABLE supplier_rebates (
+    id             INTEGER PRIMARY KEY,
+    supplier_id    INTEGER NOT NULL REFERENCES suppliers(id),
+    name           TEXT NOT NULL,
+    basis          TEXT NOT NULL CHECK (basis IN ('purchases', 'sales')),
+    start_date     TEXT NOT NULL,
+    end_date       TEXT NOT NULL,
+    target         INTEGER NOT NULL DEFAULT 0,
+    percent        REAL NOT NULL DEFAULT 0,
+    fixed_amount   INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'settled', 'cancelled')),
+    settled_amount INTEGER NOT NULL DEFAULT 0,
+    settled_at     TEXT,
+    notes          TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  ALTER TABLE supplier_payments ADD COLUMN rebate_id INTEGER REFERENCES supplier_rebates(id);
+  `,
 ];
 
 function openDatabase(file) {

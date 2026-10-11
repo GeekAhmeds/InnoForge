@@ -61,7 +61,9 @@ const plainAll = (rows) => rows.map(plain);
 const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : d);
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const str = (v) => (v == null ? '' : String(v).trim());
-const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'other'];
+const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'bank', 'other'];
+// Ways a customer can settle their account (a cheque counts once received; it is reversed if it bounces).
+const COLLECT_METHODS = [...PAYMENT_METHODS, 'cheque'];
 
 function dateRange(from, to) {
   // Inclusive local-date range on completed_at ('YYYY-MM-DD HH:MM:SS').
@@ -559,7 +561,7 @@ function createServices(db) {
     const supplierCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
     const expenseCash = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE shift_id = ? AND from_drawer = 1').get(shiftId).t;
     const creditSales = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE shift_id = ? AND status = 'completed'").get(shiftId).t;
-    const collections = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM customer_payments WHERE shift_id = ? AND method != 'return' GROUP BY method").all(shiftId));
+    const collections = plainAll(db.prepare("SELECT method, SUM(amount) AS amount FROM customer_payments WHERE shift_id = ? AND method NOT IN ('return', 'discount') AND status = 'posted' GROUP BY method").all(shiftId));
     const customerCash = collections.find((c) => c.method === 'cash')?.amount || 0;
     const expectedCash = shift.opening_cash + cashSales + customerCash - refunds.cash - supplierCash - expenseCash;
     return { shift, sales, byMethod, refunds, supplierCash, expenseCash, creditSales, collections, customerCash, expectedCash };
@@ -611,6 +613,9 @@ function createServices(db) {
     order.returns = plainAll(db.prepare('SELECT r.*, u.name AS user_name FROM returns r JOIN users u ON u.id = r.user_id WHERE r.order_id = ? ORDER BY r.id').all(id));
     order.customer_balance = order.customer_id ? customerBalance(order.customer_id) : null;
     order.customer = order.customer_id ? plain(db.prepare('SELECT id, name, phone, address, tax_number, points FROM customers WHERE id = ?').get(order.customer_id)) : null;
+    if (order.customer_id && order.credit > 0 && order.status === 'completed') {
+      order.open_amount = openItems(order.customer_id).debts.find((x) => x.order_id === order.id)?.open ?? 0;
+    }
     return order;
   }
 
@@ -941,6 +946,11 @@ function createServices(db) {
         const invoiceNo = (db.prepare('SELECT MAX(invoice_no) AS n FROM orders').get().n || 0) + 1;
         db.prepare("UPDATE orders SET status = 'completed', invoice_no = ?, shift_id = ?, user_id = ?, paid = ?, change_due = ?, credit = ?, completed_at = datetime('now', 'localtime') WHERE id = ?")
           .run(invoiceNo, shift.id, u.id, tendered, change, credit, orderId);
+        if (credit > 0) {
+          // When the unpaid part is due: an explicit date, else the customer's terms, else the general setting.
+          const due = /^\d{4}-\d{2}-\d{2}$/.test(str(cart.due_date)) ? str(cart.due_date) : addDays(new Date().toLocaleDateString('en-CA'), termsOf(customer));
+          db.prepare('UPDATE orders SET due_date = ? WHERE id = ?').run(due, orderId);
+        }
 
         // Store net amounts per method: change always comes out of cash.
         let changeLeft = change;
@@ -1025,8 +1035,9 @@ function createServices(db) {
             .run(orderId, shift.id, u.id, amount, cashOut ? 'cash' : 'account', str(reason), cashOut).lastInsertRowid,
         );
         if (toAccount > 0) {
-          db.prepare("INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, order_id, notes) VALUES (?, ?, 'return', ?, ?, ?, ?)")
-            .run(order.customer_id, toAccount, shift.id, u.id, orderId, str(reason));
+          const pid = db.prepare("INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, order_id, notes) VALUES (?, ?, 'return', ?, ?, ?, ?)")
+            .run(order.customer_id, toAccount, shift.id, u.id, orderId, str(reason)).lastInsertRowid;
+          db.prepare('INSERT INTO payment_allocations (payment_id, order_id, amount) VALUES (?, ?, ?)').run(pid, orderId, toAccount);
         }
         for (const l of lines) {
           db.prepare('INSERT INTO return_items (return_id, order_item_id, qty, amount) VALUES (?, ?, ?, ?)').run(returnId, l.line.id, l.qty, l.amount);
@@ -1237,14 +1248,81 @@ function createServices(db) {
   function customerBalance(id) {
     const opening = db.prepare('SELECT opening_balance FROM customers WHERE id = ?').get(id)?.opening_balance || 0;
     const sold = db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders WHERE customer_id = ? AND status = 'completed'").get(id).t;
-    const paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ?').get(id).t;
+    const paid = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ? AND status = 'posted'").get(id).t;
     return opening + sold - paid;
   }
   const CUSTOMER_BALANCE = `(
     c.opening_balance +
     COALESCE((SELECT SUM(credit) FROM orders o WHERE o.customer_id = c.id AND o.status = 'completed'), 0) -
-    COALESCE((SELECT SUM(amount) FROM customer_payments cp WHERE cp.customer_id = c.id), 0)
+    COALESCE((SELECT SUM(amount) FROM customer_payments cp WHERE cp.customer_id = c.id AND cp.status = 'posted'), 0)
   )`;
+
+  const addDays = (date, days) => {
+    const d = new Date(`${String(date).slice(0, 10)}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    return d.toLocaleDateString('en-CA');
+  };
+  const termsOf = (customer) => int(customer?.payment_terms) || getSettings().overdue_days || 30;
+
+  /**
+   * What the customer still owes, invoice by invoice. Payments allocated to an invoice
+   * settle it; everything else (unallocated payments, a credit opening balance, anything
+   * allocated beyond an invoice's amount) settles the oldest debts first. Whatever is
+   * left over is an advance the customer has with us.
+   */
+  function openItems(customerId) {
+    const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
+    if (!c) throw new PosError('NOT_FOUND');
+    const terms = termsOf(c);
+    const debts = [];
+    let pool = c.opening_balance < 0 ? -c.opening_balance : 0;
+    if (c.opening_balance > 0) {
+      debts.push({ order_id: null, invoice_no: null, date: c.created_at, due_date: addDays(c.created_at, terms), amount: c.opening_balance, open: c.opening_balance });
+    }
+    const allocated = new Map(db.prepare(`
+      SELECT a.order_id, SUM(a.amount) AS amount FROM payment_allocations a JOIN customer_payments p ON p.id = a.payment_id
+      WHERE p.customer_id = ? AND p.status = 'posted' GROUP BY a.order_id`).all(customerId).map((r) => [r.order_id, r.amount]));
+    const paid = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ? AND status = 'posted'").get(customerId).t;
+    const allocTotal = [...allocated.values()].reduce((s, v) => s + v, 0);
+    pool += paid - allocTotal;
+    for (const o of db.prepare("SELECT id, invoice_no, completed_at, due_date, total, credit FROM orders WHERE customer_id = ? AND status = 'completed' AND credit > 0 ORDER BY completed_at, id").all(customerId)) {
+      const a = allocated.get(o.id) || 0;
+      pool += Math.max(0, a - o.credit);
+      debts.push({ order_id: o.id, invoice_no: o.invoice_no, date: o.completed_at, due_date: o.due_date || addDays(o.completed_at, terms), total: o.total, amount: o.credit, open: Math.max(0, o.credit - a) });
+    }
+    for (const d of debts) {
+      const take = Math.min(pool, d.open);
+      d.open -= take;
+      pool -= take;
+    }
+    return { customer: plain(c), debts, open: debts.filter((d) => d.open > 0), advance: pool };
+  }
+
+  const pendingCheques = (customerId) => db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ? AND method = 'cheque' AND status = 'posted' AND cheque_status = 'pending'").get(customerId).t;
+
+  /** A receipt voucher: every payment row sharing the number (amount + settlement discount). */
+  function getReceipt(receiptNo) {
+    const rows = plainAll(db.prepare(`
+      SELECT p.*, u.name AS user_name, col.name AS collector_name, vu.name AS voided_by_name
+      FROM customer_payments p JOIN users u ON u.id = p.user_id
+      LEFT JOIN users col ON col.id = p.collector_id LEFT JOIN users vu ON vu.id = p.voided_by
+      WHERE p.receipt_no = ? ORDER BY p.id`).all(receiptNo));
+    if (!rows.length) throw new PosError('NOT_FOUND');
+    const main = rows.find((r) => r.method !== 'discount') || rows[0];
+    const ids = rows.map((r) => r.id);
+    const allocations = plainAll(db.prepare(`
+      SELECT o.id AS order_id, o.invoice_no, o.completed_at, SUM(a.amount) AS amount FROM payment_allocations a JOIN orders o ON o.id = a.order_id
+      WHERE a.payment_id IN (${ids.map(() => '?').join(',')}) GROUP BY o.id ORDER BY o.completed_at`).all(...ids));
+    return {
+      receipt_no: receiptNo, id: main.id, customer_id: main.customer_id, created_at: main.created_at, method: main.method, status: main.status,
+      amount: rows.filter((r) => r.method !== 'discount').reduce((s, r) => s + r.amount, 0),
+      discount: rows.filter((r) => r.method === 'discount').reduce((s, r) => s + r.amount, 0),
+      cheque_no: main.cheque_no, bank: main.bank, cheque_due: main.cheque_due, cheque_status: main.cheque_status,
+      notes: main.notes, user_name: main.user_name, collector_name: main.collector_name || main.user_name,
+      void_reason: main.void_reason, voided_at: main.voided_at, voided_by_name: main.voided_by_name, shift_id: main.shift_id,
+      allocations,
+    };
+  }
 
   const customers = {
     list({ search = '', includeInactive = false, owingOnly = false } = {}) {
@@ -1265,9 +1343,11 @@ function createServices(db) {
       const c = plain(db.prepare('SELECT * FROM customers WHERE id = ?').get(id));
       if (!c) throw new PosError('NOT_FOUND');
       c.balance = customerBalance(id);
+      c.pending_cheques = pendingCheques(id);
+      c.terms_days = termsOf(c);
       return c;
     },
-    /** Cashiers can add/edit contact details; only admins set credit limits or deactivate. */
+    /** Cashiers can add/edit contact details; credit limits, terms, discounts and price lists need customers_edit. */
     save(c = {}) {
       const u = requireUser();
       if (!str(c.name)) throw new PosError('NAME_REQUIRED');
@@ -1280,29 +1360,43 @@ function createServices(db) {
       const active = admin ? (c.active === false ? 0 : 1) : existing?.active ?? 1;
       if (existing && existing.credit_limit !== limit) audit('credit_limit_change', { entity: 'customer', entityId: c.id, details: { name: str(c.name), from: existing.credit_limit, to: limit } });
       const priceList = admin ? int(c.price_list_id) || null : existing?.price_list_id ?? null;
-      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList];
+      const terms = admin ? Math.max(0, int(c.payment_terms)) : existing?.payment_terms ?? 0;
+      const discountPct = admin ? Math.min(100, Math.max(0, num(c.discount_percent))) : existing?.discount_percent ?? 0;
+      if (existing && existing.discount_percent !== discountPct) audit('customer_discount_change', { entity: 'customer', entityId: c.id, details: { name: str(c.name), pct: discountPct } });
+      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct];
       if (c.id) {
-        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ? WHERE id = ?').run(...vals, c.id);
+        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ? WHERE id = ?').run(...vals, c.id);
         return c.id;
       }
-      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
     },
-    /** Invoices, collections and returns in date order with a running balance (what the customer owes). */
+    /** Invoices, receipts, discounts, bounced cheques and returns in date order with a running balance. */
     statement({ id, from = null, to = null } = {}) {
       requireUser();
       const customer = customers.get(id);
       const rows = plainAll(db.prepare(`
-        SELECT 'sale' AS kind, id, invoice_no AS ref, completed_at AS created_at, total, credit AS debit, 0 AS credit, '' AS notes
+        SELECT 'sale' AS kind, id, invoice_no AS ref, completed_at AS created_at, total, credit AS debit, 0 AS credit, '' AS notes, NULL AS receipt_no, due_date, '' AS cheque_no
           FROM orders WHERE customer_id = ? AND status = 'completed'
         UNION ALL
-        SELECT CASE method WHEN 'return' THEN 'return' ELSE 'payment' END AS kind, id, method AS ref, created_at, amount AS total, 0 AS debit, amount AS credit, notes
-          FROM customer_payments WHERE customer_id = ?
-        ORDER BY created_at, kind DESC, id`).all(id, id));
+        SELECT CASE method WHEN 'return' THEN 'return' WHEN 'discount' THEN 'discount' ELSE 'payment' END AS kind, id, method AS ref, created_at, amount AS total,
+               0 AS debit, amount AS credit, notes, receipt_no, NULL AS due_date, cheque_no
+          FROM customer_payments WHERE customer_id = ? AND status IN ('posted', 'bounced')
+        UNION ALL
+        SELECT 'bounced' AS kind, id, method AS ref, voided_at AS created_at, amount AS total, amount AS debit, 0 AS credit, void_reason AS notes, receipt_no, NULL AS due_date, cheque_no
+          FROM customer_payments WHERE customer_id = ? AND status = 'bounced'
+        ORDER BY created_at, kind DESC, id`).all(id, id, id));
       let balance = customer.opening_balance || 0;
       for (const r of rows) { balance += r.debit - r.credit; r.balance = balance; }
       const inRange = rows.filter((r) => (!from || r.created_at >= from) && (!to || r.created_at < `${to} 99`));
       const opening = inRange.length ? inRange[0].balance - inRange[0].debit + inRange[0].credit : balance;
-      return { customer, opening, rows: inRange, balance };
+      const { open, advance } = openItems(id);
+      return { customer, opening, rows: inRange, balance, open, advance };
+    },
+    /** Unpaid (or partly paid) invoices with what is left on each, oldest first. */
+    openInvoices(id) {
+      requireUser();
+      const { open, advance, customer } = openItems(id);
+      return { open, advance, balance: customerBalance(id), terms_days: termsOf(customer) };
     },
     /** Manual points correction (e.g. a welcome bonus); needs customers_edit. */
     adjustPoints({ customerId, points, reason = '' } = {}) {
@@ -1314,19 +1408,144 @@ function createServices(db) {
       audit('points_adjust', { entity: 'customer', entityId: customerId, details: { points: value, reason: str(reason) } });
       return customers.get(customerId);
     },
-    /** Receives money from a customer. Cash goes into the open shift's drawer. */
-    collect({ customerId, amount, method = 'cash', notes = '' } = {}) {
+    /**
+     * Issues a numbered receipt voucher. Cash goes into the open shift's drawer; a cheque
+     * reduces the balance now and is reversed if it bounces. `discount` is a settlement
+     * discount given on top of the money received (needs the discount permission).
+     * `allocations` [{ order_id, amount }] pick the invoices it pays; otherwise the oldest are settled.
+     * Paying more than is owed leaves an advance (credit balance).
+     */
+    collect({ customerId, amount, method = 'cash', notes = '', discount = 0, allocations = null, cheque = null, collectorId = null, approval = null } = {}) {
       const u = requireUser();
-      const value = int(amount);
-      if (!(value > 0)) throw new PosError('INVALID_AMOUNT');
-      if (!PAYMENT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
+      const value = Math.max(0, int(amount));
+      const disc = Math.max(0, int(discount));
+      if (!(value > 0) && !(disc > 0)) throw new PosError('INVALID_AMOUNT');
+      if (!COLLECT_METHODS.includes(method)) throw new PosError('INVALID_PAYMENT');
       if (!db.prepare('SELECT 1 FROM customers WHERE id = ?').get(customerId)) throw new PosError('NOT_FOUND');
       const shift = currentShift();
-      if (method === 'cash' && !shift) throw new PosError('NO_OPEN_SHIFT');
-      audit('customer_collect', { entity: 'customer', entityId: customerId, details: { amount: value, method } });
-      const id = Number(db.prepare('INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, notes) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(customerId, value, method, shift?.id ?? null, u.id, str(notes)).lastInsertRowid);
-      return { payment: plain(db.prepare('SELECT p.*, u.name AS user_name FROM customer_payments p JOIN users u ON u.id = p.user_id WHERE p.id = ?').get(id)), customer: customers.get(customerId) };
+      if (value > 0 && method === 'cash' && !shift) throw new PosError('NO_OPEN_SHIFT');
+      const chq = method === 'cheque' ? { no: str(cheque?.no), bank: str(cheque?.bank), due: str(cheque?.due) || null } : null;
+      if (chq && !chq.no) throw new PosError('CHEQUE_NO_REQUIRED');
+      const collector = int(collectorId) && db.prepare('SELECT id FROM users WHERE id = ? AND active = 1').get(int(collectorId)) ? int(collectorId) : u.id;
+      return transaction(db, () => {
+        let approvedBy = null;
+        if (disc > 0) {
+          const pct = ((disc / (value + disc)) * 100);
+          approvedBy = requirePerm('discount', approval, (p) => pct <= (p.max_discount ?? 0) + 1e-9).approvedBy;
+        }
+        // Validate requested allocations against what each invoice still owes.
+        const { open } = openItems(customerId);
+        const wanted = (Array.isArray(allocations) ? allocations : [])
+          .map((a) => ({ order_id: int(a.order_id), amount: Math.max(0, int(a.amount)) })).filter((a) => a.order_id && a.amount > 0);
+        for (const a of wanted) {
+          const inv = open.find((d) => d.order_id === a.order_id);
+          if (!inv || a.amount > inv.open) throw new PosError('ALLOCATION_EXCEEDS_DUE');
+        }
+        if (wanted.reduce((s, a) => s + a.amount, 0) > value + disc) throw new PosError('ALLOCATION_EXCEEDS_PAYMENT');
+
+        const receiptNo = (db.prepare('SELECT MAX(receipt_no) AS n FROM customer_payments').get().n || 0) + 1;
+        const ins = db.prepare(`INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, notes, receipt_no, cheque_no, bank, cheque_due, cheque_status, collector_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        const rows = [];
+        if (value > 0) {
+          rows.push({ id: Number(ins.run(customerId, value, method, shift?.id ?? null, u.id, str(notes), receiptNo, chq?.no || '', chq?.bank || '', chq?.due || null, chq ? 'pending' : '', collector).lastInsertRowid), left: value });
+        }
+        if (disc > 0) {
+          rows.push({ id: Number(ins.run(customerId, disc, 'discount', shift?.id ?? null, u.id, str(notes), receiptNo, '', '', null, '', collector).lastInsertRowid), left: disc });
+        }
+        // Spread the allocations over the money first, then the discount.
+        const insAlloc = db.prepare('INSERT INTO payment_allocations (payment_id, order_id, amount) VALUES (?, ?, ?)');
+        for (const a of wanted) {
+          let need = a.amount;
+          for (const r of rows) {
+            if (!need) break;
+            const take = Math.min(need, r.left);
+            if (take > 0) { insAlloc.run(r.id, a.order_id, take); r.left -= take; need -= take; }
+          }
+        }
+        audit('customer_collect', { entity: 'customer', entityId: customerId, approvedBy, details: { receipt: receiptNo, amount: value, discount: disc, method, ...(chq ? { cheque: chq.no } : {}) } });
+        return { receipt: getReceipt(receiptNo), customer: customers.get(customerId), payment: getReceipt(receiptNo) };
+      });
+    },
+    receipt(receiptNo) {
+      requireUser();
+      const r = getReceipt(int(receiptNo));
+      return { ...r, customer: customers.get(r.customer_id) };
+    },
+    /** Receipt vouchers in a date range (one row per voucher). */
+    receipts({ from, to, search = '', method = '', customerId = null } = {}) {
+      requireUser();
+      const [f, t] = dateRange(from, to);
+      const where = ["p.receipt_no IS NOT NULL", "p.created_at >= ?", "p.created_at < date(?, '+1 day')"];
+      const params = [f, t];
+      if (customerId) { where.push('p.customer_id = ?'); params.push(int(customerId)); }
+      if (str(search)) { where.push('(c.name LIKE ? OR c.phone LIKE ? OR CAST(p.receipt_no AS TEXT) = ? OR p.cheque_no = ?)'); params.push(`%${str(search)}%`, `%${str(search)}%`, str(search), str(search)); }
+      const rows = plainAll(db.prepare(`
+        SELECT p.receipt_no, MIN(p.created_at) AS created_at, p.customer_id, c.name AS customer_name, c.phone AS customer_phone,
+          SUM(CASE WHEN p.method != 'discount' THEN p.amount ELSE 0 END) AS amount,
+          SUM(CASE WHEN p.method = 'discount' THEN p.amount ELSE 0 END) AS discount,
+          MAX(CASE WHEN p.method != 'discount' THEN p.method END) AS method,
+          MAX(p.status) AS status, MAX(p.cheque_no) AS cheque_no, MAX(p.cheque_status) AS cheque_status,
+          MAX(u.name) AS user_name, MAX(COALESCE(col.name, u.name)) AS collector_name
+        FROM customer_payments p JOIN customers c ON c.id = p.customer_id JOIN users u ON u.id = p.user_id LEFT JOIN users col ON col.id = p.collector_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY p.receipt_no ORDER BY p.receipt_no DESC LIMIT 1000`).all(...params));
+      const list = method ? rows.filter((r) => (r.method || 'discount') === method) : rows;
+      const posted = list.filter((r) => r.status === 'posted');
+      const byMethod = {};
+      for (const r of posted) if (r.amount) byMethod[r.method] = (byMethod[r.method] || 0) + r.amount;
+      return {
+        rows: list,
+        totals: { amount: posted.reduce((s, r) => s + r.amount, 0), discount: posted.reduce((s, r) => s + r.discount, 0), count: posted.length, byMethod },
+      };
+    },
+    /** Cancels a receipt voucher (wrong amount, wrong customer…). Needs 'void' and a reason. */
+    voidReceipt({ receiptNo, reason = '', approval = null } = {}) {
+      const { user: u, approvedBy } = requirePerm('void', approval);
+      if (!str(reason)) throw new PosError('REASON_REQUIRED');
+      return transaction(db, () => {
+        const r = getReceipt(int(receiptNo));
+        if (r.status !== 'posted') throw new PosError('ALREADY_VOID');
+        // Cash already counted in a closed shift cannot leave its Z-report.
+        if (r.method === 'cash' && r.shift_id && db.prepare('SELECT closed_at FROM shifts WHERE id = ?').get(r.shift_id)?.closed_at) throw new PosError('SHIFT_CLOSED');
+        db.prepare("UPDATE customer_payments SET status = 'void', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE receipt_no = ?").run(str(reason), u.id, r.receipt_no);
+        audit('receipt_void', { entity: 'customer', entityId: r.customer_id, approvedBy, details: { receipt: r.receipt_no, amount: r.amount, discount: r.discount, reason: str(reason) } });
+        return { ...getReceipt(r.receipt_no), customer: customers.get(r.customer_id) };
+      });
+    },
+    /** Cheques received; status '' = all, pending, cleared or bounced. */
+    cheques({ status = 'pending' } = {}) {
+      requireUser();
+      const params = [];
+      let where = "p.method = 'cheque' AND p.status != 'void'";
+      if (status) { where += ' AND p.cheque_status = ?'; params.push(status); }
+      return plainAll(db.prepare(`
+        SELECT p.id, p.receipt_no, p.amount, p.cheque_no, p.bank, p.cheque_due, p.cheque_status, p.created_at, p.customer_id, c.name AS customer_name, c.phone AS customer_phone,
+          CAST(julianday(p.cheque_due) - julianday(date('now', 'localtime')) AS INTEGER) AS days_left
+        FROM customer_payments p JOIN customers c ON c.id = p.customer_id
+        WHERE ${where} ORDER BY COALESCE(p.cheque_due, p.created_at), p.id`).all(...params));
+    },
+    /** The bank paid a cheque. */
+    clearCheque(id) {
+      requirePerm('customers_edit');
+      const p = db.prepare("SELECT * FROM customer_payments WHERE id = ? AND method = 'cheque'").get(id);
+      if (!p || p.status !== 'posted' || p.cheque_status !== 'pending') throw new PosError('INVALID_STATUS');
+      db.prepare("UPDATE customer_payments SET cheque_status = 'cleared' WHERE id = ?").run(id);
+      audit('cheque_cleared', { entity: 'customer', entityId: p.customer_id, details: { cheque: p.cheque_no, amount: p.amount, receipt: p.receipt_no } });
+      return true;
+    },
+    /** The cheque bounced: the amount goes back on the customer's balance. */
+    bounceCheque({ id, reason = '' } = {}) {
+      const u = requirePerm('customers_edit').user;
+      const p = db.prepare("SELECT * FROM customer_payments WHERE id = ? AND method = 'cheque'").get(id);
+      if (!p || p.status !== 'posted' || p.cheque_status === 'bounced') throw new PosError('INVALID_STATUS');
+      transaction(db, () => {
+        db.prepare("UPDATE customer_payments SET status = 'bounced', cheque_status = 'bounced', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE id = ?").run(str(reason), u.id, id);
+        // A settlement discount given with this cheque goes with it.
+        db.prepare("UPDATE customer_payments SET status = 'void', void_reason = ?, voided_at = datetime('now', 'localtime'), voided_by = ? WHERE receipt_no = ? AND method = 'discount' AND status = 'posted'").run(str(reason), u.id, p.receipt_no);
+      });
+      audit('cheque_bounced', { entity: 'customer', entityId: p.customer_id, details: { cheque: p.cheque_no, amount: p.amount, receipt: p.receipt_no, reason: str(reason) } });
+      return customers.get(p.customer_id);
     },
   };
 
@@ -1361,7 +1580,7 @@ function createServices(db) {
           expenses: expensesTotal,
           netProfit: can('view_cost') ? profit - expensesTotal : null,
           creditSales: db.prepare("SELECT COALESCE(SUM(credit), 0) AS t FROM orders o WHERE " + range).get(f, t).t,
-          collections: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method != 'return' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t,
+          collections: db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method NOT IN ('return', 'discount') AND status = 'posted' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t,
           receivables: db.prepare(`SELECT COALESCE(SUM(b), 0) AS t FROM (SELECT ${CUSTOMER_BALANCE} AS b FROM customers c) WHERE b > 0`).get().t,
         },
         ...(can('view_cost') ? {} : { hiddenProfit: true }),
@@ -1490,32 +1709,30 @@ function createServices(db) {
    * Splits each customer's balance by age: payments settle the oldest debt first (opening
    * balance, then credit invoices in date order); what is left is bucketed by days old.
    */
-  function aging({ overdueDays = 30 } = {}) {
+  /**
+   * Receivables by age (days since each invoice) per customer. An invoice is overdue
+   * once its due date (customer payment terms, or the general setting) has passed.
+   */
+  function aging() {
     requireUser();
-    const today = Date.now();
+    const today = new Date().toLocaleDateString('en-CA');
+    const now = Date.now();
     const out = [];
-    for (const c of db.prepare('SELECT * FROM customers WHERE active = 1').all()) {
-      const debts = [];
-      if (c.opening_balance > 0) debts.push({ date: c.created_at, amount: c.opening_balance });
-      for (const o of db.prepare("SELECT invoice_no, completed_at, credit FROM orders WHERE customer_id = ? AND status = 'completed' AND credit > 0 ORDER BY completed_at, id").all(c.id)) {
-        debts.push({ date: o.completed_at, amount: o.credit, invoice: o.invoice_no });
-      }
-      let paid = db.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE customer_id = ?').get(c.id).t;
-      const row = { id: c.id, name: c.name, phone: c.phone, credit_limit: c.credit_limit, total: 0, b30: 0, b60: 0, b90: 0, b90p: 0, oldest_days: 0, overdue: 0 };
-      for (const d of debts) {
-        const settle = Math.min(paid, d.amount);
-        paid -= settle;
-        const left = d.amount - settle;
-        if (left <= 0) continue;
-        const days = Math.max(0, Math.floor((today - Date.parse(d.date.replace(' ', 'T'))) / 86400000));
-        row.total += left;
-        row[days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'b90p'] += left;
+    for (const c of db.prepare('SELECT id, name, phone, credit_limit FROM customers WHERE active = 1').all()) {
+      const { open } = openItems(c.id);
+      if (!open.length) continue;
+      const row = { id: c.id, name: c.name, phone: c.phone, credit_limit: c.credit_limit, total: 0, b30: 0, b60: 0, b90: 0, b90p: 0, oldest_days: 0, overdue: 0, next_due: null };
+      for (const d of open) {
+        const days = Math.max(0, Math.floor((now - Date.parse(String(d.date).replace(' ', 'T'))) / 86400000));
+        row.total += d.open;
+        row[days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'b90p'] += d.open;
         row.oldest_days = Math.max(row.oldest_days, days);
-        if (days > overdueDays) row.overdue += left;
+        if (d.due_date < today) row.overdue += d.open;
+        else if (!row.next_due || d.due_date < row.next_due) row.next_due = d.due_date;
       }
-      if (row.total > 0) out.push(row);
+      out.push(row);
     }
-    return out.sort((a, b) => b.oldest_days - a.oldest_days || b.total - a.total);
+    return out.sort((a, b) => b.overdue - a.overdue || b.oldest_days - a.oldest_days || b.total - a.total);
   }
 
   // ---------- purchase returns ----------

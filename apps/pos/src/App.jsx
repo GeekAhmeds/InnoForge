@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { I18nProvider, useI18n } from './i18n/index.jsx';
 import { api, licenseStatus, print } from './lib/api.js';
-import { AppContext, useToasts } from './components/ui.jsx';
+import { AppContext, AskModal, useToasts } from './components/ui.jsx';
 import Setup from './pages/Setup.jsx';
 import Login from './pages/Login.jsx';
 import Pos from './pages/Pos.jsx';
@@ -83,6 +83,9 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     }
   }, [approvalReq]);
   const can = useCallback((perm) => !!user?.perms?.[perm], [user]);
+  const [askReq, setAskReq] = useState(null);
+  // ask(label, { type, initial, required }) → Promise<string | null>
+  const ask = useCallback((label, opts = {}) => new Promise((resolve) => setAskReq({ label, ...opts, resolve })), []);
   useEffect(() => { if (user) reloadShift(); }, [user, reloadShift]);
 
   const printDoc = useCallback(async (html, printer = settings.printer_name) => {
@@ -97,9 +100,9 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
 
   const ctx = useMemo(() => ({
     settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, setPage, license, setLicense,
-    isAdmin: user?.role === 'admin', can, withApproval, pendingCart, setPendingCart,
+    isAdmin: user?.role === 'admin', can, withApproval, ask, pendingCart, setPendingCart,
     openInPos: (cart) => { setPendingCart(cart); setPage('pos'); },
-  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval, pendingCart]);
+  }), [settings, reloadSettings, user, shift, reloadShift, notify, t, tErr, lang, printDoc, license, can, withApproval, ask, pendingCart]);
 
   let content;
   if (!settings.setup_done) {
@@ -141,6 +144,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
   return (
     <AppContext.Provider value={ctx}>
       {content}
+      {askReq && <AskModal req={askReq} t={t} onDone={(v) => { askReq.resolve(v); setAskReq(null); }} />}
       {approvalReq && <ApprovalModal request={approvalReq} t={t} onDone={(a) => approvalResolve.current?.(a)} />}
       {toasts}
     </AppContext.Provider>

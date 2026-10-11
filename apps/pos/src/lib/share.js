@@ -59,3 +59,34 @@ export function statementText(data, settings, t) {
     settings.phone ? `📞 ${settings.phone}` : null,
   ].filter((x) => x !== null).join('\n');
 }
+
+export function receiptText(r, customer, settings, t) {
+  const m = (v) => formatMoney(v, settings);
+  return [
+    `*${settings.business_name}*`,
+    `${t('customers.receipt')} #${r.receipt_no} — ${String(r.created_at).slice(0, 10)}`,
+    `${t('collect.thanks', { name: customer.name })}`,
+    '',
+    `${t(`pay.${r.method}`)}${r.cheque_no ? ` ${r.cheque_no}` : ''}: *${m(r.amount)}*`,
+    r.discount ? `${t('collect.discount')}: ${m(r.discount)}` : null,
+    ...(r.allocations || []).map((a) => `• ${t('customers.invoice')} #${a.invoice_no}: ${m(a.amount)}`),
+    '',
+    `*${t('customers.balanceAfter')}: ${m(customer.balance)}*`,
+    settings.phone ? `📞 ${settings.phone}` : null,
+  ].filter((x) => x !== null).join('\n');
+}
+
+/** Friendly reminder for invoices that are due or overdue. */
+export function reminderText(customer, open, settings, t) {
+  const m = (v) => formatMoney(v, settings);
+  const today = new Date().toLocaleDateString('en-CA');
+  return [
+    `*${settings.business_name}*`,
+    t('collect.reminderHello', { name: customer.name }),
+    '',
+    ...open.map((x) => `• ${x.invoice_no ? `${t('customers.invoice')} #${x.invoice_no}` : t('customers.opening')} — ${m(x.open)} (${t('collect.due')} ${x.due_date}${x.due_date < today ? ` ⚠` : ''})`),
+    '',
+    `*${t('customers.balance')}: ${m(open.reduce((s, x) => s + x.open, 0))}*`,
+    settings.phone ? `📞 ${settings.phone}` : null,
+  ].filter((x) => x !== null).join('\n');
+}
