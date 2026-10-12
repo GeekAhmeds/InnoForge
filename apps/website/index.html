@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>InnoForge POS — نظام البيع والمخزون والحسابات | Inno Source</title>
-<meta name="description" content="InnoForge POS من Inno Source: برنامج كاشير ومخزون وحسابات للمحلات والسوبر ماركت والمطاعم والمكتبات وشركات التوزيع. يشتغل من غير نت، عربي بالكامل، فاتورة إلكترونية، فروع وأكتر من جهاز.">
+<meta name="description" content="InnoForge POS من Inno Source: برنامج كاشير ومخزون وحسابات للمحلات والسوبر ماركت والمطاعم والمكتبات وشركات التوزيع في مصر والسعودية والإمارات. يشتغل من غير نت، عربي بالكامل، فاتورة إلكترونية (الضرائب المصرية — فاتورة ZATCA — الإمارات)، فروع وأكتر من جهاز.">
 <meta property="og:title" content="InnoForge POS — من Inno Source">
 <meta property="og:description" content="بيع أسرع، حسابات أدق، ومن غير نت. للمحلات والمطاعم والشركات.">
 <meta property="og:image" content="/site/assets/shots/cashier.webp">
@@ -13,6 +13,7 @@
 </head>
 <body>
 
+<div class="offer-bar" id="offerBar" hidden></div>
 <header class="top" id="top">
   <div class="wrap bar">
     <a class="brand" href="#top"><img src="/site/assets/logo-mark.png" alt=""><span><b>InnoForge</b> POS<small>من Inno Source</small></span></a>
@@ -25,6 +26,9 @@
       <a href="#download">التحميل</a>
       <a href="#activate">التفعيل</a>
       <a href="#contact">تواصل معانا</a>
+      <div class="country" id="countryPick" role="group" aria-label="الدولة">
+        <button type="button" data-c="EG" title="مصر">🇪🇬</button><button type="button" data-c="SA" title="السعودية">🇸🇦</button><button type="button" data-c="AE" title="الإمارات">🇦🇪</button>
+      </div>
       <a class="btn ghost small" href="/login/">دخول الشركاء</a>
     </nav>
   </div>
@@ -33,15 +37,15 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="pill">🇪🇬 مصري 100% — من Inno Source</span>
+      <span class="pill" id="heroPill">🇪🇬 🇸🇦 🇦🇪 — من Inno Source</span>
       <h1>نظام البيع والمخزون والحسابات<br><span class="grad">اللي بيكبر مع شغلك</span></h1>
-      <p class="lead">كاشير سريع، مخزون مضبوط، حسابات عملاء وموردين، تقارير لكل حاجة، وفاتورة إلكترونية — كله في برنامج واحد بيشتغل <b>من غير نت</b>، عربي بالكامل، وبيحدّث نفسه لوحده.</p>
+      <p class="lead">كاشير سريع، مخزون مضبوط، حسابات عملاء وموردين، تقارير لكل حاجة، وفاتورة إلكترونية — كله في برنامج واحد بيشتغل <b>من غير نت</b>، عربي بالكامل، وبيحدّث نفسه لوحده. <span id="heroCountry">في مصر والسعودية والإمارات.</span></p>
       <div class="cta">
         <a class="btn primary" href="#download">⬇ حمّل البرنامج</a>
         <a class="btn" href="#contact">📞 اطلب عرض سعر أو تجربة</a>
       </div>
       <ul class="ticks">
-        <li>✓ تجربة مجانية</li><li>✓ تسطيب في دقايق</li><li>✓ دعم فني مصري</li>
+        <li>✓ تجربة مجانية</li><li>✓ تسطيب في دقايق</li><li>✓ دعم فني بالعربي</li>
       </ul>
     </div>
     <div class="hero-shot">
@@ -54,7 +58,7 @@
   <div class="wrap strip-grid">
     <div><b>📴</b><span>يشتغل من غير نت</span></div>
     <div><b>🔤</b><span>عربي وإنجليزي</span></div>
-    <div><b>🧾</b><span>فاتورة وإيصال إلكتروني</span></div>
+    <div><b>🧾</b><span>فاتورة إلكترونية: مصر · السعودية · الإمارات</span></div>
     <div><b>🖧</b><span>فروع وأكتر من جهاز</span></div>
     <div><b>🔄</b><span>تحديثات أوتوماتيك</span></div>
     <div><b>🔒</b><span>صلاحيات وسجل لكل حاجة</span></div>
@@ -72,7 +76,7 @@
       <article><i>💳</i><h3>البيع بالتقسيط</h3><p>جدول أقساط لكل فاتورة، المتأخر والمستحق، تحصيل القسط وطباعة إيصاله، وتذكير العميل.</p></article>
       <article><i>🍽</i><h3>للمطاعم والكافيهات</h3><p>الصالة والطاولات، نقل ودمج وتقسيم الحساب، أحجام وإضافات، شاشة المطبخ، طابعة لكل قسم، ريسيبي بيخصم المكونات، ودليفري بالطيارين.</p></article>
       <article><i>🏢</i><h3>للشركات والتوزيع</h3><p>فاتورة تجارية A4، قوائم أسعار وعروض أسعار، بونص الموردين، عمولات المندوبين، والخزنة والبنوك والشيكات.</p></article>
-      <article><i>🧾</i><h3>الفاتورة الإلكترونية</h3><p>ربط بمنظومة الفاتورة والإيصال الإلكتروني لمصلحة الضرائب. البيع ما بيستناش النت — المستندات بتتبعت لوحدها في الخلفية.</p></article>
+      <article><i>🧾</i><h3>الفاتورة الإلكترونية</h3><p>مصر: منظومة الفاتورة والإيصال الإلكتروني. السعودية: «فاتورة» ZATCA المرحلة الثانية (ربط وتكامل). الإمارات: PINT AE للشركات. البيع ما بيستناش النت — المستندات بتتبعت لوحدها.</p></article>
       <article><i>🖧</i><h3>فروع وأكتر من جهاز</h3><p>كذا كاشير على نفس البيانات في المحل، والفروع بتتصل بالجهاز الرئيسي. كل جهاز ليه طابعته ووردية الكاشير بتاعته.</p></article>
       <article><i>🧑‍💼</i><h3>الموظفين والمرتبات</h3><p>حضور وانصراف، سلف ومكافآت وخصومات، وكشف مرتبات بيتصرف من الخزنة.</p></article>
       <article><i>📊</i><h3>أكتر من 30 تقرير</h3><p>المبيعات والأرباح والمخزون والعملاء والموردين والضرايب والورديات… وكل تقرير بيتصدّر إكسيل منسّق أو PDF أو بيتطبع.</p></article>
@@ -97,6 +101,37 @@
   </div>
 </section>
 
+<section id="gulf" class="section gulf">
+  <div class="wrap split">
+    <div>
+      <span class="pill">🇸🇦 🇦🇪 السعودية والإمارات</span>
+      <h2 class="title right">جاهز للخليج — بفاتورته وضريبته</h2>
+      <p>نفس البرنامج، بس بإعدادات بلدك: العملة (ريال / درهم)، ضريبة القيمة المضافة (15% / 5%)، و«فاتورة ضريبية» بالعربي والإنجليزي.</p>
+      <div class="gulf-grid">
+        <div><h3>🇸🇦 فاتورة — ZATCA المرحلة الثانية</h3><ul>
+          <li>تسجيل الجهاز عند الهيئة من جوه البرنامج برمز OTP</li>
+          <li>ختم إلكتروني لكل فاتورة ساعة البيع، وسلسلة فواتير مترابطة</li>
+          <li>رمز QR على الإيصال بيقراه تطبيق «فاتورة»</li>
+          <li>الفاتورة المبسطة بتتبلغ للهيئة لوحدها، والضريبية بتتعتمد</li>
+          <li>إشعارات دائنة للمرتجعات — ومن غير USB Token</li>
+          <li>مفحوص بأداة الفحص الرسمية للهيئة</li>
+        </ul></div>
+        <div><h3>🇦🇪 الفاتورة الإلكترونية الإماراتية</h3><ul>
+          <li>فواتير الشركات بصيغة PINT AE (Peppol)</li>
+          <li>تسليم لمزوّد الخدمة المعتمد (ASP) مباشرة أو كملفات</li>
+          <li>الرقم الضريبي TRN والإمارة والرخصة التجارية</li>
+          <li>جاهز لمواعيد الإلزام 2027</li>
+        </ul></div>
+      </div>
+      <a class="btn primary" href="#contact" onclick="window.setCountry(document.body.dataset.country === 'EG' ? 'SA' : document.body.dataset.country)">اطلب عرض سعر للخليج</a>
+    </div>
+    <div class="gulf-shots">
+      <img src="/site/assets/shots/zatca.webp" alt="صفحة فاتورة ZATCA في InnoForge POS" loading="lazy">
+      <img class="receipt" src="/site/assets/shots/receipt-sa.webp" alt="إيصال سعودي عليه رمز QR" loading="lazy">
+    </div>
+  </div>
+</section>
+
 <section id="screens" class="section">
   <div class="wrap">
     <h2 class="title">شوف البرنامج بنفسك</h2>
@@ -112,13 +147,13 @@
 <section id="editions" class="section alt">
   <div class="wrap">
     <h2 class="title">باقات على قد احتياجك</h2>
-    <p class="sub">ادفع على اللي هتستخدمه بس، وزوّد إضافات أو أجهزة في أي وقت من غير ما تغيّر البرنامج.</p>
+    <p class="sub">ادفع على اللي هتستخدمه بس، وزوّد إضافات أو أجهزة في أي وقت من غير ما تغيّر البرنامج. <span id="pricesNote"></span></p>
     <div class="plans">
-      <div class="plan"><h3>أساسي</h3><p class="for">كشك، محل صغير</p><ul><li>الكاشير والمرتجعات</li><li>الأصناف والمخزون والجرد</li><li>المشتريات والموردين</li><li>العملاء والآجل والتحصيل</li><li>الوردية والمصروفات والتقارير</li></ul><p class="lim">مستخدمين: 2 · جهاز واحد</p></div>
-      <div class="plan"><h3>سوبر ماركت</h3><p class="for">ماركت، صيدلية، مكتبة كبيرة</p><ul><li>كل الأساسي +</li><li>الميزان وملصقات الباركود</li><li>الصلاحية والسيريال</li><li>العروض والكوبونات وكروت الهدايا</li><li>شاشة العميل وأوامر الشراء</li></ul><p class="lim">مستخدمين: 5 · لحد 3 أجهزة</p></div>
-      <div class="plan hot"><span class="tag">الأكثر طلبًا</span><h3>مطاعم</h3><p class="for">مطعم، كافيه، فود تراك</p><ul><li>كل الأساسي +</li><li>الصالة والطاولات والمطبخ</li><li>شاشة المطبخ والطابعات</li><li>الأحجام والإضافات والريسيبي</li><li>الدليفري والطيارين</li></ul><p class="lim">مستخدمين: 10 · لحد 5 أجهزة</p></div>
-      <div class="plan"><h3>تجاري</h3><p class="for">شركات توزيع وجملة</p><ul><li>كل الأساسي +</li><li>الفاتورة التجارية A4</li><li>قوائم وعروض الأسعار</li><li>التقسيط والخزنة والبنوك</li><li>العمولات والفاتورة الإلكترونية</li></ul><p class="lim">مستخدمين: 10 · لحد 5 أجهزة</p></div>
-      <div class="plan"><h3>شامل</h3><p class="for">أي نشاط عايز كل حاجة</p><ul><li>كل المميزات</li><li>أكتر من مخزن</li><li>الموظفين والمرتبات</li><li>الفروع وأجهزة بلا حد</li><li>مستخدمين بلا حد</li></ul><p class="lim">بدون حدود</p></div>
+      <div class="plan"><h3>أساسي</h3><div class="price" data-ed="basic"></div><p class="for">كشك، محل صغير</p><ul><li>الكاشير والمرتجعات</li><li>الأصناف والمخزون والجرد</li><li>المشتريات والموردين</li><li>العملاء والآجل والتحصيل</li><li>الوردية والمصروفات والتقارير</li></ul><p class="lim">مستخدمين: 2 · جهاز واحد</p></div>
+      <div class="plan"><h3>سوبر ماركت</h3><div class="price" data-ed="market"></div><p class="for">ماركت، صيدلية، مكتبة كبيرة</p><ul><li>كل الأساسي +</li><li>الميزان وملصقات الباركود</li><li>الصلاحية والسيريال</li><li>العروض والكوبونات وكروت الهدايا</li><li>شاشة العميل وأوامر الشراء</li></ul><p class="lim">مستخدمين: 5 · لحد 3 أجهزة</p></div>
+      <div class="plan hot"><span class="tag">الأكثر طلبًا</span><h3>مطاعم</h3><div class="price" data-ed="restaurant"></div><p class="for">مطعم، كافيه، فود تراك</p><ul><li>كل الأساسي +</li><li>الصالة والطاولات والمطبخ</li><li>شاشة المطبخ والطابعات</li><li>الأحجام والإضافات والريسيبي</li><li>الدليفري والطيارين</li></ul><p class="lim">مستخدمين: 10 · لحد 5 أجهزة</p></div>
+      <div class="plan"><h3>تجاري</h3><div class="price" data-ed="trading"></div><p class="for">شركات توزيع وجملة</p><ul><li>كل الأساسي +</li><li>الفاتورة التجارية A4</li><li>قوائم وعروض الأسعار</li><li>التقسيط والخزنة والبنوك</li><li>العمولات والفاتورة الإلكترونية</li></ul><p class="lim">مستخدمين: 10 · لحد 5 أجهزة</p></div>
+      <div class="plan"><h3>شامل</h3><div class="price" data-ed="full"></div><p class="for">أي نشاط عايز كل حاجة</p><ul><li>كل المميزات</li><li>أكتر من مخزن</li><li>الموظفين والمرتبات</li><li>الفروع وأجهزة بلا حد</li><li>مستخدمين بلا حد</li></ul><p class="lim">بدون حدود</p></div>
     </div>
     <p class="center"><a class="btn primary" href="#contact">اطلب عرض السعر المناسب لنشاطك</a></p>
   </div>
@@ -176,6 +211,7 @@
 <section id="faq" class="section alt">
   <div class="wrap narrow">
     <h2 class="title">أسئلة بتتسأل كتير</h2>
+    <details><summary>بيشتغل في السعودية والإمارات؟</summary><p>أيوه. بتختار الدولة من أول تشغيل، فالعملة والضريبة وشكل الفاتورة بيتظبطوا. في السعودية مربوط بمنصة «فاتورة» (المرحلة الثانية) والـ QR على كل إيصال، وفي الإمارات بيطلّع فواتير الشركات بصيغة PINT AE لمزوّد الخدمة بتاعك.</p></details>
     <details><summary>هل البرنامج محتاج نت عشان يشتغل؟</summary><p>لأ. البيع والمخزون والتقارير كلها بتشتغل من غير نت. النت مطلوب بس للتفعيل أول مرة، والتحديثات، والفاتورة الإلكترونية (وحتى دي بتستنى لحد ما النت يرجع).</p></details>
     <details><summary>لو الجهاز باظ أو غيّرته؟</summary><p>البرنامج بيعمل نسخة احتياطية كل يوم. بتسطّب على الجهاز الجديد وترجّع النسخة، وبنعملك مفتاح للجهاز الجديد.</p></details>
     <details><summary>بيدعم الفاتورة الإلكترونية؟</summary><p>أيوه — الفاتورة الإلكترونية للشركات والإيصال الإلكتروني للأفراد. بتدخل بياناتك من بوابة الضرائب في الإعدادات، والبرنامج بيبعت لوحده.</p></details>
@@ -203,6 +239,7 @@
         <label>رقم الموبايل<input name="phone" required maxlength="30" inputmode="tel" dir="ltr"></label>
         <label>اسم النشاط<input name="business" maxlength="150"></label>
         <label>المدينة<input name="city" maxlength="80"></label>
+        <label>الدولة<select name="country" id="leadCountry"><option value="EG">🇪🇬 مصر</option><option value="SA">🇸🇦 السعودية</option><option value="AE">🇦🇪 الإمارات</option></select></label>
       </div>
       <label>عايز إيه؟
         <select name="kind" id="kind">

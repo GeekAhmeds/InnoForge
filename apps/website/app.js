@@ -17,6 +17,7 @@
     ['reports', 'التقارير', 'أكتر من 30 تقرير بتتصدّر إكسيل وPDF.'],
     ['payroll', 'المرتبات', 'الموظفين والحضور والمرتبات.'],
     ['eta', 'الفاتورة الإلكترونية', 'حالة كل مستند اتبعت لمنظومة الضرائب.'],
+    ['zatca', 'فاتورة (السعودية)', 'الفواتير المختومة اللي اتبلغت لهيئة الزكاة والضريبة والجمارك.'],
     ['network', 'الفروع والأجهزة', 'الجهاز الرئيسي والأجهزة المتصلة بيه.'],
     ['display', 'شاشة العميل', 'شاشة تانية قدام العميل بتعرض الفاتورة.'],
   ];
@@ -60,6 +61,54 @@
     $('verLinux').textContent = `النسخة ${l.version}`;
   }).catch(() => { $('verLinux').textContent = ''; });
 
+  // ---- country: prices, currency and wording follow it ----
+  const COUNTRY = {
+    EG: { pill: '🇪🇬 مصري 100% — من Inno Source', hero: 'متوافق مع الفاتورة والإيصال الإلكتروني المصري.' },
+    SA: { pill: '🇸🇦 متوافق مع «فاتورة» ZATCA — المرحلة الثانية', hero: 'متوافق مع منصة «فاتورة» (المرحلة الثانية) وضريبة 15%.' },
+    AE: { pill: '🇦🇪 جاهز للفاتورة الإلكترونية الإماراتية', hero: 'جاهز للفاتورة الإلكترونية الإماراتية (PINT AE) وضريبة 5%.' },
+  };
+  const guess = () => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (/Riyadh/.test(tz)) return 'SA';
+    if (/Dubai|Muscat/.test(tz)) return 'AE';
+    return 'EG';
+  };
+  let saved = null;
+  try { saved = localStorage.getItem('country'); } catch { /* private mode */ }
+  const money = (v, sym) => `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })} ${sym}`;
+  async function loadPrices(country) {
+    let data;
+    try { data = await (await fetch(`/api/v1/prices?country=${country}`)).json(); } catch { return; }
+    if (!data || !data.editions) return;
+    for (const ed of data.editions) {
+      const box = document.querySelector(`.price[data-ed="${ed.code}"]`);
+      if (!box) continue;
+      if (!ed.year) { box.innerHTML = ''; continue; }
+      const year = ed.year_offer || ed.year;
+      const num = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      box.innerHTML = `<b>${money(year, data.symbol)}</b>${ed.year_offer ? `<div class="was"><s>${num(ed.year)}</s><span class="off">خصم ${Number(ed.offer.percent)}%</span></div>` : ''}<small>في السنة${ed.lifetime ? ` · مدى الحياة ${money(ed.lifetime_offer || ed.lifetime, data.symbol)}` : ''}</small>`;
+    }
+    $('pricesNote').textContent = 'الأسعار بالـ' + ({ EGP: 'جنيه المصري', SAR: 'ريال السعودي', AED: 'درهم الإماراتي' }[data.currency] || data.currency) + '.';
+    const bar = $('offerBar');
+    const o = data.offers && data.offers[0];
+    if (o) {
+      bar.innerHTML = `🎁 ${o.name}: خصم ${Number(o.percent)}%${o.code ? ` بالكود <code>${o.code}</code>` : ''}${o.ends ? ` — لحد ${new Date(o.ends).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })}` : ''} · <a href="#contact" style="color:#fff;text-decoration:underline">احجز دلوقتي</a>`;
+      bar.hidden = false;
+    } else bar.hidden = true;
+  }
+  window.setCountry = (c) => {
+    if (!COUNTRY[c]) c = 'EG';
+    document.body.dataset.country = c;
+    try { localStorage.setItem('country', c); } catch { /* private mode */ }
+    document.querySelectorAll('#countryPick button').forEach((b) => b.classList.toggle('on', b.dataset.c === c));
+    $('heroPill').textContent = COUNTRY[c].pill;
+    $('heroCountry').textContent = COUNTRY[c].hero;
+    $('leadCountry').value = c;
+    loadPrices(c);
+  };
+  document.querySelectorAll('#countryPick button').forEach((b) => b.addEventListener('click', () => window.setCountry(b.dataset.c)));
+  window.setCountry(saved || guess());
+
   // ---- WhatsApp activation ----
   const msg = 'السلام عليكم، عايز أفعّل InnoForge POS.\nاسم النشاط: \nالباقة: \nرقم الجهاز: ';
   $('waActivate').href = `https://wa.me/${PHONE}?text=${encodeURIComponent(msg)}`;
@@ -70,6 +119,9 @@
     e.preventDefault();
     const out = $('formMsg');
     const data = Object.fromEntries(new FormData(form));
+    const names = { EG: 'مصر', SA: 'السعودية', AE: 'الإمارات' };
+    if (data.country && data.country !== 'EG') data.city = `${data.city ? `${data.city} — ` : ''}${names[data.country]}`;
+    delete data.country;
     const btn = form.querySelector('button');
     btn.disabled = true;
     out.className = 'form-msg';

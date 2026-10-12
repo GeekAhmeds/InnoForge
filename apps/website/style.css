@@ -58,6 +58,27 @@ h1 { font-size: 46px; line-height: 1.25; margin: 14px 0; }
 .biz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .biz div { background: #fff; border-radius: var(--radius); padding: 22px; border: 1px solid var(--line); }
 
+/* country + offers */
+.country { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; margin-inline: 6px; }
+.country button { border: 0; background: #fff; font-size: 18px; padding: 3px 9px; cursor: pointer; opacity: .55; }
+.country button.on { opacity: 1; background: var(--alt); }
+.offer-bar { background: linear-gradient(90deg, #f59e0b, #ef4444); color: #fff; text-align: center; padding: 8px 16px; font-weight: 600; font-size: 15px; }
+.offer-bar code { background: rgba(255,255,255,.25); color: #fff; }
+.price { margin: 6px 0 8px; min-height: 48px; }
+.price b { font-size: 24px; color: var(--ink); white-space: nowrap; }
+.price .was { margin-top: -2px; }
+.price small { color: var(--muted); display: block; font-size: 13px; }
+.price s { color: var(--muted); font-size: 14px; }
+.price .off { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 99px; padding: 0 8px; font-size: 12px; margin-inline-start: 6px; }
+.gulf { background: linear-gradient(160deg, #ecfdf5 0, #fff 45%, #eff6ff 100%); }
+.gulf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0 22px; }
+.gulf-grid > div { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.gulf-grid h3 { margin: 0 0 8px; font-size: 17px; }
+.gulf-grid ul { margin: 0; padding-inline-start: 18px; font-size: 14.5px; color: #475569; }
+.gulf-shots { position: relative; }
+.gulf-shots img { border-radius: 14px; box-shadow: 0 24px 50px rgba(15,23,42,.14), 0 0 0 1px var(--line); }
+.gulf-shots .receipt { position: absolute; width: 34%; inset-inline-start: -4%; bottom: -8%; border-radius: 10px; }
+
 /* screenshots */
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 18px; }
 .tabs button { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 7px 16px; font: inherit; font-size: 14px; cursor: pointer; }
@@ -131,6 +152,8 @@ details p { margin: 10px 0 0; color: #475569; }
   .plans { grid-template-columns: 1fr 1fr; }
   .dl, .steps { grid-template-columns: 1fr 1fr; }
   .strip-grid { grid-template-columns: repeat(3, 1fr); }
+  .gulf-grid { grid-template-columns: 1fr; }
+  .gulf-shots .receipt { position: static; width: 50%; margin: 14px auto 0; }
 }
 @media (max-width: 860px) {
   .menu-btn { display: block; }
