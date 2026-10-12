@@ -32,3 +32,6 @@ Windows builds on Linux need `wine`.
 - `npm test` green, CI green on both OSes.
 - Install the new `.exe` on a real Windows PC over the previous version: data kept, update banner works, activation still valid.
 - If the update was rejected: the `.sig` is missing or signed with a different key than `electron/license-public.cjs`.
+
+## Publishing to customers (current setup, Oct 2026)
+Every push creates a GitHub **pre-release** `pos-v<version>` (job `release` in pos-installer.yml) with the signed update files. To ship it, the owner marks it **Latest** on GitHub → Releases. The office server `inno` runs `innoforge-updates.timer` (installed by `apps/license-server/deploy/install-inno.sh`), which pulls the latest release every 10 minutes into `/srv/InnoForge/PoS`, served at `https://pos.0x01source.com:9990/updates/` (the URL in package.json `build.publish`). Logs: `journalctl -u innoforge-updates`. No SSH/POS_DEPLOY_* secrets needed.

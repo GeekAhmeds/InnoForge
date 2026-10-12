@@ -8,6 +8,9 @@ SITE=/etc/nginx/sites-available/zz-innoforge-pos
 LINK=/etc/nginx/sites-enabled/zz-innoforge-pos
 [ "$(id -u)" = 0 ] || { echo "شغّله بـ sudo"; exit 1; }
 rm -f "$LINK" "$SITE"
+systemctl disable --now innoforge-updates.timer 2>/dev/null || true
+rm -f /etc/systemd/system/innoforge-updates.{service,timer} /usr/local/bin/innoforge-updates-sync
+systemctl daemon-reload || true
 nginx -t && systemctl reload nginx
 echo "✓ ملف nginx اتشال"
 if [ -d "$DIR/apps/license-server" ]; then

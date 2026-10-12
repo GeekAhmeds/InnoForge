@@ -33,6 +33,15 @@
 - الموقع الموجود على 9990 فضل زي ما هو.
 - النسخة الاحتياطية لـ nginx في `/root/nginx-backup-2026-10-12-070724.tgz`.
 
+**🔄 إزاي النسخ الجديدة بتوصل للعملاء (من غير SSH ومن غير أسرار على السيرفر):**
+1. كل push بيبني البرنامج، ويعمل **Pre-release** على GitHub اسمه `pos-v0.1.N`، وفيه ملفات التحديث الموقّعة وملفات التسطيب.
+2. **إنت اللي بتقرر** إمتى النسخة توصل للعملاء: GitHub ← **Releases** ← افتح النسخة ← **Edit** ← شيل علامة «Set as a pre-release» وعلّم «Set as the latest release» ← **Update release**.
+3. inno بيشيّك كل 10 دقايق (`innoforge-updates.timer`)، ولو لقى نسخة جديدة متعلّمة Latest بينزّلها في `/srv/InnoForge/PoS`. البرامج عند العملاء بتلاقيها على `https://pos.0x01source.com:9990/updates/` وتحدّث نفسها.
+4. **اللوج:** `journalctl -u innoforge-updates -n 20`.
+   **السحب على طول:** `sudo systemctl start innoforge-updates`.
+
+**تحديث سيرفر التراخيص نفسه** (لما يتعمل فيه تعديل): `sudo bash /opt/innoforge/apps/license-server/deploy/install-inno.sh`. بيسحب آخر كود ويبني من جديد، والبيانات والمفاتيح زي ما هي.
+
 **الخطوات الجاية:**
 1. في الـ DNS: سجل **A** اسمه `pos` يشاور على `196.221.144.94`، زي `ls` بالظبط.
 2. على inno:

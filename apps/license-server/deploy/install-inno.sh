@@ -23,6 +23,13 @@ PROJECT=innoforge-licenses
 SITE=/etc/nginx/sites-available/zz-innoforge-pos
 LINK=/etc/nginx/sites-enabled/zz-innoforge-pos
 
+# Running from the checkout it updates (git checkout below rewrites this file): run a copy.
+if [ -z "${INNOFORGE_COPY:-}" ] && [ "$(dirname "$(readlink -f "$0")")" = "$DIR/apps/license-server/deploy" ]; then
+  tmp=$(mktemp)
+  cp "$0" "$tmp"
+  INNOFORGE_COPY=1 exec bash "$tmp" "$@"
+fi
+
 say() { printf '\n\033[1;34m== %s\033[0m\n' "$*"; }
 ok() { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 die() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -143,7 +150,38 @@ rm -f "$NGINX_TEST"
 systemctl reload nginx
 ok "nginx اتعمله reload (من غير ما يقفل أي اتصال شغال)"
 
-say "6) التأكد"
+say "6) سحب التحديثات أوتوماتيك من GitHub (كل 10 دقايق)"
+install -m 755 "$DIR/apps/license-server/deploy/updates-sync.sh" /usr/local/bin/innoforge-updates-sync
+cat > /etc/systemd/system/innoforge-updates.service <<UNIT
+[Unit]
+Description=InnoForge POS — pull the release marked latest on GitHub into $UPDATES
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=DEST=$UPDATES
+ExecStart=/usr/local/bin/innoforge-updates-sync
+Nice=10
+UNIT
+cat > /etc/systemd/system/innoforge-updates.timer <<UNIT
+[Unit]
+Description=InnoForge POS update pull, every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now innoforge-updates.timer >/dev/null
+systemctl start innoforge-updates.service || true
+ok "اتظبط: أي نسخة تتعلّم «Latest» على GitHub بتنزل هنا خلال 10 دقايق (اللوج: journalctl -u innoforge-updates)"
+
+say "7) التأكد"
 sleep 1
 H=$(curl -sk --noproxy '*' --resolve "$HOST:$PORT:127.0.0.1" "https://$HOST:$PORT/healthz" || true)
 echo "   سيرفر التراخيص: $H"

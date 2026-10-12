@@ -98,11 +98,11 @@ docs/                 guide.html + developer docs
 
 ## Releasing
 
-CI (`.github/workflows/pos-installer.yml`) builds Windows + Linux on every push touching `apps/pos`, versions them `major.minor.<run number>`, signs the update files with the `POS_SIGNING_KEY` secret, and (when run manually with *publish*) uploads them to the update server. See the `pos-release` skill.
+CI (`.github/workflows/pos-installer.yml`) builds Windows + Linux on every push touching `apps/pos`, versions them `major.minor.<run number>`, signs the update files with the `POS_SIGNING_KEY` secret and creates a GitHub pre-release; marking it Latest ships it (the office server pulls it). See the `pos-release` skill.
 
 ## Things that are deliberately NOT done yet
 
 - Branch computers that keep selling while the main computer is unreachable (offline sync) — see `docs/FEATURES.md` → *Pending*.
 - The ETA e-invoice is built but has not been run against the live tax authority, and the USB-token signer is external — see `docs/FEATURES.md` row 17.
 - Overall status (what is done, where, where we stopped): `docs/STATUS-AR.md`.
-- Update server: everything runs on the office server `inno` (Hetzner dropped). `ls.0x01source.com` → office IP; the app checks `https://pos.0x01source.com:9990/updates/` (since the build after 0.1.39). `apps/license-server/deploy/install-inno.sh` adds the license server + `/updates/` there without touching existing sites; still needed: the `pos` DNS record, running the script, `POS_DEPLOY_*` secrets. See `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟».
+- Update server: everything runs on the office server `inno` (Hetzner dropped). `ls.0x01source.com` → office IP; the app checks `https://pos.0x01source.com:9990/updates/` (since the build after 0.1.39). `apps/license-server/deploy/install-inno.sh` adds the license server + `/updates/` there without touching existing sites; installed and running on inno (Oct 12). Shipping = mark a GitHub pre-release `pos-v…` as Latest; inno pulls it every 10 min (`updates-sync.sh`, `innoforge-updates.timer`). See `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟».

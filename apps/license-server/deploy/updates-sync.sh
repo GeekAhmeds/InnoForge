@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Pulls the POS version marked "latest" on GitHub Releases into the update folder that
+# https://pos.0x01source.com:9990/updates/ serves. Runs every 10 minutes (systemd timer
+# installed by install-inno.sh). Pre-releases are ignored: a version reaches customers only
+# after someone ticks «Set as the latest release» on GitHub.
+#
+# Safe swap: files are downloaded to a temp folder on the same disk, sizes checked, installers
+# moved in first and the latest*.yml files last, so an app never sees a version whose file is
+# not there yet. The last 3 versions' installers are kept.
+set -euo pipefail
+REPO=${REPO:-GeekAhmeds/InnoForge}
+DEST=${DEST:-/srv/InnoForge/PoS}
+KEEP=${KEEP:-3}
+API=${API:-https://api.github.com}
+[ -f /etc/innoforge-updates.env ] && . /etc/innoforge-updates.env   # optional GITHUB_TOKEN (private repo)
+AUTH=()
+[ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
+
+log() { echo "[innoforge-updates] $*"; }
+
+json=$(curl -fsSL --max-time 30 "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/releases/latest") || { log "GitHub not reachable or no latest release"; exit 0; }
+tag=$(printf '%s' "$json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
+case "$tag" in pos-v*) ;; *) log "latest release $tag is not a POS release — nothing to do"; exit 0;; esac
+current=$(cat "$DEST/.release" 2>/dev/null || true)
+[ "$tag" = "$current" ] && exit 0
+
+log "new release $tag (was ${current:-none})"
+work=$(mktemp -d "$DEST/.incoming-XXXXXX")
+trap 'rm -rf "$work"' EXIT
+printf '%s' "$json" | python3 -c '
+import json,sys
+for a in json.load(sys.stdin)["assets"]:
+    print(a["name"], a["size"], a["url"])' | while read -r name size url; do
+  case "$name" in */*|.*) log "skipping odd asset name $name"; continue;; esac
+  curl -fsSL --max-time 900 "${AUTH[@]}" -H "Accept: application/octet-stream" -o "$work/$name" "$url"
+  got=$(stat -c %s "$work/$name")
+  [ "$got" = "$size" ] || { log "size mismatch for $name ($got != $size)"; exit 1; }
+done
+
+ls "$work"/latest*.yml >/dev/null 2>&1 || { log "release has no latest*.yml — not a POS update"; exit 1; }
+for f in "$work"/*.exe "$work"/*.AppImage; do
+  [ -e "$f" ] || continue
+  [ -s "$f.sig" ] || { log "$(basename "$f") has no signature — refusing (apps would reject it anyway)"; exit 1; }
+done
+
+owner=$(stat -c %u:%g "$DEST")
+chown "$owner" "$work"/* 2>/dev/null || true
+chmod 644 "$work"/*
+for f in "$work"/*; do case "$f" in *.yml) ;; *) mv -f "$f" "$DEST/";; esac; done
+for f in "$work"/*.yml; do mv -f "$f" "$DEST/"; done
+echo "$tag" > "$DEST/.release"
+
+# Keep the newest $KEEP versions of each installer kind.
+for ext in exe AppImage deb; do
+  { ls -1t "$DEST"/*."$ext" 2>/dev/null || true; } | tail -n +$((KEEP + 1)) | while read -r old; do
+    rm -f "$old" "$old.sig" "$old.blockmap"
+  done
+done
+log "published $tag to $DEST"

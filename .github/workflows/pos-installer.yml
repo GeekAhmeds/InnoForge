@@ -1,9 +1,9 @@
 name: POS installer
 
-# Every push builds signed Windows and Linux installers + the update files as artifacts.
-# Pushes to main also upload the update to the server automatically (when the deploy
-# secrets are set), so every installed copy updates itself. Running the workflow by hand
-# with "publish" ticked uploads from any branch.
+# Every push builds signed Windows and Linux installers + the update files as artifacts, and
+# a GitHub pre-release "pos-v<version>" (job "release"). Marking a release as the latest on
+# GitHub sends it to customers: the office server pulls it (no SSH or secrets needed).
+# The older SSH upload (job "publish", POS_DEPLOY_* secrets) still works when configured.
 #
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   POS_SIGNING_KEY   contents of pos-license-private.pem (signs updates; required to publish)
@@ -78,6 +78,48 @@ jobs:
           name: update-server-files-${{ matrix.label }}-${{ env.POS_VERSION }}
           path: apps/pos/release/update/
           retention-days: 30
+
+  # Every build also becomes a GitHub *pre-release* "pos-v<version>" with the signed update files
+  # (installers included). Nothing reaches customers until you open it on GitHub → Releases and
+  # tick "Set as the latest release": the office server (inno) checks every 10 minutes and pulls
+  # the latest release into the update folder (apps/license-server/deploy/updates-sync.sh).
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.publish
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/pos/package.json
+      - name: Version
+        run: echo "POS_VERSION=$(node -p "require('./apps/pos/package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-server-files-*
+          path: update
+          merge-multiple: true
+      - name: Create the pre-release
+        run: |
+          ls -la update
+          if ! ls update/*.sig >/dev/null 2>&1; then echo "::error::unsigned build (POS_SIGNING_KEY missing) — not released"; exit 1; fi
+          {
+            echo "InnoForge POS ${POS_VERSION} — branch \`${GITHUB_REF_NAME}\`, commit ${GITHUB_SHA::7}"
+            echo
+            git log -1 --format=%B "${GITHUB_SHA}" 2>/dev/null | head -20 || true
+            echo
+            echo "To send this version to customers: Edit → untick «Set as a pre-release» → tick «Set as the latest release» → Update release."
+          } > notes.md
+          gh release create "pos-v${POS_VERSION}" update/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "InnoForge POS ${POS_VERSION}" --notes-file notes.md --prerelease
+      - name: Keep only the last 8 pre-releases
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease,isLatest \
+            --jq '[.[] | select(.isPrerelease and (.isLatest|not) and (.tagName|startswith("pos-v")))] | .[8:] | .[].tagName' |
+          while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
 
   # Collects both platforms' update files and uploads them in one go (scp-action needs a Linux runner).
   publish:

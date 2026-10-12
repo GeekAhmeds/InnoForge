@@ -37,6 +37,10 @@ sudo bash install-inno.sh
   - ملفات تحديث البرنامج على `https://pos.0x01source.com:9990/updates/`.
 - **للتراجع:** `sudo bash /opt/innoforge/apps/license-server/deploy/uninstall-inno.sh`.
 
+### التحديثات بعد كده
+- **نسخ البرنامج للعملاء:** من GitHub ← Releases، علّم النسخة «Latest»، وinno بيسحبها لوحده خلال 10 دقايق.
+- **سيرفر التراخيص نفسه:** `sudo bash /opt/innoforge/apps/license-server/deploy/install-inno.sh`. بيعيد التشغيل بآخر كود، والبيانات زي ما هي.
+
 ## الخطوات (لأي سيرفر تاني بالطريقة اليدوية)
 
 ### 1) جيب الكود وجهّز الإعدادات
