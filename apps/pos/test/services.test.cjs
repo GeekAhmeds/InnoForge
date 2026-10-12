@@ -999,3 +999,22 @@ test('reports catalog: every report runs, totals add up, cost columns follow vie
   assert.ok(!s.reports.run({ id: 'sales_by_product' }).columns.some((c) => c.key === 'profit'));
   assert.ok(!s.reports.catalog().some((r) => r.id === 'profit_loss'));
 });
+
+test('country: VAT number format, e-invoice per country, license lock', () => {
+  const { s } = setup({ country: 'SA', tax_number: '300000000000003', currency: 'SAR', tax_rate: 15 });
+  assert.equal(s.settings.get().country, 'SA');
+  assert.equal(tryCode(() => s.settings.save({ tax_number: '123' })), 'BAD_VAT_NUMBER');
+  assert.equal(tryCode(() => s.settings.save({ eta_enabled: true })), 'WRONG_COUNTRY');
+  assert.equal(tryCode(() => s.settings.save({ country: 'XX' })), 'INVALID_SETTING');
+  s.settings.save({ country: 'AE', tax_number: '100000000000003' });
+  assert.equal(s.settings.get().country, 'AE');
+  // A key for one country keeps the copy there.
+  const { openDatabase: open } = require('../electron/db.cjs');
+  const { entitlements } = require('../electron/editions.cjs');
+  const db2 = open(':memory:');
+  const s2 = createServices(db2, { entitlements: () => entitlements({ edition: 'market', country: 'SA' }) });
+  s2.auth.setup({ business: { business_name: 'X', business_type: 'retail' }, admin: { name: 'A', username: 'a', pin: '1234' } });
+  s2.auth.login({ username: 'a', pin: '1234' });
+  assert.equal(s2.settings.get().country, 'SA');
+  assert.equal(tryCode(() => s2.settings.save({ country: 'EG' })), 'LICENSE_COUNTRY');
+});

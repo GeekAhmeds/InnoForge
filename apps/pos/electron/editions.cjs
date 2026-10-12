@@ -7,8 +7,12 @@ const DATA = require('./editions.json');
 const FEATURES = Object.keys(DATA.features);
 const EDITIONS = Object.keys(DATA.editions);
 const LIMITS = Object.keys(DATA.limits);
+// Countries the app is sold in (currency, VAT, e-invoice system). A key may name one; the
+// copy then only works as a business in that country (its e-invoice system, currency, VAT).
+const COUNTRIES = Object.keys(DATA.countries);
 
-const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addons: [], limits: { users: 0, warehouses: 0, devices: 0 } });
+const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addons: [], limits: { users: 0, warehouses: 0, devices: 0 }, country: null });
+const countryOf = (payload) => (COUNTRIES.includes(payload?.country) ? payload.country : null);
 
 /**
  * Turns a license payload into what it allows. Keys issued before editions existed carry
@@ -17,7 +21,7 @@ const FULL = Object.freeze({ edition: 'full', features: new Set(FEATURES), addon
 function entitlements(payload) {
   if (!payload || !payload.edition) return FULL;
   const ed = DATA.editions[payload.edition];
-  if (!ed) return { edition: payload.edition, features: new Set(), addons: [], limits: { users: 1, warehouses: 1, devices: 1 } };
+  if (!ed) return { edition: payload.edition, features: new Set(), addons: [], limits: { users: 1, warehouses: 1, devices: 1 }, country: countryOf(payload) };
   const base = ed.features === '*' ? FEATURES : ed.features;
   const addons = (Array.isArray(payload.addons) ? payload.addons : []).filter((f) => FEATURES.includes(f));
   const limits = {};
@@ -27,11 +31,11 @@ function entitlements(payload) {
   }
   // Selling several warehouses without allowing more than one would be pointless.
   if ((base.includes('warehouses') || addons.includes('warehouses')) && limits.warehouses === 1 && payload.limits?.warehouses == null) limits.warehouses = 3;
-  return { edition: payload.edition, features: new Set([...base, ...addons]), addons, limits };
+  return { edition: payload.edition, features: new Set([...base, ...addons]), addons, limits, country: countryOf(payload) };
 }
 
 /** Plain JSON form for the renderer. */
-const toJSON = (e) => ({ edition: e.edition, features: [...e.features], addons: e.addons, limits: e.limits });
+const toJSON = (e) => ({ edition: e.edition, features: [...e.features], addons: e.addons, limits: e.limits, country: e.country || null });
 
 /** Checks a reseller certificate allows this license (edition, add-ons, duration, limits). */
 function resellerAllows(cert, payload) {
@@ -49,10 +53,12 @@ function resellerAllows(cert, payload) {
     const v = entitlements(payload).limits[k];
     if (v === 0 || v > cap) return 'RESELLER_LIMIT';
   }
+  // A permit limited to some countries only signs keys locked to one of them.
+  if (cert.countries && cert.countries !== '*' && !(cert.countries || []).includes(payload.country)) return 'RESELLER_COUNTRY';
   const issued = Date.parse(payload.issued);
   if (!(issued >= Date.parse(cert.issued)) || (cert.expires && issued > Date.parse(cert.expires))) return 'RESELLER_EXPIRED';
   if ((DATA.revoked_resellers || []).includes(cert.id)) return 'RESELLER_REVOKED';
   return null;
 }
 
-module.exports = { DATA, FEATURES, EDITIONS, LIMITS, FULL, entitlements, toJSON, resellerAllows };
+module.exports = { DATA, FEATURES, EDITIONS, LIMITS, COUNTRIES, FULL, entitlements, toJSON, resellerAllows };

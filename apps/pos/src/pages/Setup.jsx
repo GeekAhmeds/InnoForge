@@ -4,6 +4,7 @@ import { seedSamples } from '../lib/samples.js';
 import { Field, Toggle, useApp } from '../components/ui.jsx';
 import BrandHead from '../components/Brand.jsx';
 import { ConnectModal } from '../components/Network.jsx';
+import { COUNTRIES, COUNTRY_FLAGS, countryName, countryPreset } from '../lib/countries.js';
 
 const TYPES = [
   { id: 'retail', icon: '🏪' },
@@ -13,9 +14,11 @@ const TYPES = [
 ];
 
 export default function Setup({ onDone }) {
-  const { t, tErr, notify, reloadSettings, settings } = useApp();
+  const { t, tErr, notify, reloadSettings, settings, license } = useApp();
+  const locked = license?.country || null;
   const [form, setForm] = useState({
-    business_type: 'retail', business_name: '', currency_symbol: 'ج.م', language: settings.language || 'ar',
+    ...countryPreset(locked || settings.country || 'EG'),
+    business_type: 'retail', business_name: '', language: settings.language || 'ar',
     name: '', username: 'admin', pin: '', samples: true,
   });
   const [busy, setBusy] = useState(false);
@@ -32,9 +35,9 @@ export default function Setup({ onDone }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const { business_type, business_name, currency_symbol, language } = form;
+      const { business_type, business_name, currency_symbol, language, country, currency, tax_rate, prices_include_tax } = form;
       await api.auth.setup({
-        business: { business_type, business_name, currency_symbol, language, service_rate: business_type === 'restaurant' ? 12 : 0 },
+        business: { business_type, business_name, currency_symbol, language, country, currency, tax_rate, prices_include_tax, service_rate: business_type === 'restaurant' ? 12 : 0 },
         admin: { name: form.name, username: form.username, pin: form.pin },
       });
       const user = await api.auth.login({ username: form.username, pin: form.pin });
@@ -58,6 +61,16 @@ export default function Setup({ onDone }) {
           </div>
         </div>
         <p className="muted">{t('setup.subtitle')}</p>
+
+        <h3>{t('country.title')}</h3>
+        <div className="seg">
+          {Object.keys(COUNTRIES).filter((c) => !locked || c === locked).map((c) => (
+            <button type="button" key={c} className={form.country === c ? 'on' : ''} onClick={() => setForm((f) => ({ ...f, ...countryPreset(c) }))}>
+              {COUNTRY_FLAGS[c]} {countryName(c, form.language)}
+            </button>
+          ))}
+        </div>
+        <p className="muted small">{t('country.hint')}</p>
 
         <h3>{t('setup.businessType')}</h3>
         <div className="type-grid">

@@ -2,6 +2,8 @@
 import { formatMoney, formatQty } from './money.js';
 import { VENDOR } from './vendor.js';
 import { barcodeSvg } from './barcode.js';
+import { qrSvg } from './qr.js';
+import { zatcaQrForOrder } from './zatca-qr.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Numbers, phones and dates inside RTL text must stay left-to-right.
@@ -26,6 +28,31 @@ function page(settings, lang, body) {
 </style></head><body>${body}</body></html>`;
 }
 
+/** Gulf VAT invoices carry a fixed bilingual title; '' elsewhere (or when not VAT-registered). */
+export function vatTitle(settings, t, b2b = false) {
+  if (!settings.tax_number) return '';
+  if (settings.country === 'SA') return t(b2b ? 'invoice.taxSA' : 'invoice.simplifiedSA');
+  if (settings.country === 'AE') return t('invoice.taxAE');
+  return '';
+}
+
+/** The QR a Saudi invoice must carry (signed in phase 2, plain TLV in phase 1). */
+const zatcaQr = (order, settings, size) => {
+  const text = zatcaQrForOrder(order, settings);
+  return text ? `<div class="c" style="margin:6px 0">${qrSvg(text, { size })}</div>` : '';
+};
+
+/** VAT per line (the order's VAT spread over the lines), for Gulf tax invoices. */
+function lineVat(items, tax) {
+  const sum = items.reduce((a, i) => a + (i.line_total || 0), 0);
+  let left = tax || 0;
+  return items.map((i, n) => {
+    const v = n === items.length - 1 ? left : sum ? Math.round(((tax || 0) * (i.line_total || 0)) / sum) : 0;
+    left -= v;
+    return v;
+  });
+}
+
 function header(settings, t) {
   return `<h1>${esc(settings.business_name)}</h1>
   ${settings.address ? `<div class="c muted">${esc(settings.address)}</div>` : ''}
@@ -47,7 +74,9 @@ export function receiptHtml(order, settings, t, lang) {
   const pays = order.payments.map((p) => line(t(`pay.${p.method}`), m(p.amount + (p.method === 'cash' ? order.change_due : 0)))).join('');
   const customer = [order.customer_name, order.customer_phone, order.customer_address].filter(Boolean).map(esc).join(' — ');
 
+  const title = vatTitle(settings, t, !!order.customer?.tax_number);
   return page(settings, lang, `${header(settings, t)}
+  ${title ? `<div class="c" style="margin-top:4px"><b>${title}</b></div>` : ''}
   <hr>
   <table>
     ${line(t('receipt.invoice'), `<b>${order.invoice_no ?? '—'}</b>`)}
@@ -80,6 +109,7 @@ export function receiptHtml(order, settings, t, lang) {
   </table>
   ${order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
   <hr>
+  ${zatcaQr(order, settings, 130)}
   ${settings.receipt_footer ? `<div class="c">${esc(settings.receipt_footer)}</div>` : ''}
   <div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
 }
@@ -219,11 +249,13 @@ export function a4Html(doc, kind, settings, t, lang) {
   const cust = isQuote
     ? { name: doc.customer_display || doc.customer_name, phone: doc.customer_phone, address: doc.customer_address, tax: doc.customer_tax }
     : { name: doc.customer?.name || doc.customer_name, phone: doc.customer?.phone || doc.customer_phone, address: doc.customer?.address || doc.customer_address, tax: doc.customer?.tax_number };
-  const title = isQuote ? t('a4.quote') : settings.tax_number ? t('a4.taxInvoice') : t('a4.invoice');
+  const gulf = ['SA', 'AE'].includes(settings.country) && !!settings.tax_number && !isQuote;
+  const title = isQuote ? t('a4.quote') : vatTitle(settings, t, !!cust.tax) || (settings.tax_number ? t('a4.taxInvoice') : t('a4.invoice'));
+  const vats = gulf ? lineVat(doc.items, doc.tax) : [];
   const row = (label, value, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${value}</td></tr>`;
   const items = doc.items.map((i, n) => `<tr>
       <td class="c">${n + 1}</td><td>${esc(i.name)}${i.serials ? `<div class="muted">S/N: ${esc(i.serials)}</div>` : ''}${i.note ? `<div class="muted">${esc(i.note)}</div>` : ''}</td>
-      <td class="c">${formatQty(i.qty)}</td><td class="n">${m(i.unit_price)}</td><td class="n">${i.discount ? m(i.discount) : '—'}</td><td class="n">${m(i.line_total)}</td></tr>`).join('');
+      <td class="c">${formatQty(i.qty)}</td><td class="n">${m(i.unit_price)}</td><td class="n">${i.discount ? m(i.discount) : '—'}</td>${gulf ? `<td class="c">${settings.tax_rate}%</td><td class="n">${m(vats[n])}</td>` : ''}<td class="n">${m(i.line_total)}</td></tr>`).join('');
   const paid = (doc.payments || []).reduce((s, p) => s + p.amount, 0);
   return `<!doctype html><html lang="${lang}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>
     @page { size: A4; margin: 12mm; }
@@ -277,13 +309,14 @@ export function a4Html(doc, kind, settings, t, lang) {
       ${!isQuote && doc.order_type && doc.order_type !== 'sale' ? `<div>${t(`order.${doc.order_type}`)}${doc.table_name ? ` — ${t('pos.table')} ${esc(doc.table_name)}` : ''}</div>` : ''}
       ${!isQuote ? `<div>${(doc.payments || []).map((p) => `${t(`pay.${p.method}`)}: ${m(p.amount)}`).join(' · ') || '—'}</div>` : ''}</div>
   </div>
-  <table class="items"><thead><tr><th class="c">#</th><th>${t('receipt.item')}</th><th class="c">${t('pos.qty')}</th><th class="n">${t('pos.price')}</th><th class="n">${t('pos.discount')}</th><th class="n">${t('common.total')}</th></tr></thead>
+  <table class="items"><thead><tr><th class="c">#</th><th>${t('receipt.item')}</th><th class="c">${t('pos.qty')}</th><th class="n">${t('pos.price')}</th><th class="n">${t('pos.discount')}</th>${gulf ? `<th class="c">${t('invoice.vatRate')}</th><th class="n">${t('invoice.vatAmount')}</th>` : ''}<th class="n">${t('common.total')}</th></tr></thead>
   <tbody>${items}</tbody></table>
   <div class="bottom">
     <div class="notes">
       ${doc.note ? `<p><b>${t('pos.note')}:</b> ${esc(doc.note)}</p>` : ''}
       ${settings.a4_terms ? `<p style="white-space:pre-wrap">${esc(settings.a4_terms)}</p>` : ''}
       ${!isQuote && doc.customer_balance != null ? `<p><b>${t('customers.currentBalance')}:</b> ${m(doc.customer_balance)}</p>` : ''}
+      ${!isQuote ? zatcaQr(doc, settings, 120) : ''}
     </div>
     <table class="totals">
       ${row(t('pos.subtotal'), m(doc.subtotal))}

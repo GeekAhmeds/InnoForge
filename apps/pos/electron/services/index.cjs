@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const { transaction } = require('../db.cjs');
 const { computeTotals } = require('./totals.cjs');
 const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = require('./permissions.cjs');
-const { FULL, toJSON } = require('../editions.cjs');
+const { FULL, toJSON, COUNTRIES, DATA: EDITIONS_DATA } = require('../editions.cjs');
 const { buildCatalog } = require('./report-catalog.cjs');
 const etaDoc = require('../eta.cjs');
 
@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = {
   address: '',
   phone: '',
   tax_number: '',
+  country: 'EG', // EG | SA | AE — currency, VAT and the e-invoice system (a key may lock it)
   currency: 'EGP',
   currency_symbol: 'ج.م',
   decimals: 2,
@@ -95,6 +96,10 @@ const DEFAULT_SETTINGS = {
 };
 // Never sent to the window: settings.get shows "<key>_set" instead.
 const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key'];
+
+// VAT registration numbers: Saudi (15 digits, starts and ends with 3), UAE TRN (15 digits).
+const VAT_NUMBER = { SA: /^3\d{13}3$/, AE: /^\d{15}$/ };
+const validVatNumber = (country, value) => !value || !VAT_NUMBER[country] || VAT_NUMBER[country].test(String(value).trim());
 
 class PosError extends Error {
   constructor(code, message) {
@@ -217,6 +222,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     // This computer's own values win over the shared ones.
     db.prepare('SELECT key, value FROM device_settings WHERE device_id = ?').all(deviceId).forEach(put);
     out.device_id = deviceId;
+    // A key sold for one country keeps the copy there.
+    if (entitlements().country) out.country = entitlements().country;
     for (const k of SECRET_KEYS) {
       out[`${k}_set`] = !!out[k];
       if (!withSecrets) out[k] = '';
@@ -240,6 +247,21 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     }
   }
 
+  /** The business country (and its VAT number) in a settings patch. */
+  function checkCountry(patch = {}) {
+    const current = getSettings();
+    const country = 'country' in patch ? str(patch.country) : current.country;
+    if (!COUNTRIES.includes(country)) throw new PosError('INVALID_SETTING', 'country');
+    const locked = entitlements().country;
+    if (locked && country !== locked) throw new PosError('LICENSE_COUNTRY', EDITIONS_DATA.countries[locked].ar);
+    const vat = 'tax_number' in patch ? str(patch.tax_number) : current.tax_number;
+    if (!validVatNumber(country, vat)) throw new PosError('BAD_VAT_NUMBER', country);
+    // Each country's e-invoice system only runs there.
+    if (patch.eta_enabled && country !== 'EG') throw new PosError('WRONG_COUNTRY');
+    if (patch.zatca_enabled && country !== 'SA') throw new PosError('WRONG_COUNTRY');
+    if (patch.uae_enabled && country !== 'AE') throw new PosError('WRONG_COUNTRY');
+  }
+
   const settings = {
     get: () => getSettings(),
     // UI language is a harmless display preference, so it is allowed before login/setup.
@@ -258,6 +280,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.customer_display) requireFeature('customer_display');
       if (patch?.scale_barcodes || patch?.scale_serial) requireFeature('scale');
       if (patch?.loyalty_enabled) requireFeature('promotions');
+      checkCountry(patch);
       if (patch?.eta_enabled) requireFeature('eta');
       if (patch && 'eta_env' in patch && !['preprod', 'prod'].includes(patch.eta_env)) throw new PosError('INVALID_SETTING', 'eta_env');
       if (patch && 'eta_signer' in patch && !['none', 'url', 'command'].includes(patch.eta_signer)) throw new PosError('INVALID_SETTING', 'eta_signer');
@@ -287,6 +310,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (!str(business.business_name)) throw new PosError('NAME_REQUIRED');
       if (!str(admin.name) || !str(admin.username)) throw new PosError('NAME_REQUIRED');
       validatePin(admin.pin);
+      if (entitlements().country && !business.country) business = { ...business, country: entitlements().country };
+      checkCountry(business);
       transaction(db, () => {
         writeSettings(business);
         db.prepare("INSERT INTO users (name, username, pin_hash, role) VALUES (?, ?, ?, 'admin')").run(

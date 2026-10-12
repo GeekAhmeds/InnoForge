@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { activate, copyText } from '../lib/api.js';
 import { VENDOR } from '../lib/vendor.js';
 import { Modal, useApp } from './ui.jsx';
+import { COUNTRY_FLAGS, countryName } from '../lib/countries.js';
 
 // Every feature a license can include, in the order they are listed.
 export const FEATURES = ['restaurant', 'delivery', 'trading', 'rebates', 'installments', 'treasury', 'warehouses', 'purchase_orders', 'employees',
-  'promotions', 'coupons', 'scale', 'labels', 'batches', 'customer_display', 'lan', 'excel', 'commissions', 'eta'];
+  'promotions', 'coupons', 'scale', 'labels', 'batches', 'customer_display', 'lan', 'excel', 'commissions', 'eta', 'zatca', 'uae_einvoice'];
 
 /** Settings → License: who it is for, the edition, what it includes and its limits; update the key. */
 export default function LicenseTab() {
-  const { t, tErr, notify, license, setLicense } = useApp();
+  const { t, tErr, notify, license, setLicense, lang } = useApp();
   const [renewing, setRenewing] = useState(false);
   const [newKey, setNewKey] = useState('');
   async function renew() {
@@ -45,6 +46,7 @@ export default function LicenseTab() {
             <dt>{t('license.customer')}</dt><dd>{license.customer || '—'}</dd>
             <dt>{t('license.machineId')}</dt><dd className="mono" dir="ltr">{license.machine}</dd>
             <dt>{t('license.expires')}</dt><dd>{license.expires ? new Date(license.expires).toLocaleDateString('en-GB') : t('license.lifetime')}</dd>
+            {license.country && <><dt>{t('country.title')}</dt><dd>{COUNTRY_FLAGS[license.country]} {countryName(license.country, lang)}</dd></>}
             <dt>{t('license.soldBy')}</dt><dd>{(() => { const by = license.seller || license.reseller; return by ? `${by.name}${by.phone ? ` — ${by.phone}` : ''}` : VENDOR.name; })()}</dd>
             <dt>{t('limit.users')}</dt><dd>{limit('users')}</dd>
             <dt>{t('limit.warehouses')}</dt><dd>{limit('warehouses')}</dd>

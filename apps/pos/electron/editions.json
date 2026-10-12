@@ -75,6 +75,14 @@
     "eta": {
       "ar": "الفاتورة والإيصال الإلكتروني (مصلحة الضرائب)",
       "en": "Egyptian e-invoice and e-receipt (ETA)"
+    },
+    "zatca": {
+      "ar": "الفاتورة الإلكترونية السعودية (فاتورة — ZATCA)",
+      "en": "Saudi e-invoicing (FATOORA — ZATCA)"
+    },
+    "uae_einvoice": {
+      "ar": "الفاتورة الإلكترونية الإماراتية (للشركات)",
+      "en": "UAE e-invoicing (B2B)"
     }
   },
   "limits": {
@@ -95,7 +103,9 @@
     "basic": {
       "ar": "أساسي",
       "en": "Basic",
-      "features": [],
+      "features": [
+        "zatca"
+      ],
       "limits": {
         "users": 2,
         "warehouses": 1,
@@ -113,7 +123,8 @@
         "coupons",
         "customer_display",
         "purchase_orders",
-        "excel"
+        "excel",
+        "zatca"
       ],
       "limits": {
         "users": 5,
@@ -131,7 +142,8 @@
         "lan",
         "promotions",
         "coupons",
-        "excel"
+        "excel",
+        "zatca"
       ],
       "limits": {
         "users": 10,
@@ -152,7 +164,9 @@
         "commissions",
         "labels",
         "excel",
-        "eta"
+        "eta",
+        "zatca",
+        "uae_einvoice"
       ],
       "limits": {
         "users": 10,
@@ -171,5 +185,31 @@
       }
     }
   },
-  "revoked_resellers": []
+  "revoked_resellers": [],
+  "countries": {
+    "EG": {
+      "ar": "مصر",
+      "en": "Egypt",
+      "currency": "EGP",
+      "symbol": "ج.م",
+      "tax_rate": 0,
+      "einvoice": "eta"
+    },
+    "SA": {
+      "ar": "السعودية",
+      "en": "Saudi Arabia",
+      "currency": "SAR",
+      "symbol": "ر.س",
+      "tax_rate": 15,
+      "einvoice": "zatca"
+    },
+    "AE": {
+      "ar": "الإمارات",
+      "en": "United Arab Emirates",
+      "currency": "AED",
+      "symbol": "د.إ",
+      "tax_rate": 5,
+      "einvoice": "uae_einvoice"
+    }
+  }
 }

@@ -13,16 +13,20 @@ import LicenseTab from '../components/License.jsx';
 import Network from '../components/Network.jsx';
 import EtaSettings from '../components/Eta.jsx';
 import { has } from '../lib/features.js';
+import { COUNTRIES, COUNTRY_FLAGS, countryName, countryPreset, einvoiceOf } from '../lib/countries.js';
 
 const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'network', 'eta', 'data', 'license', 'support'];
 // Which permission opens each tab.
 // Which licensed feature a tab needs.
+const EINVOICE_TABS = { eta: 'eta', zatca: 'zatca', uae: 'uae_einvoice' };
 const TAB_FEATURE = { eta: 'eta', priceLists: 'trading', tables: 'restaurant', kitchen: 'restaurant' };
 const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', network: 'settings', eta: 'settings', data: 'backup', license: null, support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
-  const tabs = TABS.filter((x) => (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && has(TAB_FEATURE[x]) && (x !== 'promos' || has('promotions') || has('coupons')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
+  // Only this country's e-invoice system has a tab.
+  const einvoice = einvoiceOf(settings);
+  const tabs = TABS.filter((x) => (!EINVOICE_TABS[x] || EINVOICE_TABS[x] === einvoice) && (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && has(TAB_FEATURE[x]) && (x !== 'promos' || has('promotions') || has('coupons')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
   const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', network: 'net.tab', eta: 'eta.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
   return (
@@ -54,7 +58,7 @@ export default function Settings() {
 }
 
 function SettingsForm({ tab }) {
-  const { t, tErr, notify, settings, reloadSettings, printDoc, lang } = useApp();
+  const { t, tErr, notify, settings, reloadSettings, printDoc, lang, license } = useApp();
   const [f, setF] = useState(settings);
   const [printers, setPrinters] = useState([]);
   useEffect(() => { if (tab === 'receipt') listPrinters().then(setPrinters).catch(() => {}); }, [tab]);
@@ -96,6 +100,11 @@ function SettingsForm({ tab }) {
           <Field label={t('settings.language')}>
             <select value={f.language} onChange={set('language')}><option value="ar">العربية</option><option value="en">English</option></select>
           </Field>
+          <Field label={t('country.title')} hint={license?.country ? t('country.locked') : t('country.changeHint')}>
+            <select value={f.country} disabled={!!license?.country} onChange={(e) => setF((x) => ({ ...x, ...countryPreset(e.target.value) }))}>
+              {Object.keys(COUNTRIES).map((c) => <option key={c} value={c}>{COUNTRY_FLAGS[c]} {countryName(c, lang)}</option>)}
+            </select>
+          </Field>
           <Field label={t('setup.currency')}><input value={f.currency_symbol} onChange={set('currency_symbol')} /></Field>
           <Field label={t('settings.currencyCode')}><input value={f.currency} onChange={set('currency')} /></Field>
           <Field label={t('settings.decimals')}>
@@ -128,7 +137,8 @@ function SettingsForm({ tab }) {
       {tab === 'taxes' && (
         <div className="grid2">
           <Field label={t('settings.taxRate')}><input inputMode="decimal" value={f.tax_rate} onChange={set('tax_rate')} /></Field>
-          <Field label={t('settings.taxNumber')}><input value={f.tax_number} onChange={set('tax_number')} /></Field>
+          <Field label={t('settings.taxNumber')} hint={f.country === 'SA' ? t('country.vatHintSA') : f.country === 'AE' ? t('country.vatHintAE') : ''}>
+            <input value={f.tax_number} onChange={set('tax_number')} dir="ltr" /></Field>
           <div className="span2"><Toggle checked={f.prices_include_tax} onChange={set('prices_include_tax')} label={t('settings.pricesIncludeTax')} /></div>
           {sellScreens(f).includes('restaurant') && <Field label={t('settings.serviceRate')}><input inputMode="decimal" value={f.service_rate} onChange={set('service_rate')} /></Field>}
         </div>

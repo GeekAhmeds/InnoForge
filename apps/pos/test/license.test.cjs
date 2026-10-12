@@ -58,7 +58,7 @@ test('editions: old keys stay full, editions bring their features and limits, ad
   assert.equal(entitlements(old.payload).edition, 'full');
   assert.equal(entitlements(old.payload).features.has('employees'), true);
   const basic = entitlements({ edition: 'basic' });
-  assert.equal(basic.features.size, 0);
+  assert.deepEqual([...basic.features], ['zatca']); // the Saudi e-invoice is required there, so every edition has it
   assert.deepEqual(basic.limits, { users: 2, warehouses: 1, devices: 1 });
   const rest = entitlements({ edition: 'restaurant', addons: ['employees', 'nonsense'], limits: { users: 4 } });
   assert.equal(rest.features.has('restaurant'), true);
@@ -107,4 +107,25 @@ test('license generator and reseller portal pages carry the same editions as the
     assert.ok(m, `EDITIONS_DATA block missing in ${page}`);
     assert.deepEqual(JSON.parse(m[1]), { features: data.features, limits: data.limits, editions: data.editions }, page);
   }
+});
+
+test('countries: a key may lock the copy to one country; a permit may limit its countries', () => {
+  const { entitlements: ent } = require('../electron/editions.cjs');
+  assert.equal(ent({ edition: 'market', country: 'SA' }).country, 'SA');
+  assert.equal(ent({ edition: 'market', country: 'XX' }).country, null);
+  assert.equal(ent({ edition: 'market' }).country, null);
+  assert.ok(ent({ edition: 'basic' }).features.has('zatca'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lic-'));
+  const store = createLicenseStore({ file: path.join(dir, 'l.json'), publicKeyPem: pub, machine });
+  assert.equal(store.activate(issue({ edition: 'market', country: 'AE' })).country, 'AE');
+
+  const r = crypto.generateKeyPairSync('ed25519');
+  const rPriv = r.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const rPub = r.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const now = Date.now();
+  const cert = signResellerCert({ id: 'G1', name: 'Gulf', pub: rPub, editions: '*', addons: '*', max_days: 0, max_limits: {}, countries: ['SA', 'AE'], issued: new Date(now - 86400000).toISOString() }, priv);
+  const resold = (extra) => `${signLicense({ product: 'innoforge-pos', machine, customer: 'C', issued: new Date(now).toISOString(), expires: null, edition: 'market', reseller: 'G1', ...extra }, rPriv)}.${cert}`;
+  assert.equal(verifyLicense(resold({ country: 'SA' }), { machine, publicKeyPem: pub }).valid, true);
+  assert.equal(verifyLicense(resold({ country: 'EG' }), { machine, publicKeyPem: pub }).reason, 'RESELLER_COUNTRY');
+  assert.equal(verifyLicense(resold({}), { machine, publicKeyPem: pub }).reason, 'RESELLER_COUNTRY');
 });

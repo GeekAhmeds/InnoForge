@@ -6,6 +6,7 @@
 //   node tools/license.cjs keygen                     # once: create the key pair
 //   node tools/license.cjs issue --machine 7F3A-91C2-04BE-D5E8-2A6F --customer "مكتبة النور" [--days 365]
 //        [--edition basic|market|restaurant|trading|full] [--addons warehouses,employees] [--users 5] [--warehouses 3] [--devices 3]
+//        [--country EG|SA|AE]   (locks the copy to that country: currency, VAT, e-invoice system)
 //   node tools/license.cjs machine                    # print this computer's Machine ID
 //
 // Resellers (they never get the vendor key):
@@ -18,7 +19,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { signLicense, signResellerCert, machineId, normalizeId } = require('../electron/license.cjs');
-const { EDITIONS, FEATURES, LIMITS, resellerAllows } = require('../electron/editions.cjs');
+const { EDITIONS, FEATURES, LIMITS, COUNTRIES, resellerAllows } = require('../electron/editions.cjs');
 
 const PUBLIC_KEY_FILE = path.join(__dirname, '..', 'electron', 'license-public.cjs');
 const DEFAULT_PRIVATE = path.join(os.homedir(), '.innoforge', 'pos-license-private.pem');
@@ -85,6 +86,8 @@ module.exports = \`${pem}
     if (bad.length) die(`Unknown add-on(s): ${bad.join(', ')}. Known: ${FEATURES.join(', ')}`);
     const limits = {};
     for (const k of LIMITS) if (a[k] != null && a[k] !== true) limits[k] = Number(a[k]);
+    const country = a.country && a.country !== true ? String(a.country).toUpperCase() : '';
+    if (country && !COUNTRIES.includes(country)) die(`Unknown country "${country}". One of: ${COUNTRIES.join(', ')}`);
     const cert = a.cert ? readCert(a.cert) : null;
     const payload = {
       product: 'innoforge-pos',
@@ -95,6 +98,7 @@ module.exports = \`${pem}
       edition,
       ...(addons.length ? { addons } : {}),
       ...(Object.keys(limits).length ? { limits } : {}),
+      ...(country ? { country } : {}),
       ...(cert ? { reseller: cert.payload.id } : {}),
     };
     if (cert) {
@@ -116,7 +120,7 @@ module.exports = \`${pem}
     break;
   }
   case 'reseller-cert': {
-    if (!a.pub || !a.id || !a.name) die('Usage: reseller-cert --pub reseller.pub.txt --id R001 --name "Reseller" [--editions a,b] [--addons a,b|*] [--max-days N] [--max-users N] [--max-warehouses N] [--valid-days 90]');
+    if (!a.pub || !a.id || !a.name) die('Usage: reseller-cert --pub reseller.pub.txt --id R001 --name "Reseller" [--editions a,b] [--addons a,b|*] [--max-days N] [--max-users N] [--max-warehouses N] [--countries SA,AE] [--valid-days 90]');
     if (!fs.existsSync(privateFile)) die(`Vendor private key not found: ${privateFile}`);
     const pub = fs.readFileSync(a.pub, 'utf8').trim();
     crypto.createPublicKey({ key: Buffer.from(pub, 'base64'), format: 'der', type: 'spki' }); // validates
@@ -129,6 +133,7 @@ module.exports = \`${pem}
     const cert = {
       id: String(a.id), name: String(a.name), phone: a.phone && a.phone !== true ? String(a.phone) : '', pub,
       editions, addons, max_days: Number(a['max-days']) || 0, max_limits: maxLimits,
+      ...(a.countries && a.countries !== true && a.countries !== '*' ? { countries: list(a.countries).map((c) => c.toUpperCase()) } : {}),
       issued: new Date().toISOString(), expires: new Date(Date.now() + validDays * 86400000).toISOString(),
     };
     const out = a.out && a.out !== true ? a.out : `reseller-${cert.id}.cert`;
