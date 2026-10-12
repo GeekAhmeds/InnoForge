@@ -16,6 +16,7 @@ const { createDeviceStore } = require('./device.cjs');
 const { createRemote } = require('./remote.cjs');
 const { createLanServer } = require('./lan-server.cjs');
 const { createEtaSubmitter } = require('./eta-submitter.cjs');
+const { createZatcaSubmitter } = require('./zatca-submitter.cjs');
 
 
 // Lets a portable install or tests keep data in a chosen folder.
@@ -28,6 +29,7 @@ let remote = null; // client mode: the main computer
 let remoteInfo = null; // client mode: what the main computer said last (license, version)
 let lanServer = null; // server mode
 let etaSubmitter = null; // e-invoices go out from the computer that holds the data
+let zatcaSubmitter = null;
 let mainWindow;
 let licenses;
 let license;
@@ -120,6 +122,9 @@ function boot() {
     etaSubmitter = createEtaSubmitter({ queue: services.etaQueue, log: (...a) => console.error(...a) });
     etaSubmitter.start();
     setTimeout(() => { if (licenseOk() && services.settings.get().eta_auto) etaSubmitter.run(); }, 20000).unref?.();
+    zatcaSubmitter = createZatcaSubmitter({ queue: services.zatcaQueue, log: (...a) => console.error(...a), version: app.getVersion() });
+    zatcaSubmitter.start();
+    setTimeout(() => { if (licenseOk() && services.settings.get().zatca_auto) zatcaSubmitter.run(); }, 25000).unref?.();
   }
   kdsServer = createKdsServer({ services: svc, customerState: () => customerState });
   kdsServer.start().catch((err) => console.error('kitchen screen server', err));
@@ -437,6 +442,31 @@ ipcMain.handle('pos:etaTest', async () => {
   }
 });
 
+// ---------- Saudi e-invoice (ZATCA) ----------
+ipcMain.handle('pos:zatcaOnboard', async (_e, args = {}) => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
+    services.requirePerm('settings');
+    services.license.requireFeature('zatca');
+    if (services.settings.get().country !== 'SA') throw new PosError('WRONG_COUNTRY');
+    return ok(await zatcaSubmitter.onboard({ otp: args.otp }));
+  } catch (err) {
+    return fail(err);
+  }
+});
+ipcMain.handle('pos:zatcaRun', async () => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
+    services.requirePerm('reports');
+    services.license.requireFeature('zatca');
+    return ok({ ...(await zatcaSubmitter.run()), last: zatcaSubmitter.state() });
+  } catch (err) {
+    return fail(err);
+  }
+});
+
 ipcMain.handle('pos:printers', async () => {
   try {
     return ok((await mainWindow.webContents.getPrintersAsync()).map((p) => ({ name: p.name, displayName: p.displayName || p.name, isDefault: p.isDefault })));
@@ -638,6 +668,7 @@ if (!app.requestSingleInstanceLock()) {
     kdsServer?.stop();
     lanServer?.stop();
     etaSubmitter?.stop();
+    zatcaSubmitter?.stop();
     try { db?.close(); } catch { /* already closed */ }
     app.quit();
   });

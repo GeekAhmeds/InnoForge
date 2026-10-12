@@ -914,6 +914,36 @@ const MIGRATIONS = [
   ALTER TABLE products ADD COLUMN eta_unit TEXT NOT NULL DEFAULT '';
   ALTER TABLE customers ADD COLUMN eta TEXT NOT NULL DEFAULT ''; -- JSON { type B|P|F, id, governate, regionCity, street, buildingNumber }
   `,
+  // v19: Saudi e-invoicing (ZATCA): every stamped invoice / credit note, in chain order (icv),
+  // the QR printed on the sale, and the buyer's address for standard (B2B) invoices.
+  `
+  CREATE TABLE zatca_documents (
+    id          INTEGER PRIMARY KEY,
+    order_id    INTEGER NOT NULL REFERENCES orders(id),
+    return_id   INTEGER REFERENCES returns(id),
+    kind        TEXT NOT NULL CHECK (kind IN ('invoice', 'credit')),
+    standard    INTEGER NOT NULL DEFAULT 0, -- 1 = standard tax invoice (B2B, cleared), 0 = simplified (reported)
+    icv         INTEGER NOT NULL UNIQUE,    -- invoice counter of this device (no gaps, no repeats)
+    doc_no      TEXT NOT NULL,
+    uuid        TEXT NOT NULL,
+    hash        TEXT NOT NULL,              -- the next document's "previous invoice hash"
+    xml         TEXT NOT NULL,              -- signed (replaced by ZATCA's copy once cleared)
+    qr          TEXT NOT NULL,
+    env         TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | reported | cleared | warning | rejected | error | skipped
+    error       TEXT NOT NULL DEFAULT '',
+    response    TEXT NOT NULL DEFAULT '',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    sent_at     TEXT
+  );
+  CREATE INDEX idx_zatca_status ON zatca_documents(status);
+  CREATE INDEX idx_zatca_order ON zatca_documents(order_id);
+  ALTER TABLE orders ADD COLUMN zatca_qr TEXT NOT NULL DEFAULT '';
+  ALTER TABLE returns ADD COLUMN zatca_qr TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customers ADD COLUMN zatca TEXT NOT NULL DEFAULT ''; -- JSON { street, building, plot, district, city, postal }
+  `,
 ];
 
 function openDatabase(file) {

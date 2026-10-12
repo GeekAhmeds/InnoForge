@@ -6,6 +6,7 @@ const { PERMISSIONS, ROLE_DEFAULTS, effectivePermissions, parseOverrides } = req
 const { FULL, toJSON, COUNTRIES, DATA: EDITIONS_DATA } = require('../editions.cjs');
 const { buildCatalog } = require('./report-catalog.cjs');
 const etaDoc = require('../eta.cjs');
+const zatcaDoc = require('../zatca.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -93,9 +94,34 @@ const DEFAULT_SETTINGS = {
   eta_pos_client_id: '',
   eta_pos_client_secret: '',
   eta_pos_key: '', // pre-shared key
+  // Saudi e-invoicing (ZATCA / FATOORA phase 2) — Settings → FATOORA. The key and certificates
+  // are written only by the onboarding (zatca-submitter.cjs), never from a form.
+  zatca_enabled: false,
+  zatca_env: 'simulation', // sandbox (developer portal) | simulation | production
+  zatca_auto: true,
+  zatca_b2b: true, // standard (cleared) tax invoices for customers with a VAT number and address
+  zatca_name: '', // legal name (Arabic) as registered
+  zatca_crn: '', // commercial registration (or other seller ID)
+  zatca_id_scheme: 'CRN', // CRN | MOM | MLS | SAG | 700 | OTH
+  zatca_street: '',
+  zatca_building: '', // 4 digits
+  zatca_plot: '', // additional number (4 digits)
+  zatca_district: '',
+  zatca_city: '',
+  zatca_postal: '', // 5 digits
+  zatca_branch: '', // branch / unit name (certificate OU)
+  zatca_industry: '', // business category (certificate)
+  zatca_serial: '',
+  zatca_key: '',
+  zatca_cert: '',
+  zatca_secret: '',
+  zatca_onboarded_env: '',
+  zatca_cert_expires: '',
 };
+// Written only by the ZATCA onboarding, never by settings.save.
+const ZATCA_INTERNAL = ['zatca_serial', 'zatca_key', 'zatca_cert', 'zatca_secret', 'zatca_onboarded_env', 'zatca_cert_expires'];
 // Never sent to the window: settings.get shows "<key>_set" instead.
-const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key'];
+const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key', 'zatca_key', 'zatca_secret'];
 
 // VAT registration numbers: Saudi (15 digits, starts and ends with 3), UAE TRN (15 digits).
 const VAT_NUMBER = { SA: /^3\d{13}3$/, AE: /^\d{15}$/ };
@@ -284,8 +310,17 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.eta_enabled) requireFeature('eta');
       if (patch && 'eta_env' in patch && !['preprod', 'prod'].includes(patch.eta_env)) throw new PosError('INVALID_SETTING', 'eta_env');
       if (patch && 'eta_signer' in patch && !['none', 'url', 'command'].includes(patch.eta_signer)) throw new PosError('INVALID_SETTING', 'eta_signer');
-      // The kitchen screen key only changes through newKdsKey (forms send stale copies of it).
+      if (patch?.zatca_enabled) {
+        requireFeature('zatca');
+        const cur = getSettings(true);
+        const env = patch.zatca_env || cur.zatca_env;
+        if (!cur.zatca_cert || cur.zatca_onboarded_env !== env) throw new PosError('ZATCA_NOT_ONBOARDED');
+      }
+      if (patch && 'zatca_env' in patch && !['sandbox', 'simulation', 'production'].includes(patch.zatca_env)) throw new PosError('INVALID_SETTING', 'zatca_env');
+      // The kitchen screen key only changes through newKdsKey (forms send stale copies of it);
+      // the e-invoice keys only through the onboarding.
       const { kds_key: _key, ...rest } = patch || {};
+      for (const k of ZATCA_INTERNAL) delete rest[k];
       transaction(db, () => writeSettings(rest));
       return getSettings();
     },
@@ -1310,6 +1345,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         }
         if (cart.quote_id) db.prepare("UPDATE quotes SET status = 'invoiced', order_id = ? WHERE id = ? AND status IN ('quote', 'order')").run(orderId, cart.quote_id);
         etaEnqueue(orderId);
+        zatcaStamp(orderId);
         for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
         // Orders paid straight away (takeaway, counter) still have to reach the kitchen.
         const tickets = priced.settings.kitchen_auto_send ? dispatchKitchen(getOrder(orderId)) : [];
@@ -1381,6 +1417,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         }
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
         etaEnqueue(orderId, returnId);
+        zatcaStamp(orderId, returnId, str(reason));
         if (order.customer_id && order.points_earned > 0 && order.total > 0) {
           const back = Math.min(order.points_earned, Math.round((order.points_earned * amount) / order.total));
           if (back) {
@@ -1934,6 +1971,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       c.pending_cheques = pendingCheques(id);
       c.terms_days = termsOf(c);
       c.eta = parseJson(c.eta, {});
+      c.zatca = parseJson(c.zatca, {});
       return c;
     },
     /** Cashiers can add/edit contact details; credit limits, terms, discounts and price lists need customers_edit. */
@@ -1956,12 +1994,17 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       const eta = c.eta && typeof c.eta === 'object'
         ? JSON.stringify(Object.fromEntries(['type', 'id', 'governate', 'regionCity', 'street', 'buildingNumber'].map((k) => [k, str(c.eta[k])]).filter(([, v]) => v)))
         : existing?.eta ?? '';
-      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct, eta];
+      // Saudi buyer address for standard (B2B) tax invoices.
+      const zatcaIn = typeof c.zatca === 'string' ? parseJson(c.zatca, null) : c.zatca;
+      const zatca = zatcaIn && typeof zatcaIn === 'object'
+        ? JSON.stringify(Object.fromEntries(['street', 'building', 'plot', 'district', 'city', 'postal'].map((k) => [k, str(zatcaIn[k])]).filter(([, v]) => v)))
+        : existing?.zatca ?? '';
+      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct, eta, zatca];
       if (c.id) {
-        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ?, eta = ? WHERE id = ?').run(...vals, c.id);
+        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ?, eta = ?, zatca = ? WHERE id = ?').run(...vals, c.id);
         return c.id;
       }
-      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent, eta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent, eta, zatca) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
     },
     /** Invoices, receipts, discounts, bounced cheques and returns in date order with a running balance. */
     statement({ id, from = null, to = null } = {}) {
@@ -3806,6 +3849,190 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     },
   };
 
+  // ---------- Saudi e-invoicing (ZATCA) ----------
+  // Every sale is stamped right away (the QR on the receipt carries its signature) and chained
+  // to the previous one; zatca-submitter.cjs then reports it (or clears a B2B invoice).
+  const zatcaReady = (s) => s.zatca_enabled && has('zatca') && s.country === 'SA' && !!s.zatca_cert && !!s.zatca_key && s.zatca_onboarded_env === s.zatca_env;
+
+  /** The sale (or the returned part of it) in the shape zatca.cjs builds documents from. */
+  function zatcaInput(orderId, returnId = null) {
+    const order = plain(db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId));
+    if (!order || order.status !== 'completed') throw new PosError('ORDER_NOT_COMPLETED');
+    let items = plainAll(db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(orderId));
+    let o = order;
+    if (returnId) {
+      const ret = db.prepare('SELECT * FROM returns WHERE id = ?').get(returnId);
+      items = db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(returnId).map((r) => {
+        const it = items.find((i) => i.id === r.order_item_id);
+        return { ...it, qty: r.qty, line_total: r.amount };
+      });
+      // Return amounts already include their share of discount, service and VAT.
+      o = { ...order, total: ret.amount, tax: order.total > 0 ? Math.round((order.tax * ret.amount) / order.total) : 0, service: 0, delivery_fee: 0, completed_at: ret.created_at };
+      const sum = items.reduce((a, i) => a + i.line_total, 0);
+      if (sum !== ret.amount && items.length) items[items.length - 1].line_total += ret.amount - sum;
+    }
+    const customer = order.customer_id ? plain(db.prepare('SELECT * FROM customers WHERE id = ?').get(order.customer_id)) : null;
+    if (customer) customer.zatca = parseJson(customer.zatca, {});
+    const pay = db.prepare('SELECT method FROM payments WHERE order_id = ? ORDER BY amount DESC LIMIT 1').get(orderId)?.method;
+    return { order: o, items, customer, payment: order.credit > 0 && !pay ? 'credit' : pay || 'cash', invoiceNo: String(order.invoice_no ?? order.id) };
+  }
+
+  /** Stamps a sale or a return now; never stops the sale (a failure shows on the FATOORA screen). */
+  function zatcaStamp(orderId, returnId = null, reason = '') {
+    const s = getSettings(true);
+    if (!zatcaReady(s)) return null;
+    try {
+      const { order, items, customer, payment, invoiceNo } = zatcaInput(orderId, returnId);
+      let standard = !!(s.zatca_b2b && zatcaDoc.b2bBuyer(customer));
+      let original = null;
+      if (returnId) {
+        const orig = db.prepare("SELECT doc_no, standard FROM zatca_documents WHERE order_id = ? AND return_id IS NULL AND status != 'skipped' ORDER BY icv DESC").get(orderId);
+        original = orig?.doc_no || invoiceNo;
+        standard = orig ? !!orig.standard : standard;
+      }
+      const last = db.prepare('SELECT icv, hash FROM zatca_documents ORDER BY icv DESC LIMIT 1').get();
+      const doc = {
+        kind: returnId ? 'credit' : 'invoice', standard, id: returnId ? `${invoiceNo}-R${returnId}` : invoiceNo, uuid: zatcaDoc.uuid(),
+        icv: (last?.icv || 0) + 1, pih: last?.hash || zatcaDoc.INITIAL_PIH, issued: order.completed_at, original, reason: reason || 'Return', payment,
+      };
+      const r = zatcaDoc.stamp({ doc, order, items, customer, settings: s }, { privateKey: s.zatca_key, certificate: s.zatca_cert });
+      db.prepare('INSERT INTO zatca_documents (order_id, return_id, kind, standard, icv, doc_no, uuid, hash, xml, qr, env) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(orderId, returnId, doc.kind, standard ? 1 : 0, doc.icv, doc.id, doc.uuid, r.hash, r.xml, r.qr, s.zatca_env);
+      if (returnId) db.prepare('UPDATE returns SET zatca_qr = ? WHERE id = ?').run(r.qr, returnId);
+      else db.prepare('UPDATE orders SET zatca_qr = ? WHERE id = ?').run(r.qr, orderId);
+      return r.qr;
+    } catch (err) {
+      console.error('ZATCA stamp', err);
+      audit('zatca_failed', { entity: 'order', entityId: orderId, details: { return: returnId, error: `${err.code || ''} ${err.message}`.trim() } });
+      return null;
+    }
+  }
+
+  const zatcaRow = (r) => r && { ...plain(r), xml: undefined };
+
+  const zatca = {
+    summary() {
+      requirePerm('reports');
+      const s = getSettings(true);
+      const counts = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM zatca_documents GROUP BY status').all().map((r) => [r.status, r.n]));
+      const oldest = db.prepare("SELECT MIN(created_at) AS at FROM zatca_documents WHERE status = 'pending'").get()?.at || null;
+      let since = null;
+      if (s.zatca_enabled) {
+        const first = db.prepare('SELECT MIN(created_at) AS at FROM zatca_documents').get()?.at;
+        if (first) since = db.prepare("SELECT COUNT(*) AS n FROM orders o WHERE o.status = 'completed' AND o.completed_at >= ? AND NOT EXISTS (SELECT 1 FROM zatca_documents d WHERE d.order_id = o.id AND d.return_id IS NULL)").get(first).n;
+      }
+      return {
+        enabled: s.zatca_enabled, ready: zatcaReady(s), env: s.zatca_env, onboarded_env: s.zatca_onboarded_env, cert_expires: s.zatca_cert_expires, serial: s.zatca_serial,
+        counts, oldest_pending: oldest, unstamped: since || 0, missing: zatcaDoc.missingSettings(s),
+        last_error: plain(db.prepare("SELECT id, error, updated_at FROM zatca_documents WHERE status IN ('error', 'rejected') ORDER BY updated_at DESC LIMIT 1").get()) || null,
+      };
+    },
+    list({ status = '', from = null, to = null, search = '' } = {}) {
+      requirePerm('reports');
+      const where = ['1 = 1'];
+      const args = [];
+      if (status === 'attention') where.push("d.status IN ('error', 'rejected')");
+      else if (status) { where.push('d.status = ?'); args.push(str(status)); }
+      if (from) { where.push('d.created_at >= ?'); args.push(str(from)); }
+      if (to) { where.push("d.created_at < date(?, '+1 day')"); args.push(str(to)); }
+      if (str(search)) { where.push('(d.doc_no LIKE ? OR d.uuid LIKE ?)'); args.push(`${str(search)}%`, `${str(search)}%`); }
+      return db.prepare(`SELECT d.*, o.invoice_no, o.total, o.customer_name, c.name AS customer FROM zatca_documents d JOIN orders o ON o.id = d.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id WHERE ${where.join(' AND ')} ORDER BY d.icv DESC LIMIT 500`).all(...args).map(zatcaRow);
+    },
+    get(id) {
+      requirePerm('reports');
+      const r = db.prepare('SELECT * FROM zatca_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      return { ...plain(r), response: parseJson(r.response, null) };
+    },
+    /** Sends again (after a connection or login problem). */
+    retry(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM zatca_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!['error', 'skipped'].includes(r.status)) throw new PosError('ZATCA_NOT_RETRYABLE');
+      db.prepare("UPDATE zatca_documents SET status = 'pending', error = '', updated_at = datetime('now', 'localtime') WHERE id = ?").run(r.id);
+      audit('zatca_retry', { entity: 'order', entityId: r.order_id, details: { doc: r.doc_no } });
+      return true;
+    },
+    /** A rejected document is issued again (new number in the chain) after fixing the cause. */
+    restamp(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM zatca_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!['rejected', 'error'].includes(r.status)) throw new PosError('ZATCA_NOT_RETRYABLE');
+      if (!zatcaReady(getSettings(true))) throw new PosError('ZATCA_NOT_ONBOARDED');
+      return transaction(db, () => {
+        db.prepare("UPDATE zatca_documents SET status = 'skipped', updated_at = datetime('now', 'localtime') WHERE id = ?").run(r.id);
+        const qr = zatcaStamp(r.order_id, r.return_id);
+        if (!qr) throw new PosError('ZATCA_STAMP_FAILED');
+        audit('zatca_restamp', { entity: 'order', entityId: r.order_id, details: { doc: r.doc_no } });
+        return true;
+      });
+    },
+    skip(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM zatca_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      if (!['pending', 'error', 'rejected'].includes(r.status)) throw new PosError('ZATCA_NOT_RETRYABLE');
+      db.prepare("UPDATE zatca_documents SET status = 'skipped', updated_at = datetime('now', 'localtime') WHERE id = ?").run(r.id);
+      audit('zatca_skip', { entity: 'order', entityId: r.order_id, details: { doc: r.doc_no } });
+      return true;
+    },
+    /** Stamps a sale that has no e-invoice yet (made while switched off, or a failed stamp). */
+    add({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const o = db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo));
+      if (!o) throw new PosError('NOT_FOUND');
+      if (db.prepare("SELECT 1 FROM zatca_documents WHERE order_id = ? AND return_id IS NULL AND status != 'skipped'").get(o.id)) throw new PosError('ZATCA_ALREADY');
+      if (!zatcaReady(getSettings(true))) throw new PosError('ZATCA_NOT_ONBOARDED');
+      if (!transaction(db, () => zatcaStamp(o.id))) throw new PosError('ZATCA_STAMP_FAILED');
+      return true;
+    },
+    /** The (unsigned) XML a sale would become, to check the settings before going live. */
+    preview({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const o = invoiceNo
+        ? db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo))
+        : db.prepare("SELECT * FROM orders WHERE status = 'completed' ORDER BY id DESC LIMIT 1").get();
+      if (!o) throw new PosError('NOT_FOUND');
+      const s = getSettings();
+      const missing = zatcaDoc.missingSettings(s);
+      if (missing.length) throw new PosError('ZATCA_MISSING', missing.join(','));
+      const { order, items, customer, payment, invoiceNo: no } = zatcaInput(o.id);
+      const standard = !!(s.zatca_b2b && zatcaDoc.b2bBuyer(customer));
+      const built = zatcaDoc.buildXml({ doc: { kind: 'invoice', standard, id: no, uuid: zatcaDoc.uuid(), icv: 1, pih: zatcaDoc.INITIAL_PIH, issued: order.completed_at, payment }, order, items, customer, settings: s });
+      return { invoice_no: no, standard, totals: built.totals, xml: built.xml.replace(/<!--[A-Z]+-->/g, '') };
+    },
+  };
+
+  /** For zatca-submitter.cjs (main process only — not reachable from a window or the network). */
+  const zatcaQueue = {
+    settings: () => getSettings(true),
+    /** Waiting documents in chain order. */
+    toSend(limit = 100) {
+      return plainAll(db.prepare("SELECT * FROM zatca_documents WHERE status = 'pending' ORDER BY icv LIMIT ?").all(limit));
+    },
+    result(id, { status, error = '', response = null, xml = null, qr = null }) {
+      const r = db.prepare('SELECT * FROM zatca_documents WHERE id = ?').get(id);
+      db.prepare(`UPDATE zatca_documents SET status = ?, error = ?, response = ?, xml = COALESCE(?, xml), qr = COALESCE(?, qr), attempts = attempts + 1,
+        sent_at = CASE WHEN ? IN ('reported', 'cleared', 'warning') THEN datetime('now', 'localtime') ELSE sent_at END, updated_at = datetime('now', 'localtime') WHERE id = ?`)
+        .run(status, String(error).slice(0, 4000), response ? JSON.stringify(response).slice(0, 20000) : '', xml, qr, status, id);
+      // A cleared invoice carries ZATCA's own QR: print that one from now on.
+      if (qr && r) {
+        if (r.return_id) db.prepare('UPDATE returns SET zatca_qr = ? WHERE id = ?').run(qr, r.return_id);
+        else db.prepare('UPDATE orders SET zatca_qr = ? WHERE id = ?').run(qr, r.order_id);
+      }
+    },
+    /** Saved by the onboarding: the device key and its production certificate. */
+    saveCredentials(values) {
+      const allowed = Object.fromEntries(Object.entries(values).filter(([k]) => ZATCA_INTERNAL.includes(k)));
+      const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+      transaction(db, () => { for (const [k, v] of Object.entries(allowed)) stmt.run(k, String(v ?? '')); });
+      audit('zatca_onboard', { details: { env: values.zatca_onboarded_env, expires: values.zatca_cert_expires } });
+    },
+  };
+
   /** Called by the main computer's network server for every request from another computer. */
   function admitDevice(id, name) {
     const dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
@@ -3823,7 +4050,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
     auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
     license: { get: () => toJSON(entitlements()), has, requireFeature },
-    devices, admitDevice, deviceId, eta, etaQueue,
+    devices, admitDevice, deviceId, eta, etaQueue, zatca, zatcaQueue,
   };
   // Whole namespaces that belong to a licensed feature. Read-only methods other screens rely
   // on stay open, so data made under a bigger license can still be seen.
@@ -3832,7 +4059,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     delivery: ['delivery'], priceLists: ['trading', ['list']], quotes: ['trading'], rebates: ['rebates'],
     installments: ['installments', ['get']], treasury: ['treasury', ['accounts']], warehouses: ['warehouses', ['list']],
     purchaseOrders: ['purchase_orders'], employees: ['employees'], promotions: ['promotions'], coupons: ['coupons'], giftCards: ['coupons'],
-    importer: ['excel'], commissions: ['commissions'], eta: ['eta'],
+    importer: ['excel'], commissions: ['commissions'], eta: ['eta'], zatca: ['zatca'],
   };
   for (const [ns, [feature, open = []]] of Object.entries(LOCKED)) {
     for (const [name, fn] of Object.entries(api[ns])) {

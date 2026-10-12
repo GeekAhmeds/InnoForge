@@ -26,6 +26,8 @@ export const networkConnect = (opts) => unwrap(bridge.networkConnect(opts));
 export const networkDisconnect = () => unwrap(bridge.networkDisconnect());
 export const etaRun = () => unwrap(bridge.etaRun());
 export const etaTest = () => unwrap(bridge.etaTest());
+export const zatcaOnboard = (args) => unwrap(bridge.zatcaOnboard(args));
+export const zatcaRun = () => unwrap(bridge.zatcaRun());
 export const copyText = (text) => unwrap(bridge.copy(text));
 export const appVersion = () => unwrap(bridge.version());
 export const excelTemplate = (kind) => unwrap(bridge.excelTemplate(kind));

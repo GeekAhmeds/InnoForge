@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('posBridge', {
   networkDisconnect: () => ipcRenderer.invoke('pos:networkDisconnect'),
   etaRun: () => ipcRenderer.invoke('pos:etaRun'),
   etaTest: () => ipcRenderer.invoke('pos:etaTest'),
+  zatcaOnboard: (args) => ipcRenderer.invoke('pos:zatcaOnboard', args),
+  zatcaRun: () => ipcRenderer.invoke('pos:zatcaRun'),
   copy: (text) => ipcRenderer.invoke('pos:copy', text),
   version: () => ipcRenderer.invoke('pos:version'),
   excelTemplate: (kind) => ipcRenderer.invoke('pos:excelTemplate', kind),
