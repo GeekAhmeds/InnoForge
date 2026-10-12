@@ -1030,3 +1030,78 @@ test('receipt design: stored as JSON, anything else is refused', () => {
   s.settings.save({ receipt_layout: '' }); // back to the default design
   assert.equal(s.settings.get().receipt_layout, '');
 });
+
+test('packs: Excel import adds the carton, reports show stock in cartons', () => {
+  const { s } = setup({});
+  const r = s.importer.products({ rows: [
+    { name: 'مياه 600مل', barcode: '6221000000011', price: '7', stock: '245', pack_name: 'كرتونة', pack_factor: '24', pack_price: '150', pack_barcode: '16221000000018' },
+    { name: 'بدون عبوة', barcode: '6221000000042', price: '15', stock: '5' },
+    { name: 'عبوة ناقصة', barcode: '6221000000059', price: '15', pack_name: 'كرتونة' },
+    { name: 'باركود مكرر', barcode: '6221000000066', price: '15', pack_name: 'علبة', pack_factor: '6', pack_barcode: '6221000000042' },
+  ] });
+  assert.equal(r.created, 2);
+  assert.deepEqual(r.errors.map((e) => e.code), ['INVALID_UNIT', 'DUPLICATE_BARCODE']);
+  const water = s.products.list({ search: 'مياه' })[0];
+  assert.deepEqual(water.units.map((u) => [u.name, u.factor, u.price, u.barcode]), [['كرتونة', 24, 15000, '16221000000018']]);
+  // the carton barcode sells a carton (24 from stock)
+  assert.equal(s.products.byBarcode('16221000000018').unit.factor, 24);
+  // importing again updates the same carton instead of adding a second one
+  s.importer.products({ rows: [{ name: 'مياه 600مل', barcode: '6221000000011', price: '7', pack_name: 'كرتونة', pack_factor: '24', pack_price: '160' }] });
+  assert.deepEqual(s.products.list({ search: 'مياه' })[0].units.map((u) => [u.factor, u.price, u.barcode]), [[24, 16000, '16221000000018']]);
+  const rep = s.reports.run({ id: 'stock_valuation' });
+  assert.equal(rep.rows.find((x) => x.name === 'مياه 600مل').packs, '10 كرتونة + 5');
+  assert.equal(rep.rows.find((x) => x.name === 'بدون عبوة').packs, '');
+  assert.ok(!('id' in rep.rows[0]));
+});
+
+test('variants: a T-shirt in sizes and colours sells, stocks and reports per variant', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const tee = s.products.save({ name: 'تيشيرت بولو', price: 25000, cost: 12000, min_stock: 2, units: [{ name: 'دستة', factor: 12 }] });
+  const attributes = [{ name: 'اللون', values: 'أحمر، أسود' }, { name: 'المقاس', values: ['M', 'L'] }];
+  const combos = [['أحمر', 'M'], ['أحمر', 'L'], ['أسود', 'M'], ['أسود', 'L']];
+  const r = s.products.saveVariants({ parentId: tee, attributes, variants: combos.map(([c, z], i) => ({ values: { اللون: c, المقاس: z }, barcode: `700000000000${i}`, stock: 5, price: z === 'L' ? '27000' : '' })) });
+  assert.equal(r.variants.length, 4);
+  assert.deepEqual(r.attributes.map((a) => a.values), [['أحمر', 'أسود'], ['M', 'L']]);
+  const redL = r.variants.find((v) => v.variant_label === 'أحمر / L');
+  assert.equal(redL.name, 'تيشيرت بولو — أحمر / L');
+  assert.equal(redL.price, 27000);
+  assert.equal(redL.stock, 5);
+  assert.equal(redL.cost, 12000);
+  assert.deepEqual(redL.units.map((u) => [u.name, u.factor, u.barcode]), [['دستة', 12, null]]);
+  // the products page shows the model once, with the total stock; selling lists show the variants
+  const grouped = s.products.list({ grouped: true });
+  const model = grouped.find((p) => p.id === tee);
+  assert.equal(model.is_parent, true);
+  assert.equal(model.variant_count, 4);
+  assert.equal(model.stock, 20);
+  assert.equal(model.min_price, 25000);
+  assert.ok(!grouped.some((p) => p.parent_id));
+  assert.ok(!s.products.list({}).some((p) => p.id === tee));
+  assert.equal(s.products.list({ grouped: true, search: 'أسود' }).length, 2);
+  assert.ok(!s.products.lowStock().some((p) => p.id === tee));
+  // scanning a variant sells it; the model itself cannot be sold
+  s.shifts.open({});
+  const scanned = s.products.byBarcode('7000000000001');
+  assert.equal(scanned.id, redL.id);
+  s.orders.checkout({ items: [{ product_id: redL.id, qty: 2 }], payments: [{ method: 'cash', amount: 54000 }] });
+  assert.equal(s.products.get(redL.id).stock, 3);
+  assert.equal(tryCode(() => s.orders.checkout({ items: [{ product_id: tee, qty: 1 }], payments: [{ method: 'cash', amount: 25000 }] })), 'PICK_VARIANT');
+  // a new parent price reaches the variants without their own price
+  s.products.save({ ...s.products.get(tee), name: 'تيشيرت بولو قطن', price: 26000 });
+  const after = s.products.variants(tee).variants;
+  assert.equal(after.find((v) => v.variant_label === 'أحمر / M').price, 26000);
+  assert.equal(after.find((v) => v.variant_label === 'أحمر / L').price, 27000);
+  assert.equal(after.find((v) => v.variant_label === 'أحمر / L').name, 'تيشيرت بولو قطن — أحمر / L');
+  // the model report adds the variants up
+  const rep = s.reports.run({ id: 'sales_by_model' });
+  assert.deepEqual(rep.rows.map((x) => [x.name, x.qty, x.sales, x.stock]), [['تيشيرت بولو قطن', 2, 54000, 18]]);
+  // dropping a sold variant switches it off; an unsold one is deleted
+  s.products.saveVariants({ parentId: tee, attributes, variants: after.filter((v) => !['أحمر / L', 'أسود / L'].includes(v.variant_label)).map((v) => ({ id: v.id, values: v.variant, price: v.own_price ? v.price : '' })) });
+  assert.equal(s.products.get(redL.id).active, 0);
+  assert.equal(tryCode(() => s.products.get(after.find((v) => v.variant_label === 'أسود / L').id)), 'NOT_FOUND');
+  // rules
+  const stocked = s.products.save({ name: 'بنطلون', price: 30000, stock: 4 });
+  assert.equal(tryCode(() => s.products.saveVariants({ parentId: stocked, attributes, variants: [{ values: { اللون: 'أحمر', المقاس: 'M' } }] })), 'VARIANT_PARENT_STOCK');
+  assert.equal(tryCode(() => s.products.saveVariants({ parentId: tee, attributes, variants: [{ values: { اللون: 'أخضر', المقاس: 'M' } }] })), 'INVALID_VARIANTS');
+  assert.equal(tryCode(() => s.products.saveVariants({ parentId: redL.id, attributes, variants: [] })), 'VARIANT_OF_VARIANT');
+});

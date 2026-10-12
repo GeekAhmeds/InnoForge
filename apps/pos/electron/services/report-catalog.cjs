@@ -23,6 +23,19 @@ function buildCatalog(ctx) {
   const cost = () => can('view_cost');
   const margin = (r) => { r.margin = r.sales ? Math.round((r.profit / r.sales) * 1000) / 10 : 0; return r; };
   // Drop cost/profit columns for users who may not see cost prices.
+  // Stock in the product's largest whole pack, e.g. "10 كرتونة + 5" (stock itself stays in base units).
+  const withPacks = (rows) => {
+    const packs = new Map(all('SELECT product_id, name, factor FROM product_units WHERE factor > 1 AND factor = CAST(factor AS INTEGER) ORDER BY factor')
+      .map((u) => [u.product_id, u])); // the largest wins (ordered ascending)
+    return rows.map(({ id, ...r }) => {
+      const u = packs.get(id);
+      const q = Math.abs(r.stock || 0);
+      if (!u || q < u.factor) return { ...r, packs: '' };
+      const n = Math.floor(q / u.factor);
+      const rest = Math.round((q - n * u.factor) * 1000) / 1000;
+      return { ...r, packs: `${r.stock < 0 ? '-' : ''}${n} ${u.name}${rest ? ` + ${rest}` : ''}` };
+    });
+  };
   const costCols = (cols) => (cost() ? cols : cols.filter((c) => !['cost', 'profit', 'margin', 'value_cost'].includes(c.key)));
 
   return {
@@ -63,6 +76,19 @@ function buildCatalog(ctx) {
             ROUND(SUM(${NET_COST})) AS cost, ROUND(SUM(${NET_LINE}) - SUM(${NET_COST})) AS profit
           FROM order_items i JOIN orders o ON o.id = i.order_id LEFT JOIN products p ON p.id = i.product_id LEFT JOIN categories cat ON cat.id = p.category_id
           WHERE ${RANGE} GROUP BY COALESCE(i.product_id, i.name) ORDER BY sales DESC`, f, t).map(margin),
+      }),
+    },
+    // Products with variants summed up per model (all sizes / colours of a T-shirt together).
+    sales_by_model: {
+      group: 'sales',
+      run: ({ f, t }) => ({
+        columns: costCols([col('name', 'rep.col.product'), col('variants', 'rep.col.variants', 'int', false), col('qty', 'rep.col.qty', 'qty'), col('sales', 'rep.col.sales', 'money'),
+          col('cost', 'rep.col.cost', 'money'), col('profit', 'rep.col.profit', 'money'), col('margin', 'rep.col.margin', 'pct', false), col('stock', 'rep.col.stockNow', 'qty')]),
+        rows: all(`SELECT m.name, COUNT(DISTINCT i.product_id) AS variants, SUM((i.qty - i.returned_qty) * i.unit_factor) AS qty, ROUND(SUM(${NET_LINE})) AS sales,
+            ROUND(SUM(${NET_COST})) AS cost, ROUND(SUM(${NET_LINE}) - SUM(${NET_COST})) AS profit,
+            (SELECT COALESCE(SUM(v.stock), 0) FROM products v WHERE v.parent_id = m.id AND v.track_stock = 1) AS stock
+          FROM order_items i JOIN orders o ON o.id = i.order_id JOIN products p ON p.id = i.product_id JOIN products m ON m.id = p.parent_id
+          WHERE ${RANGE} GROUP BY m.id ORDER BY sales DESC`, f, t).map(margin),
       }),
     },
     sales_by_category: {
@@ -189,21 +215,21 @@ function buildCatalog(ctx) {
     stock_valuation: {
       group: 'stock', noRange: true,
       run: () => ({
-        columns: costCols([col('name', 'rep.col.product'), col('barcode', 'rep.col.barcode'), col('category', 'rep.col.category'), col('stock', 'rep.col.stock', 'qty'),
+        columns: costCols([col('name', 'rep.col.product'), col('barcode', 'rep.col.barcode'), col('category', 'rep.col.category'), col('stock', 'rep.col.stock', 'qty'), col('packs', 'rep.col.packs'),
           col('cost', 'rep.col.unitCost', 'money', false), col('value_cost', 'rep.col.valueCost', 'money'), col('price', 'rep.col.price', 'money', false), col('value_price', 'rep.col.valuePrice', 'money')]),
-        rows: all(`SELECT p.name, COALESCE(p.barcode, '') AS barcode, COALESCE(c.name, '') AS category, p.stock, p.cost, ROUND(MAX(p.stock, 0) * p.cost) AS value_cost,
+        rows: withPacks(all(`SELECT p.id, p.name, COALESCE(p.barcode, '') AS barcode, COALESCE(c.name, '') AS category, p.stock, p.cost, ROUND(MAX(p.stock, 0) * p.cost) AS value_cost,
             p.price, ROUND(MAX(p.stock, 0) * p.price) AS value_price
-          FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.active = 1 AND p.track_stock = 1 ORDER BY c.name, p.name`),
+          FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.active = 1 AND p.track_stock = 1 AND p.attributes = '' ORDER BY c.name, p.name`)),
       }),
     },
     low_stock: {
       group: 'stock', noRange: true,
       run: () => ({
-        columns: [col('name', 'rep.col.product'), col('category', 'rep.col.category'), col('stock', 'rep.col.stock', 'qty', false), col('min_stock', 'rep.col.minStock', 'qty', false),
+        columns: [col('name', 'rep.col.product'), col('category', 'rep.col.category'), col('stock', 'rep.col.stock', 'qty', false), col('packs', 'rep.col.packs'), col('min_stock', 'rep.col.minStock', 'qty', false),
           col('shortage', 'rep.col.shortage', 'qty'), col('supplier', 'rep.col.supplier')],
-        rows: all(`SELECT p.name, COALESCE(c.name, '') AS category, p.stock, p.min_stock, p.min_stock - p.stock AS shortage, COALESCE(s.name, '') AS supplier
+        rows: withPacks(all(`SELECT p.id, p.name, COALESCE(c.name, '') AS category, p.stock, p.min_stock, p.min_stock - p.stock AS shortage, COALESCE(s.name, '') AS supplier
           FROM products p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN suppliers s ON s.id = p.supplier_id
-          WHERE p.active = 1 AND p.track_stock = 1 AND p.stock <= p.min_stock ORDER BY shortage DESC`),
+          WHERE p.active = 1 AND p.track_stock = 1 AND p.attributes = '' AND p.stock <= p.min_stock ORDER BY shortage DESC`)),
       }),
     },
     stock_movement: {
@@ -232,7 +258,7 @@ function buildCatalog(ctx) {
         rows: all(`SELECT p.name, COALESCE(c.name, '') AS category, p.stock, ROUND(MAX(p.stock, 0) * p.cost) AS value_cost,
             (SELECT MAX(o.completed_at) FROM order_items i JOIN orders o ON o.id = i.order_id WHERE i.product_id = p.id AND o.status = 'completed') AS last_sale
           FROM products p LEFT JOIN categories c ON c.id = p.category_id
-          WHERE p.active = 1 AND p.track_stock = 1 AND p.stock > 0 AND NOT EXISTS (
+          WHERE p.active = 1 AND p.track_stock = 1 AND p.attributes = '' AND p.stock > 0 AND NOT EXISTS (
             SELECT 1 FROM order_items i JOIN orders o ON o.id = i.order_id WHERE i.product_id = p.id AND ${RANGE})
           ORDER BY value_cost DESC`, f, t),
       }),
@@ -249,7 +275,7 @@ function buildCatalog(ctx) {
       group: 'stock', feature: 'warehouses', noRange: true,
       run: () => {
         const whs = all('SELECT id, name FROM warehouses WHERE active = 1 ORDER BY id');
-        const rows = all("SELECT id, name, stock FROM products WHERE active = 1 AND track_stock = 1 ORDER BY name");
+        const rows = all("SELECT id, name, stock FROM products WHERE active = 1 AND track_stock = 1 AND attributes = '' ORDER BY name");
         const split = all('SELECT warehouse_id, product_id, qty FROM warehouse_stock');
         for (const r of rows) for (const w of whs) r[`w${w.id}`] = split.find((x) => x.product_id === r.id && x.warehouse_id === w.id)?.qty || 0;
         return {

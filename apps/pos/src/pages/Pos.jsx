@@ -8,6 +8,7 @@ import { connectScale, onScale, stableWeight } from '../lib/scale.js';
 import { openCustomerDisplay, openDrawer, sendDisplay } from '../lib/api.js';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { ModifierPicker } from '../components/Modifiers.jsx';
+import { VariantPicker } from '../components/Variants.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 import { has } from '../lib/features.js';
 
@@ -78,7 +79,7 @@ export default function Pos() {
 
   useEffect(() => { api.categories.list().then(setCategories); }, []);
   useEffect(() => {
-    const h = setTimeout(() => api.products.list(categoryId === 'top' && !search ? { top: true } : { search, categoryId: categoryId === 'top' ? null : categoryId, forSale: true }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
+    const h = setTimeout(() => api.products.list(categoryId === 'top' && !search ? { top: true } : { search, categoryId: categoryId === 'top' ? null : categoryId, forSale: true, grouped: true }).then(setProducts).catch((e) => notify(tErr(e), 'error')), 120);
     return () => clearTimeout(h);
   }, [search, categoryId, notify, tErr]);
 
@@ -124,6 +125,7 @@ export default function Pos() {
 
   /** Tapping a product sold by weight takes the scale's weight, or asks for it. */
   async function pick(p) {
+    if (p.is_parent) { setModal({ kind: 'variants', product: p }); return; }
     if (p.modifier_count > 0) { setModal({ kind: 'modifiers', product: p }); return; }
     if (!p.by_weight) { addProduct(p); focusSearch(); return; }
     let w = stableWeight();
@@ -145,11 +147,14 @@ export default function Pos() {
       // A scale label carries the weight (or price) of this package.
       addProduct(byCode, byCode.scale.qty, null, { separate: true });
       setSearch('');
+    } else if (byCode?.is_parent) {
+      setModal({ kind: 'variants', product: byCode });
+      setSearch('');
     } else if (byCode) {
       addProduct(byCode, qtyStr ? Number(qtyStr) : 1, byCode.unit || null);
       setSearch('');
     } else if (products.length === 1) {
-      addProduct(products[0]);
+      pick(products[0]);
       setSearch('');
     } else {
       notify(t('pos.notFound'), 'error');
@@ -281,7 +286,8 @@ export default function Pos() {
             <button key={p.id} className="product" style={{ '--chip': p.category_color || '#94a3b8' }} onClick={() => pick(p)}>
               <span className="p-name">{p.name}</span>
               {p.author && <span className="p-sub">{p.author}</span>}
-              <span className="p-price">{m(p.price)}{p.by_weight ? ` / ${p.unit === 'pcs' ? 'kg' : p.unit}` : ''}</span>
+              {p.is_parent && <span className="p-sub">👕 {t('variants.count', { n: p.variant_count })}</span>}
+              <span className="p-price">{p.is_parent && p.min_price !== p.max_price ? `${m(p.min_price)}+` : m(p.price)}{p.by_weight ? ` / ${p.unit === 'pcs' ? 'kg' : p.unit}` : ''}</span>
               {p.track_stock ? <span className={`p-stock ${p.stock <= p.min_stock ? 'low' : ''}`}>{p.stock > 0 ? formatQty(p.stock) : t('pos.outOfStock')}</span> : null}
             </button>
           ))}
@@ -412,6 +418,9 @@ export default function Pos() {
           onSave={(patch) => { setCart((c) => ({ ...c, items: c.items.map((x, i) => (i === modal.idx ? { ...x, ...patch } : x)) })); setModal(null); focusSearch(); }}
           onRemove={() => { setCart((c) => ({ ...c, items: c.items.filter((_, i) => i !== modal.idx) })); setModal(null); focusSearch(); }}
         />
+      )}
+      {modal?.kind === 'variants' && (
+        <VariantPicker product={modal.product} onClose={() => { setModal(null); focusSearch(); }} onPick={(v) => { setModal(null); pick(v); }} />
       )}
       {modal?.kind === 'modifiers' && (
         <ModifierPicker product={modal.product} onClose={() => { setModal(null); focusSearch(); }}

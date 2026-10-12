@@ -24,8 +24,19 @@ function exportSheets(s, kind, params = {}) {
         { header: excel.COLUMNS.products.track_stock[0], key: 'track' },
         { header: excel.COLUMNS.products.author[0], key: 'author' },
         { header: excel.COLUMNS.products.publisher[0], key: 'publisher' },
+        { header: excel.COLUMNS.products.pack_name[0], key: 'pack_name' },
+        { header: excel.COLUMNS.products.pack_factor[0], key: 'pack_factor' },
+        { header: excel.COLUMNS.products.pack_price[0], key: 'pack_price', money: true },
+        { header: excel.COLUMNS.products.pack_barcode[0], key: 'pack_barcode', width: 18 },
       ],
-      rows: s.products.list({ includeInactive: true }).map((p) => ({ ...p, track: p.track_stock ? 'نعم' : 'لا' })),
+      rows: s.products.list({ includeInactive: true }).map((p) => {
+        // The largest unit goes in the pack columns, so the file can be imported back as-is.
+        const pack = [...(p.units || [])].sort((a, b) => b.factor - a.factor)[0];
+        return {
+          ...p, track: p.track_stock ? 'نعم' : 'لا',
+          pack_name: pack?.name ?? '', pack_factor: pack?.factor ?? null, pack_price: pack ? pack.price ?? Math.round(p.price * pack.factor) : null, pack_barcode: pack?.barcode ?? '',
+        };
+      }),
     }];
   }
   if (kind === 'customers' || kind === 'suppliers') {

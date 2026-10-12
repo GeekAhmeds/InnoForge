@@ -965,6 +965,17 @@ const MIGRATIONS = [
   CREATE INDEX idx_uae_status ON uae_documents(status);
   ALTER TABLE customers ADD COLUMN uae TEXT NOT NULL DEFAULT ''; -- JSON { street, city, emirate, tl, authority }
   `,
+  // v21: product variants (size / colour / flavour). A parent product lists its attributes and is
+  // never sold itself; each combination is an ordinary product row (own stock, barcode, price)
+  // pointing at it, so stock, purchases, returns and reports work unchanged.
+  `
+  ALTER TABLE products ADD COLUMN parent_id INTEGER REFERENCES products(id) ON DELETE CASCADE;
+  ALTER TABLE products ADD COLUMN attributes TEXT NOT NULL DEFAULT ''; -- parent: JSON [{ name, values: [] }]
+  ALTER TABLE products ADD COLUMN variant TEXT NOT NULL DEFAULT ''; -- variant: JSON { attribute: value }
+  ALTER TABLE products ADD COLUMN variant_label TEXT NOT NULL DEFAULT ''; -- variant: "أحمر / L"
+  ALTER TABLE products ADD COLUMN own_price INTEGER NOT NULL DEFAULT 0; -- variant: 1 = its own price, 0 = follows the parent
+  CREATE INDEX idx_products_parent ON products(parent_id);
+  `,
 ];
 
 function openDatabase(file) {

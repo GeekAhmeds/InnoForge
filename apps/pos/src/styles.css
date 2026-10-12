@@ -162,6 +162,26 @@ tr.dim td { opacity: .5; }
 .form-foot { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }
 .settings-form { max-width: 820px; }
 .settings-form.wide { max-width: 1120px; }
+.label-designer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 12px; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.label-designer .row.wrap { margin: 6px 0; }
+.label-preview-box { display: flex; flex-direction: column; align-items: center; gap: 6px; background: #e5e7eb; border-radius: 8px; padding: 12px; }
+.label-preview-box iframe { border: 0; background: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / .15); }
+input.grow { flex: 1; }
+@media (max-width: 900px) { .label-designer { grid-template-columns: 1fr; } }
+.badge.info { background: #e8f0fd; color: var(--brand); }
+.variant-attr { display: grid; grid-template-columns: 180px 1fr auto auto; gap: 6px; margin: 6px 0; }
+.variants .excel-preview { max-height: 300px; }
+.variants td input { width: 100%; }
+.variant-grid { border-collapse: separate; border-spacing: 6px; margin: 0 auto; }
+.variant-grid th { font-weight: 600; padding: 4px 8px; }
+.variant-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.variant-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 110px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: pointer; }
+.variant-cell:hover { border-color: var(--brand); background: #f5f8ff; }
+.variant-cell small { color: var(--muted); }
+.variant-cell .strong { font-weight: 700; font-size: 15px; }
+.variant-cell.out { opacity: .55; }
+.variant-cell.none { cursor: default; color: var(--muted); border-style: dashed; }
+small.packs { display: block; font-size: 11px; white-space: nowrap; }
 .receipt-designer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: start; margin: 8px 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .receipt-designer h4 { margin: 0 0 4px; }
 .rdesign-group { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px 10px; margin: 0 0 10px; }

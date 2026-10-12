@@ -3,6 +3,7 @@ import { SCREENS, sellScreens } from '../lib/screens.js';
 import { api, backup, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
 import ReceiptDesigner, { sampleOrder } from '../components/ReceiptDesigner.jsx';
+import { LABEL_SIZES, sizeName } from '../lib/labels.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { formatMoney } from '../lib/money.js';
 import Support from '../components/Support.jsx';
@@ -161,7 +162,7 @@ function SettingsForm({ tab }) {
           <Field label={t('a4.printer')}>{printerSelect('a4_printer_name')}</Field>
           <Field label={t('labels.printer')}>{printerSelect('label_printer_name')}</Field>
           <Field label={t('labels.size')}>
-            <select value={f.label_size} onChange={set('label_size')}>{['38x25', '50x30', '58x40', 'a4'].map((k) => <option key={k} value={k}>{k === 'a4' ? t('labels.a4') : `${k.replace('x', ' × ')} mm`}</option>)}</select>
+            <select value={f.label_size} onChange={set('label_size')}>{Object.keys(LABEL_SIZES).map((k) => <option key={k} value={k}>{sizeName(k, t)}</option>)}</select>
           </Field>
           <Field label={t('a4.logo')} hint={t('a4.logoHint')}>
             <div className="row">

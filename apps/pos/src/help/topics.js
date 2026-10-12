@@ -222,7 +222,7 @@ export const TOPICS = [
         'الوحدات: ضيف «كرتونة = 12» بسعرها وباركودها، فالكاشير يقدر يبيع بالكرتونة أو بالقطعة.',
         'الأسعار حسب القائمة: لكل قائمة (جملة مثلاً) سعر للصنف.',
       ],
-      tips: ['رفع الأصناف كلها مرة واحدة من شيت إكسيل: زرار «استيراد».', 'تكلفة الصنف بتتحدث لوحدها مع كل فاتورة شراء (متوسط مرجّح).'],
+      tips: ['رفع الأصناف كلها مرة واحدة من شيت إكسيل: زرار «استيراد». الشيت فيه أعمدة للعبوة (اسمها، فيها كام، سعرها، باركودها).', 'تكلفة الصنف بتتحدث لوحدها مع كل فاتورة شراء (متوسط مرجّح).', 'المخزون بيظهر بالكرتونة كمان، مثلاً «10 كرتونة + 5 قطعة».'],
     },
     en: {
       title: 'Products, prices and units',
@@ -233,7 +233,69 @@ export const TOPICS = [
         'Units: add "Carton = 12" with its own price and barcode so the cashier can sell either.',
         'Price-list prices: a price per list (e.g. wholesale).',
       ],
-      tips: ['Load all products at once from an Excel sheet with Import.', 'Cost updates itself with every purchase (weighted average).'],
+      tips: ['Load all products at once from an Excel sheet with Import; the sheet has pack columns (name, size, price, barcode).', 'Cost updates itself with every purchase (weighted average).', 'Stock also shows in packs, e.g. "10 cartons + 5 pieces".'],
+    },
+  },
+  {
+    id: 'variants', icon: '👕', group: 'stock',
+    ar: {
+      title: 'المقاسات والألوان (المتغيرات)',
+      intro: 'صنف واحد (موديل) بمقاسات وألوان أو نكهات، وكل تركيبة ليها مخزون وباركود وسعر.',
+      steps: [
+        'افتح الصنف (أو اعمل صنف جديد) وانزل لـ«المقاسات والألوان».',
+        'اضغط «+ المقاس» و«+ اللون» (أو خاصية تانية زي النكهة)، واكتب القيم مفصولة بفاصلة.',
+        'البرنامج بيعمل كل التركيبات في جدول: اكتب سعر خاص لو مختلف (الفاضي = سعر الصنف)، والرصيد الأول، والباركود أو سيبه تلقائي.',
+        'احفظ. الموديل بيظهر مرة واحدة في الأصناف وجنبه عدد المتغيرات، ورصيده مجموع رصيد المتغيرات.',
+        'في البيع: دوس على الموديل يطلع جدول المقاس × اللون، أو امسح باركود المتغير على طول.',
+      ],
+      tips: [
+        'المشتريات والمرتجعات والجرد بتتعمل على كل متغير لوحده.',
+        'تقرير «المبيعات بالموديل» بيجمع كل المقاسات والألوان مع بعض، و«مبيعات وأرباح الأصناف» بيفصّلهم.',
+        'ملصقات الباركود بتطبع المقاس واللون تحت اسم الموديل.',
+        'لو الصنف عليه رصيد، صفّره الأول قبل ما تقسمه لمتغيرات.',
+      ],
+    },
+    en: {
+      title: 'Sizes and colours (variants)',
+      intro: 'One item (a model) in sizes and colours or flavours; each combination has its own stock, barcode and price.',
+      steps: [
+        'Open the item (or create one) and scroll to "Sizes and colours".',
+        'Press "+ Size" and "+ Colour" (or another attribute such as flavour) and type the values separated by commas.',
+        'Every combination appears in a table: set a price if different (empty = the item\'s price), the opening stock, and a barcode or leave it automatic.',
+        'Save. The model shows once in Products with its number of variants; its stock is their total.',
+        'Selling: tap the model to get a size × colour grid, or scan the variant\'s barcode directly.',
+      ],
+      tips: [
+        'Purchases, returns and stock counts work per variant.',
+        'The "Sales by model" report adds all sizes and colours together; "Sales & profit by product" lists them apart.',
+        'Barcode labels print the size and colour under the model name.',
+        'An item that has stock must be zeroed before it is split into variants.',
+      ],
+    },
+  },
+  {
+    id: 'labels', icon: '🏷', group: 'stock',
+    ar: {
+      title: 'ملصقات الباركود وتصميمها',
+      intro: 'اطبع ملصقات للأصناف والكراتين والمقاسات، وصمّم شكل الملصق.',
+      steps: [
+        'من «الأصناف» اضغط «ملصقات»، واكتب عدد النسخ لكل صنف (أو «واحد لكل صنف» / «حسب المخزون»).',
+        'اضغط «تصميم الملصق»: اختار المقاس (أو مقاس خاص بالمللي، أو ورقة A4)، وشغّل أو اقفل: اسم النشاط، الاسم، المقاس واللون، رقم الباركود، السعر، وسطر إضافي.',
+        'غيّر خط الاسم والسعر وطول الباركود، وشوف المعاينة.',
+        '«حفظ التصميم» عشان يفضل كده كل مرة، وبعدين «طباعة».',
+      ],
+      tips: ['لو الملصق بيطلع مقلوب فعّل «اقلب الملصق».', 'فعّل «إطار» أول مرة مع رول جديد عشان تتأكد إن الملصق مظبوط على الورقة.', 'الأصناف اللي من غير باركود: زرار «اعمل باركود» بيديها باركود داخلي.'],
+    },
+    en: {
+      title: 'Barcode labels and their design',
+      intro: 'Print labels for items, cartons and variants, and design how the label looks.',
+      steps: [
+        'Products → Labels, then type the number of copies per item (or "One each" / "By stock").',
+        'Press "Label design": pick the size (or a custom size in mm, or an A4 sheet) and switch on or off: business name, name, size and colour, barcode number, price and an extra line.',
+        'Change the name and price fonts and the barcode height, and check the preview.',
+        '"Save design" keeps it for next time; then Print.',
+      ],
+      tips: ['If labels come out upside down, turn on "Turn the label over".', 'Turn on "Frame" the first time with a new roll to check the label sits right.', 'Items without a barcode: "Generate barcodes" gives them an internal one.'],
     },
   },
   {

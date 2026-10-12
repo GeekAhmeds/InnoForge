@@ -30,7 +30,9 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | 8 | Official A4 invoice with logo and tax data | ✅ | `a4Html` |
 | 9 | Debt aging 30/60/90 and overdue alerts | ✅ | `aging()`, `openItems()`, Customers → Aging, WhatsApp reminder |
 | 10 | Purchase returns, stock counts by barcode | ✅ | `returnPurchase`, `stockCounts.*` |
-| 11 | Multiple units (carton = 12) with their own price/barcode | ✅ | `product_units`, `priceCart` |
+| 11 | Multiple units (carton = 12) with their own price/barcode; stock shown in packs ("10 cartons + 5"), pack columns in Excel import/export | ✅ | `product_units`, `priceCart`, `src/lib/packs.js`, `excel.cjs` (`pack_*`), stock reports `packs` column |
+| 11b | Variants (size / colour / flavour): a model with up to 3 attributes, each combination an ordinary product (own stock, barcode, price or the model's), picker grid at the cashier, "Sales by model" report | ✅ | `products.saveVariants/variants`, v21, `components/Variants.jsx`, `report-catalog` `sales_by_model` |
+| 11c | Barcode label designer: sizes (rolls, custom mm, A4 24/40), parts on/off, fonts, bar height, extra line, rotate, frame, live preview, saved design | ✅ | `src/lib/labels.js` (`label_layout`), `components/Labels.jsx` |
 | 12 | Expiry dates / batches (FEFO), serial numbers | ✅ | `batches`, `moveStock`, `findSerial` |
 | 13 | Automatic promotions (buy X get Y, time windows) | ✅ | `promotions.*`, `applyPromotions` |
 | 14 | Loyalty points | ✅ | `loyalty_moves`, checkout/refund |

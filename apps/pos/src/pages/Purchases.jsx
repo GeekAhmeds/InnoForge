@@ -8,6 +8,7 @@ import { openWhatsApp } from '../lib/share.js';
 import { poHtml } from '../lib/receipt.js';
 import { AccountSelect } from './Treasury.jsx';
 import { WarehouseSelect } from '../components/Warehouses.jsx';
+import { packsText } from '../lib/packs.js';
 import { has } from '../lib/features.js';
 
 export default function Purchases() {
@@ -104,7 +105,7 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
         const unit = p.units.find((u) => u.id === it.unit_id);
         ls.push({
           product_id: p.id, name: p.name, qty: String(it.qty), unit_cost: fromMinor(it.unit_cost ?? (p.cost ?? 0), d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
-          units: p.units || [], unit_id: unit ? String(unit.id) : '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
+          units: p.units || [], unit: p.unit, unit_id: unit ? String(unit.id) : '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
         });
       }
       setLines(ls);
@@ -119,7 +120,7 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
   const add = (p) => {
     setLines((ls) => (ls.some((l) => l.product_id === p.id) ? ls : [...ls, {
       product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(p.cost ?? 0, d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
-      units: p.units || [], unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
+      units: p.units || [], unit: p.unit, unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
     }]));
     setSearch('');
   };
@@ -209,7 +210,7 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
                   </div>
                 )}
               </td>
-              <td className="num muted">{l.track ? formatQty(l.stock) : '∞'}</td>
+              <td className="num muted">{l.track ? formatQty(l.stock) : '∞'}{l.track && packsText(l.stock, l, t) && <small className="packs">{packsText(l.stock, l, t)}</small>}</td>
               <td>{l.units.length ? (
                 <select value={l.unit_id} onChange={(e) => {
                   const u = l.units.find((x) => x.id === Number(e.target.value));

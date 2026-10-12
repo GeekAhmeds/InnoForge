@@ -8,6 +8,8 @@ import LabelsModal from '../components/Labels.jsx';
 import { sellScreens } from '../lib/screens.js';
 import { ModifierGroups, ProductKitchenFields } from '../components/Modifiers.jsx';
 import { has } from '../lib/features.js';
+import { packsText } from '../lib/packs.js';
+import { VariantEditor, saveVariants, useVariantState } from '../components/Variants.jsx';
 
 export default function Products() {
   const { t, settings, can } = useApp();
@@ -20,7 +22,7 @@ export default function Products() {
   const [labels, setLabels] = useState(false);
   const [categories, reloadCategories] = useLoad(() => api.categories.list(), []);
   const [list, reload] = useLoad(
-    () => (lowOnly ? api.products.lowStock() : api.products.list({ search, categoryId, includeInactive: true })),
+    () => (lowOnly ? api.products.lowStock() : api.products.list({ search, categoryId, includeInactive: true, grouped: true })),
     [search, categoryId, lowOnly],
   );
   const bookstore = settings.business_type === 'bookstore';
@@ -79,14 +81,15 @@ export default function Products() {
                     <b>{p.name}</b>
                     {p.author && <small className="muted"> — {p.author}</small>}
                     {!p.active && <small className="badge">{t('products.inactive')}</small>}
+                    {p.is_parent && <small className="badge info">👕 {t('variants.count', { n: p.variant_count })}</small>}
                   </td>
                   <td className="mono">{p.barcode}</td>
                   <td>{p.category_name && <span className="dot" style={{ background: p.category_color }} />}{p.category_name}</td>
-                  <td className="num">{m(p.price)}</td>
+                  <td className="num">{p.is_parent && p.min_price !== p.max_price ? `${m(p.min_price)} – ${m(p.max_price)}` : m(p.price)}</td>
                   {can('view_cost') && <td className="num muted">{m(p.cost)}</td>}
-                  <td className={`num ${p.track_stock && p.stock <= p.min_stock ? 'warn' : ''}`}>{p.track_stock ? formatQty(p.stock) : '∞'}</td>
+                  <td className={`num ${p.track_stock && p.stock <= p.min_stock ? 'warn' : ''}`}>{p.track_stock ? formatQty(p.stock) : '∞'}{p.track_stock && packsText(p.stock, p, t) && <small className="muted packs">{packsText(p.stock, p, t)}</small>}</td>
                   <td className="num">
-                    {!!p.track_stock && <button className="ghost sm" onClick={(e) => { e.stopPropagation(); setAdjusting(p); }}>± {t('products.adjust')}</button>}
+                    {!!p.track_stock && !p.is_parent && <button className="ghost sm" onClick={(e) => { e.stopPropagation(); setAdjusting(p); }}>± {t('products.adjust')}</button>}
                   </td>
                 </tr>
               ))}
@@ -97,7 +100,7 @@ export default function Products() {
       )}
 
       {editing && <ProductModal product={editing} categories={categories || []} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
-      {labels && list && <LabelsModal products={list} onClose={() => setLabels(false)} onChanged={reload} />}
+      {labels && <LabelsModal onClose={() => setLabels(false)} onChanged={reload} />}
       {adjusting && <AdjustModal product={adjusting} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); reload(); }} />}
     </div>
   );
@@ -137,6 +140,8 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     prices: Object.fromEntries(Object.entries(product.prices || {}).map(([k, v]) => [k, fromMinor(v, d)])),
   });
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
+  const [variants, setVariants] = useVariantState(product, d);
+  const isModel = !!variants.attributes.length;
   const [suppliers, setSuppliers] = useState(null);
   const [stations] = useLoad(() => (restaurant ? api.kitchenStations.list() : Promise.resolve([])), []);
   useEffect(() => { if (can('purchases')) api.suppliers.list({}).then(setSuppliers).catch(() => {}); }, [can]);
@@ -148,7 +153,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     try {
       // Users who cannot see suppliers leave the product's supplier as it is.
       const { supplier_id: supplierId, ...rest } = f;
-      await api.products.save({
+      const id = await api.products.save({
         ...rest,
         id: product.id,
         category_id: Number(f.category_id) || null,
@@ -160,7 +165,9 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         min_stock: Number(f.min_stock) || 0,
         units: f.units.map((u) => ({ ...u, factor: Number(u.factor), price: u.price === '' ? null : toMinor(u.price, d) })),
         prices: Object.fromEntries((priceLists || []).map((pl) => [pl.id, f.prices[pl.id] === '' || f.prices[pl.id] == null ? '' : toMinor(f.prices[pl.id], d)])),
+        ...(isModel ? { stock: 0 } : {}),
       });
+      await saveVariants(product.id || id, variants, d);
       notify(t('common.saved'));
       onSaved();
     } catch (err) {
@@ -236,10 +243,11 @@ function ProductModal({ product, categories, onClose, onSaved }) {
           </div>
         )}
         {restaurant && <ProductKitchenFields productId={product.id} f={f} setF={setF} />}
-        {f.track_stock && <>
+        {product.parent_id && <div className="span2 pay-customer">👕 {t('variants.ofModel')}</div>}
+        {f.track_stock && !isModel && <>
           {isNew
             ? <Field label={t('products.initialStock')}><input inputMode="decimal" value={f.stock} onChange={set('stock')} placeholder="0" /></Field>
-            : <Field label={t('products.stock')}><input disabled value={formatQty(product.stock)} /></Field>}
+            : <Field label={t('products.stock')} hint={packsText(product.stock, product, t)}><input disabled value={formatQty(product.stock)} /></Field>}
           <Field label={t('products.minStock')}><input inputMode="decimal" value={f.min_stock} onChange={set('min_stock')} /></Field>
         </>}
         {!!priceLists?.length && (
@@ -269,6 +277,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
           ))}
           {!f.units.length && <small className="muted">{t('units.hint')}</small>}
         </div>
+        {!product.parent_id && !f.by_weight && !f.is_ingredient && <VariantEditor product={product} state={variants} setState={setVariants} basePrice={f.price} />}
         <button hidden />
       </form>
     </Modal>

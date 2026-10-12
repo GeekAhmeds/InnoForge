@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS = {
   loyalty_min_redeem: 100,
   label_printer_name: '',
   label_size: '38x25',
+  label_layout: '', // barcode sticker design (JSON; '' = defaults) — see src/lib/labels.js
   kitchen_auto_send: true, // paying an order sends its unsent kitchen items (takeaway paid at once)
   kds_lan: false, // let tablets on the local network open the kitchen screen
   kds_port: 7799,
@@ -335,10 +336,11 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.uae_enabled) requireFeature('uae_einvoice');
       if (patch && 'uae_mode' in patch && !['export', 'asp'].includes(patch.uae_mode)) throw new PosError('INVALID_SETTING', 'uae_mode');
       if (patch && 'uae_emirate' in patch && patch.uae_emirate && !uaeDoc.EMIRATES.includes(patch.uae_emirate)) throw new PosError('INVALID_SETTING', 'uae_emirate');
-      if (patch && 'receipt_layout' in patch && str(patch.receipt_layout)) {
+      if (patch && 'label_size' in patch && !['38x25', '40x30', '50x25', '50x30', '58x40', '60x40', 'a4', 'a4_40', 'custom'].includes(patch.label_size)) throw new PosError('INVALID_SETTING', 'label_size');
+      for (const key of ['receipt_layout', 'label_layout']) if (patch && key in patch && str(patch[key])) {
         let layout = null;
-        try { layout = JSON.parse(patch.receipt_layout); } catch { /* checked below */ }
-        if (!layout || typeof layout !== 'object' || Array.isArray(layout) || String(patch.receipt_layout).length > 4000) throw new PosError('INVALID_SETTING', 'receipt_layout');
+        try { layout = JSON.parse(patch[key]); } catch { /* checked below */ }
+        if (!layout || typeof layout !== 'object' || Array.isArray(layout) || String(patch[key]).length > 4000) throw new PosError('INVALID_SETTING', key);
       }
       if (patch && 'zatca_env' in patch && !['sandbox', 'simulation', 'production'].includes(patch.zatca_env)) throw new PosError('INVALID_SETTING', 'zatca_env');
       // The kitchen screen key only changes through newKdsKey (forms send stale copies of it);
@@ -497,11 +499,22 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     const marks = ids.map(() => '?').join(',');
     const units = db.prepare(`SELECT * FROM product_units WHERE product_id IN (${marks}) ORDER BY factor`).all(...ids);
     const prices = db.prepare(`SELECT * FROM product_prices WHERE product_id IN (${marks})`).all(...ids);
-    return rows.map((r) => ({
-      ...r,
-      units: units.filter((u) => u.product_id === r.id).map(plain),
-      prices: Object.fromEntries(prices.filter((x) => x.product_id === r.id).map((x) => [x.price_list_id, x.price])),
-    }));
+    // Parents (products with variants): how many variants, their total stock and price range.
+    const parents = rows.filter((r) => r.attributes).map((r) => r.id);
+    const kids = parents.length ? db.prepare(`SELECT parent_id, COUNT(*) AS n, SUM(CASE WHEN track_stock = 1 THEN stock ELSE 0 END) AS stock, MIN(price) AS min_price, MAX(price) AS max_price
+      FROM products WHERE active = 1 AND parent_id IN (${parents.map(() => '?').join(',')}) GROUP BY parent_id`).all(...parents) : [];
+    return rows.map((r) => {
+      const k = kids.find((x) => x.parent_id === r.id);
+      return {
+        ...r,
+        attributes: parseJson(r.attributes, []),
+        variant: parseJson(r.variant, {}),
+        is_parent: !!r.attributes,
+        ...(r.attributes ? { variant_count: k?.n || 0, stock: k?.stock || 0, min_price: k?.min_price ?? r.price, max_price: k?.max_price ?? r.price } : {}),
+        units: units.filter((u) => u.product_id === r.id).map(plain),
+        prices: Object.fromEntries(prices.filter((x) => x.product_id === r.id).map((x) => [x.price_list_id, x.price])),
+      };
+    });
   }
 
   // Replaces a product's units / list prices when the editor sent them.
@@ -597,8 +610,38 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     }
   }
 
+  // ---------- variants (size / colour / flavour) ----------
+  // Fields every variant takes from its parent whenever the parent is saved.
+  const VARIANT_SHARED = ['name', 'category_id', 'unit', 'track_stock', 'kitchen', 'station_id', 'supplier_id', 'track_expiry', 'track_serial',
+    'is_ingredient', 'author', 'publisher', 'eta_item_type', 'eta_item_code', 'eta_unit', 'active'];
+  const variantLabel = (attributes, values) => attributes.map((a) => values[a.name]).filter(Boolean).join(' / ');
+  const variantName = (parentName, label) => (label ? `${parentName} — ${label}` : parentName);
+
+  /** Copies the parent's shared fields (and its price, where a variant has none of its own) to its variants. */
+  function syncVariants(parentId) {
+    const parent = db.prepare('SELECT * FROM products WHERE id = ?').get(parentId);
+    if (!parent?.attributes) return;
+    const attributes = parseJson(parent.attributes, []);
+    for (const v of db.prepare('SELECT * FROM products WHERE parent_id = ?').all(parentId)) {
+      const label = variantLabel(attributes, parseJson(v.variant, {})) || v.variant_label;
+      const f = Object.fromEntries(VARIANT_SHARED.map((k) => [k, parent[k]]));
+      f.name = variantName(parent.name, label);
+      f.variant_label = label;
+      if (!parent.active) f.active = 0;
+      else f.active = v.active; // a variant switched off on its own stays off
+      if (!v.own_price) f.price = parent.price;
+      const keys = Object.keys(f);
+      db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => f[k]), v.id);
+    }
+  }
+
   const products = {
-    list({ search = '', categoryId = null, includeInactive = false, top = false, forSale = false } = {}) {
+    /**
+     * Products. Normally every sellable row: variants are listed, their parents are not.
+     * `grouped` (the products page, the cashier's grid) lists parents instead of their
+     * variants — unless searching, when matching variants show too.
+     */
+    list({ search = '', categoryId = null, includeInactive = false, top = false, forSale = false, grouped = false } = {}) {
       requireUser();
       if (top) {
         // Best sellers of the last 30 days, for the cashier's quick tab.
@@ -613,6 +656,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (!includeInactive) where.push('p.active = 1');
       if (forSale) where.push('p.is_ingredient = 0');
       if (categoryId) { where.push('p.category_id = ?'); params.push(categoryId); }
+      if (!grouped) where.push("p.attributes = ''");
+      else if (!str(search)) where.push('p.parent_id IS NULL');
       if (str(search)) {
         where.push('(p.name LIKE ? OR p.barcode LIKE ? OR p.author LIKE ?)');
         const q = `%${str(search)}%`;
@@ -659,7 +704,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       requirePerm('products');
       const rows = ids?.length
         ? db.prepare(`SELECT id FROM products WHERE (barcode IS NULL OR barcode = '') AND id IN (${ids.map(() => '?').join(',')})`).all(...ids)
-        : db.prepare("SELECT id FROM products WHERE barcode IS NULL OR barcode = ''").all();
+        : db.prepare("SELECT id FROM products WHERE (barcode IS NULL OR barcode = '') AND attributes = ''").all();
       const check = (d12) => String((10 - ([...d12].reduce((sum, c, i) => sum + Number(c) * (i % 2 ? 3 : 1), 0) % 10)) % 10);
       let n = 0;
       transaction(db, () => {
@@ -724,12 +769,21 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       return transaction(db, () => {
         if (p.id) {
           const before = db.prepare('SELECT price, cost, active FROM products WHERE id = ?').get(p.id);
+          // A variant's shared fields come from its parent (saved there); its own are price, cost, barcode, stock levels.
+          const parentId = db.prepare('SELECT parent_id FROM products WHERE id = ?').get(p.id)?.parent_id;
+          if (parentId) {
+            const parent = db.prepare('SELECT * FROM products WHERE id = ?').get(parentId);
+            for (const k of VARIANT_SHARED) if (k !== 'name' && k !== 'active') fields[k] = parent[k];
+            fields.name = db.prepare('SELECT name FROM products WHERE id = ?').get(p.id).name;
+            db.prepare('UPDATE products SET own_price = ? WHERE id = ?').run(fields.price !== parent.price ? 1 : 0, p.id);
+          }
           db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), p.id);
           const changes = {};
           for (const k of ['price', 'cost', 'active']) if (before && before[k] !== fields[k]) changes[k] = [before[k], fields[k]];
           audit(changes.price ? 'product_price_change' : 'product_update', { entity: 'product', entityId: p.id, details: { name: fields.name, ...changes } });
           saveUnitsAndPrices(p.id, p);
           saveModifiersAndRecipe(p.id, p);
+          syncVariants(p.id);
           return p.id;
         }
         const id = Number(
@@ -746,7 +800,9 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     },
     remove(id) {
       requirePerm('products');
-      const used = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(id);
+      for (const v of db.prepare('SELECT id FROM products WHERE parent_id = ?').all(id)) products.remove(v.id);
+      const used = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(id)
+        || db.prepare('SELECT 1 FROM products WHERE parent_id = ? LIMIT 1').get(id);
       const name = db.prepare('SELECT name FROM products WHERE id = ?').get(id)?.name;
       if (used) db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(id);
       else db.prepare('DELETE FROM products WHERE id = ?').run(id);
@@ -762,7 +818,85 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     },
     lowStock() {
       requireUser();
-      return plainAll(db.prepare(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.track_stock = 1 AND p.stock <= p.min_stock ORDER BY p.stock`).all());
+      return plainAll(db.prepare(`${PRODUCT_SELECT} WHERE p.active = 1 AND p.track_stock = 1 AND p.attributes = '' AND p.stock <= p.min_stock ORDER BY p.stock`).all());
+    },
+    /** A parent product with its attributes and every variant (for the editor and the cashier's picker). */
+    variants(parentId) {
+      requireUser();
+      const parent = products.get(parentId);
+      const where = 'WHERE p.parent_id = ?';
+      let rows = withUnitsAndPrices(plainAll(db.prepare(`${PRODUCT_SELECT} ${where} ORDER BY p.id`).all(parentId)));
+      if (multiWarehouse()) {
+        const wh = saleWarehouse();
+        rows = rows.map((r) => (r.track_stock ? { ...r, total_stock: r.stock, stock: whQty(wh, r.id) } : r));
+      }
+      if (!can('view_cost')) rows = rows.map(({ cost, ...r }) => r);
+      return { parent, attributes: parent.attributes, variants: rows };
+    },
+    /**
+     * Turns a product into a parent with these attributes ([{ name, values }]) and creates /
+     * updates its variants: [{ id?, values: { attr: value }, barcode, price (null = parent's), stock (new only), active }].
+     * Variants left out are switched off (or deleted when never used). Attributes [] undoes it.
+     */
+    saveVariants({ parentId, attributes = [], variants = [] } = {}) {
+      const u = requirePerm('products').user;
+      const parent = db.prepare('SELECT * FROM products WHERE id = ?').get(parentId);
+      if (!parent) throw new PosError('NOT_FOUND');
+      if (parent.parent_id) throw new PosError('VARIANT_OF_VARIANT');
+      const attrs = (Array.isArray(attributes) ? attributes : []).map((a) => ({
+        name: str(a.name), values: [...new Set((Array.isArray(a.values) ? a.values : String(a.values || '').split(/[,،\n]/)).map(str).filter(Boolean))],
+      })).filter((a) => a.name && a.values.length);
+      if (attrs.length > 3 || new Set(attrs.map((a) => a.name)).size !== attrs.length) throw new PosError('INVALID_VARIANTS');
+      const existing = db.prepare('SELECT * FROM products WHERE parent_id = ?').all(parentId);
+      if (attrs.length && !parent.attributes && !existing.length && parent.track_stock && parent.stock) throw new PosError('VARIANT_PARENT_STOCK');
+      return transaction(db, () => {
+        const keep = [];
+        if (attrs.length) {
+          const seen = new Set();
+          for (const v of Array.isArray(variants) ? variants : []) {
+            const values = {};
+            for (const a of attrs) {
+              const val = str(v.values?.[a.name]);
+              if (!a.values.includes(val)) throw new PosError('INVALID_VARIANTS');
+              values[a.name] = val;
+            }
+            const key = JSON.stringify(values);
+            if (seen.has(key)) throw new PosError('INVALID_VARIANTS');
+            seen.add(key);
+            const label = variantLabel(attrs, values);
+            const own = v.price !== '' && v.price != null;
+            const price = own ? int(v.price, -1) : parent.price;
+            if (price < 0) throw new PosError('INVALID_PRICE', label);
+            const barcode = str(v.barcode) || null;
+            const id = int(v.id) && existing.some((e) => e.id === int(v.id)) ? int(v.id) : null;
+            if (barcode && (db.prepare('SELECT 1 FROM products WHERE barcode = ? AND id != ?').get(barcode, id || 0)
+              || db.prepare('SELECT 1 FROM product_units WHERE barcode = ?').get(barcode))) throw new PosError('DUPLICATE_BARCODE', label);
+            const shared = Object.fromEntries(VARIANT_SHARED.map((k) => [k, parent[k]]));
+            const row = { ...shared, name: variantName(parent.name, label), parent_id: parentId, variant: key, variant_label: label, own_price: own ? 1 : 0, price, barcode,
+              active: parent.active && v.active !== false ? 1 : 0 };
+            const keys = Object.keys(row);
+            if (id) {
+              db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => row[k]), id);
+              keep.push(id);
+            } else {
+              const newId = Number(db.prepare(`INSERT INTO products (${keys.join(', ')}, cost, min_stock, stock) VALUES (${keys.map(() => '?').join(', ')}, ?, ?, 0)`)
+                .run(...keys.map((k) => row[k]), parent.cost, parent.min_stock).lastInsertRowid);
+              // The parent's packs (carton…) apply to each variant; their barcodes are per variant, so none is copied.
+              for (const un of db.prepare('SELECT name, factor, price FROM product_units WHERE product_id = ?').all(parentId)) {
+                db.prepare('INSERT INTO product_units (product_id, name, factor, price) VALUES (?, ?, ?, ?)').run(newId, un.name, un.factor, un.price);
+              }
+              const initial = num(v.stock);
+              if (initial && parent.track_stock) moveStock(newId, initial, 'purchase', null, u.id);
+              keep.push(newId);
+            }
+          }
+          if (!keep.length) throw new PosError('INVALID_VARIANTS');
+        }
+        for (const e of existing) if (!keep.includes(e.id)) products.remove(e.id);
+        db.prepare('UPDATE products SET attributes = ? WHERE id = ?').run(attrs.length ? JSON.stringify(attrs) : '', parentId);
+        audit('product_variants', { entity: 'product', entityId: parentId, details: { name: parent.name, variants: keep.length, attributes: attrs.map((a) => a.name) } });
+        return products.variants(parentId);
+      });
     },
   };
 
@@ -1040,6 +1174,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (!(qty > 0)) throw new PosError('INVALID_QTY');
       const p = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
       if (!p) throw new PosError('PRODUCT_NOT_FOUND');
+      if (p.attributes) throw new PosError('PICK_VARIANT', p.name);
       const unit = it.unit_id ? db.prepare('SELECT * FROM product_units WHERE id = ? AND product_id = ?').get(it.unit_id, p.id) : null;
       if (it.unit_id && !unit) throw new PosError('INVALID_UNIT');
       const factor = unit?.factor ?? 1;
@@ -2528,7 +2663,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       requireUser();
       const q = `%${str(search)}%`;
       const rows = plainAll(db.prepare(`SELECT id, name, barcode, unit, stock, min_stock, cost FROM products
-        WHERE track_stock = 1 AND active = 1 AND (name LIKE ? OR barcode LIKE ?) ORDER BY name LIMIT 1000`).all(q, q));
+        WHERE track_stock = 1 AND attributes = '' AND active = 1 AND (name LIKE ? OR barcode LIKE ?) ORDER BY name LIMIT 1000`).all(q, q));
       const split = new Map();
       for (const r of db.prepare('SELECT warehouse_id, product_id, qty FROM warehouse_stock').all()) {
         if (!split.has(r.product_id)) split.set(r.product_id, {});
@@ -2604,7 +2739,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         // One warehouse: the product total. Several: what this warehouse holds.
         const expected = multiWarehouse() ? 'COALESCE((SELECT qty FROM warehouse_stock w WHERE w.product_id = products.id AND w.warehouse_id = ?), 0)' : 'stock';
         db.prepare(`INSERT INTO stock_count_items (count_id, product_id, expected)
-          SELECT ?, id, ${expected} FROM products WHERE active = 1 AND track_stock = 1 ${categoryId ? 'AND category_id = ?' : ''}`)
+          SELECT ?, id, ${expected} FROM products WHERE active = 1 AND track_stock = 1 AND attributes = '' ${categoryId ? 'AND category_id = ?' : ''}`)
           .run(...[id, ...(multiWarehouse() ? [wh] : []), ...(categoryId ? [categoryId] : [])]);
         audit('count_start', { entity: 'count', entityId: id });
         return getCount(id);
@@ -2718,17 +2853,36 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         };
         const stock = r.stock === '' || r.stock == null ? null : num(r.stock, NaN);
         if (Number.isNaN(stock)) { result.errors.push({ row: line, code: 'INVALID_QTY', name }); return; }
+        // Optional pack (carton): name + how many base units, price and barcode.
+        const packName = str(r.pack_name);
+        const packFactor = r.pack_factor === '' || r.pack_factor == null ? null : num(r.pack_factor, NaN);
+        const packPrice = toMinorUnits(r.pack_price);
+        const packBarcode = str(r.pack_barcode) || null;
+        if ((packName || packFactor != null) && !(packName && packFactor > 0)) { result.errors.push({ row: line, code: 'INVALID_UNIT', name }); return; }
+        if (Number.isNaN(packPrice) || (packPrice != null && packPrice < 0)) { result.errors.push({ row: line, code: 'INVALID_PRICE', name }); return; }
+        if (packBarcode && (packBarcode === barcode || db.prepare('SELECT 1 FROM products WHERE barcode = ? AND id != ?').get(packBarcode, existing?.id || 0)
+          || db.prepare('SELECT 1 FROM product_units WHERE barcode = ? AND (product_id != ? OR name != ?)').get(packBarcode, existing?.id || 0, packName))) {
+          result.errors.push({ row: line, code: 'DUPLICATE_BARCODE', name }); return;
+        }
+        const savePack = (productId) => {
+          if (!packName) return;
+          const unit = db.prepare('SELECT id FROM product_units WHERE product_id = ? AND name = ?').get(productId, packName);
+          if (unit) db.prepare('UPDATE product_units SET factor = ?, price = ?, barcode = COALESCE(?, barcode) WHERE id = ?').run(packFactor, packPrice, packBarcode, unit.id);
+          else db.prepare('INSERT INTO product_units (product_id, name, factor, barcode, price) VALUES (?, ?, ?, ?, ?)').run(productId, packName, packFactor, packBarcode, packPrice);
+        };
         if (existing) {
           if (!updateExisting) { result.skipped++; return; }
           const keys = Object.keys(fields);
           db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), existing.id);
           // The sheet's stock is the counted quantity: record the difference as an adjustment.
           if (stock != null && fields.track_stock && stock !== existing.stock) moveStock(existing.id, stock - existing.stock, 'adjust', null, u.id);
+          savePack(existing.id);
           result.updated++;
         } else {
           const keys = Object.keys(fields);
           const id = Number(db.prepare(`INSERT INTO products (${keys.join(', ')}, stock) VALUES (${keys.map(() => '?').join(', ')}, 0)`).run(...keys.map((k) => fields[k])).lastInsertRowid);
           if (stock && fields.track_stock) moveStock(id, stock, 'purchase', null, u.id);
+          savePack(id);
           result.created++;
         }
       });
@@ -3339,7 +3493,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       requirePerm('purchases');
       const rows = db.prepare(`SELECT p.id AS product_id, p.name, p.stock, p.min_stock, p.cost, p.unit, p.supplier_id, s.name AS supplier_name
         FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
-        WHERE p.active = 1 AND p.track_stock = 1 AND p.min_stock > 0 AND p.stock <= p.min_stock ORDER BY s.name, p.name`).all();
+        WHERE p.active = 1 AND p.track_stock = 1 AND p.attributes = '' AND p.min_stock > 0 AND p.stock <= p.min_stock ORDER BY s.name, p.name`).all();
       const groups = new Map();
       for (const r of rows) {
         const key = r.supplier_id || 0;
@@ -3420,8 +3574,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'completed' AND o.completed_at >= ?
         GROUP BY COALESCE(i.product_id, i.name) ORDER BY total DESC LIMIT 5`).all(today)),
       shift: shift ? { id: shift.id, opened_at: shift.opened_at, expectedCash: shiftSummary(shift.id).expectedCash } : null,
-      lowStock: plainAll(db.prepare(`SELECT id, name, stock, min_stock, unit FROM products WHERE active = 1 AND track_stock = 1 AND min_stock > 0 AND stock <= min_stock ORDER BY stock - min_stock LIMIT 8`).all()),
-      lowStockCount: db.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND track_stock = 1 AND min_stock > 0 AND stock <= min_stock').get().n,
+      lowStock: plainAll(db.prepare(`SELECT id, name, stock, min_stock, unit FROM products WHERE active = 1 AND track_stock = 1 AND attributes = '' AND min_stock > 0 AND stock <= min_stock ORDER BY stock - min_stock LIMIT 8`).all()),
+      lowStockCount: db.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND track_stock = 1 AND attributes = '' AND min_stock > 0 AND stock <= min_stock").get().n,
       expiring: db.prepare("SELECT COUNT(*) AS n FROM batches WHERE qty > 0 AND expiry_date IS NOT NULL AND expiry_date <= date('now', 'localtime', '+30 days')").get().n,
       receivables, overdueAmount: overdue.reduce((sum, d) => sum + d.open, 0), overdueCount: overdue.length,
       chequesDue: plainAll(db.prepare(`SELECT p.id, p.amount, p.cheque_no, p.bank, p.cheque_due, c.name AS customer_name FROM customer_payments p JOIN customers c ON c.id = p.customer_id

@@ -1,57 +1,101 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
-import { barcodeSvg } from '../lib/barcode.js';
 import { formatMoney } from '../lib/money.js';
+import { DEFAULT_LABEL, LABEL_PARTS, LABEL_SIZES, labelLayout, labelSetting, labelSize, labelsHtml, sizeName } from '../lib/labels.js';
 import { Field, Modal, Toggle, useApp } from './ui.jsx';
 
-// Label sizes in mm. 'a4' prints a 3×8 sheet of 70×37mm stickers on a normal printer.
-const SIZES = { '38x25': [38, 25], '50x30': [50, 30], '58x40': [58, 40], a4: [70, 37] };
+const PX_PER_MM = 96 / 25.4;
+const ZOOM = 2.6;
 
-function labelsHtml(labels, opts, settings) {
-  const [w, h] = SIZES[opts.size] || SIZES['38x25'];
-  const sheet = opts.size === 'a4';
-  const one = (l) => `<div class="lb">
-    ${opts.business ? `<div class="biz">${escape(settings.business_name)}</div>` : ''}
-    ${opts.name ? `<div class="nm">${escape(l.name)}</div>` : ''}
-    <div class="bc">${barcodeSvg(l.code, { height: 40 })}</div>
-    ${opts.price ? `<div class="pr">${formatMoney(l.price, settings)}</div>` : ''}
-  </div>`;
-  const body = labels.flatMap((l) => Array.from({ length: l.copies }, () => one(l))).join('');
-  return `<!doctype html><html dir="rtl"><head><meta charset="utf-8"><style>
-    @page { size: ${sheet ? 'A4' : `${w}mm ${h}mm`}; margin: ${sheet ? '10mm 5mm' : '0'}; }
-    * { box-sizing: border-box; margin: 0; }
-    body { font-family: Tahoma, Arial, sans-serif; ${sheet ? 'display: grid; grid-template-columns: repeat(3, 70mm); grid-auto-rows: 37mm;' : ''} }
-    .lb { width: ${w}mm; height: ${h}mm; padding: 1.2mm 1.5mm; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; ${sheet ? '' : 'page-break-after: always;'} }
-    .biz { font-size: 6.5pt; color: #333; }
-    .nm { font-size: ${h < 30 ? 7 : 8.5}pt; font-weight: bold; text-align: center; max-height: 2.4em; overflow: hidden; line-height: 1.2; }
-    .bc { width: 100%; flex: 1; min-height: 0; display: flex; }
-    .bc svg { width: 100%; height: 100%; }
-    .pr { font-size: ${h < 30 ? 9 : 11}pt; font-weight: bold; }
-  </style></head><body>${body}</body></html>`;
+/** The design panel: what the sticker shows, sizes, and a live preview of one sticker. */
+function LabelDesigner({ size, setSize, layout, setLayout, sample, onSave }) {
+  const { t, settings, can } = useApp();
+  const set = (patch) => setLayout((l) => labelLayout({ label_layout: JSON.stringify({ ...l, ...patch }) }));
+  const [w, h] = labelSize(size, layout);
+  const html = labelsHtml([sample], { size, layout, settings, preview: true }).replace('</style>', `body { zoom: ${ZOOM}; }</style>`);
+  return (
+    <div className="label-designer">
+      <div>
+        <div className="grid2">
+          <Field label={t('labels.size')}>
+            <select value={size} onChange={(e) => setSize(e.target.value)}>
+              {Object.keys(LABEL_SIZES).map((k) => <option key={k} value={k}>{sizeName(k, t)}</option>)}
+            </select>
+          </Field>
+          {size === 'custom' ? (
+            <div className="row">
+              <Field label={t('labels.width')}><input type="number" min="20" max="120" key={layout.customW} defaultValue={layout.customW} onBlur={(e) => set({ customW: e.target.value })} /></Field>
+              <Field label={t('labels.height')}><input type="number" min="10" max="100" key={layout.customH} defaultValue={layout.customH} onBlur={(e) => set({ customH: e.target.value })} /></Field>
+            </div>
+          ) : <span />}
+        </div>
+        <div className="row wrap">
+          {LABEL_PARTS.map((k) => <Toggle key={k} checked={layout.show[k]} onChange={(v) => set({ show: { ...layout.show, [k]: v } })} label={t(`labels.part.${k}`)} />)}
+        </div>
+        {layout.show.custom && <Field label={t('labels.customText')}><input value={layout.customText} placeholder={t('labels.customHint')} onChange={(e) => set({ customText: e.target.value })} /></Field>}
+        <div className="grid3">
+          <Field label={`${t('labels.nameSize')} (${layout.nameSize})`}><input type="range" min="5" max="16" step="0.5" value={layout.nameSize} onChange={(e) => set({ nameSize: Number(e.target.value) })} /></Field>
+          <Field label={`${t('labels.priceSize')} (${layout.priceSize})`}><input type="range" min="6" max="22" step="0.5" value={layout.priceSize} onChange={(e) => set({ priceSize: Number(e.target.value) })} /></Field>
+          <Field label={`${t('labels.bars')} (${layout.bars}%)`}><input type="range" min="20" max="75" value={layout.bars} onChange={(e) => set({ bars: Number(e.target.value) })} /></Field>
+        </div>
+        <div className="row wrap">
+          <Toggle checked={layout.currency} onChange={(v) => set({ currency: v })} label={t('labels.currency')} />
+          <Toggle checked={layout.rotate} onChange={(v) => set({ rotate: v })} label={t('labels.rotate')} />
+          <Toggle checked={layout.border} onChange={(v) => set({ border: v })} label={t('labels.border')} />
+        </div>
+        <div className="row">
+          {can('settings') && <button type="button" onClick={onSave}>💾 {t('labels.saveDesign')}</button>}
+          <button type="button" className="ghost" onClick={() => setLayout(labelLayout({ label_layout: JSON.stringify({ ...DEFAULT_LABEL, customW: layout.customW, customH: layout.customH }) }))}>↺ {t('rdesign.reset')}</button>
+        </div>
+      </div>
+      <div className="label-preview-box">
+        <small className="muted">{t('rdesign.preview')} — {w} × {h} mm</small>
+        <iframe title={t('rdesign.preview')} srcDoc={html} sandbox="" style={{ width: Math.ceil(w * PX_PER_MM * ZOOM) + 4, height: Math.ceil(h * PX_PER_MM * ZOOM) + 4 }} />
+      </div>
+    </div>
+  );
 }
 
-const escape = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-
 /** Choose products and copies, then print barcode stickers. */
-export default function LabelsModal({ products, onClose, onChanged }) {
-  const { t, tErr, notify, settings, printDoc, can } = useApp();
+export default function LabelsModal({ onClose, onChanged }) {
+  const { t, tErr, notify, settings, printDoc, can, reloadSettings } = useApp();
   const [copies, setCopies] = useState({});
   const [filter, setFilter] = useState('');
-  const [opts, setOpts] = useState({ size: settings.label_size || '38x25', name: true, price: true, business: false });
+  const [size, setSize] = useState(LABEL_SIZES[settings.label_size] !== undefined ? settings.label_size : '38x25');
+  const [layout, setLayout] = useState(() => labelLayout(settings));
+  const [designing, setDesigning] = useState(false);
+  // Every sellable row, variants included (each size / colour has its own barcode).
+  const [products, setProducts] = useState([]);
+  const [version, setVersion] = useState(0);
+  useEffect(() => { api.products.list({}).then(setProducts).catch((err) => notify(tErr(err), 'error')); }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
   // Units with their own barcode (e.g. a carton) get their own label rows.
+  // A variant's sticker shows the model name, with its size / colour on its own line.
+  const modelName = (p) => (p.variant_label && p.name.endsWith(` — ${p.variant_label}`) ? p.name.slice(0, -(p.variant_label.length + 3)) : p.name);
   const rows = useMemo(() => products.flatMap((p) => [
-    { key: `p${p.id}`, id: p.id, name: p.name, code: p.barcode, price: p.price, stock: p.stock },
-    ...(p.units || []).filter((u) => u.barcode).map((u) => ({ key: `u${u.id}`, id: p.id, name: `${p.name} (${u.name})`, code: u.barcode, price: u.price ?? Math.round(p.price * u.factor), stock: null })),
+    { key: `p${p.id}`, id: p.id, name: p.name, label: modelName(p), attrs: p.variant_label || '', code: p.barcode, price: p.price, stock: p.stock },
+    ...(p.units || []).filter((u) => u.barcode).map((u) => ({ key: `u${u.id}`, id: p.id, name: `${p.name} (${u.name})`, label: `${modelName(p)} (${u.name})`, attrs: p.variant_label || '', code: u.barcode, price: u.price ?? Math.round(p.price * u.factor), stock: null })),
   ]), [products]);
   const shown = rows.filter((r) => !filter || r.name.includes(filter) || (r.code || '').includes(filter));
   const missing = products.filter((p) => !p.barcode).length;
   const chosen = rows.filter((r) => r.code && Number(copies[r.key]) > 0).map((r) => ({ ...r, copies: Number(copies[r.key]) }));
   const total = chosen.reduce((s, r) => s + r.copies, 0);
+  const sample = chosen[0] || rows.find((r) => r.code) || { name: t('rdesign.sampleItem1'), attrs: '', code: '6221000000011', price: 1500 };
+
+  async function saveDesign() {
+    try {
+      await api.settings.save({ label_layout: labelSetting(layout), label_size: size });
+      await reloadSettings();
+      notify(t('common.saved'));
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  }
 
   async function generate() {
     try {
       const n = await api.products.generateBarcodes({});
       notify(t('labels.generated', { n }));
+      setVersion((v) => v + 1);
       onChanged?.();
     } catch (err) {
       notify(tErr(err), 'error');
@@ -65,21 +109,13 @@ export default function LabelsModal({ products, onClose, onChanged }) {
         <span className="spacer" />
         <button onClick={() => setCopies(Object.fromEntries(shown.filter((r) => r.code).map((r) => [r.key, 1])))}>{t('labels.oneEach')}</button>
         <button onClick={() => setCopies(Object.fromEntries(shown.filter((r) => r.code && r.stock > 0).map((r) => [r.key, Math.ceil(r.stock)])))}>{t('labels.byStock')}</button>
-        <button className="primary" disabled={!total} onClick={() => printDoc(labelsHtml(chosen, opts, settings), settings.label_printer_name)}>🖨 {t('common.print')}</button>
+        <button className="primary" disabled={!total} onClick={() => printDoc(labelsHtml(chosen, { size, layout, settings }), settings.label_printer_name)}>🖨 {t('common.print')}</button>
       </>}>
-      <div className="grid3">
-        <Field label={t('labels.size')}>
-          <select value={opts.size} onChange={(e) => setOpts({ ...opts, size: e.target.value })}>
-            {Object.keys(SIZES).map((k) => <option key={k} value={k}>{k === 'a4' ? t('labels.a4') : `${k.replace('x', ' × ')} mm`}</option>)}
-          </select>
-        </Field>
-        <div className="row wrap">
-          <Toggle checked={opts.name} onChange={(v) => setOpts({ ...opts, name: v })} label={t('common.name')} />
-          <Toggle checked={opts.price} onChange={(v) => setOpts({ ...opts, price: v })} label={t('pos.price')} />
-          <Toggle checked={opts.business} onChange={(v) => setOpts({ ...opts, business: v })} label={t('setup.businessName')} />
-        </div>
-        <input placeholder={t('common.search')} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="row">
+        <input className="grow" placeholder={t('common.search')} value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button type="button" className={designing ? 'on' : ''} onClick={() => setDesigning((x) => !x)}>🎨 {t('labels.design')} ({sizeName(size, t)})</button>
       </div>
+      {designing && <LabelDesigner size={size} setSize={setSize} layout={layout} setLayout={setLayout} sample={sample} onSave={saveDesign} />}
       {missing > 0 && can('products') && (
         <div className="pay-customer"><span>{t('labels.missing', { n: missing })}</span><button type="button" onClick={generate}>⚙ {t('labels.generate')}</button></div>
       )}
@@ -94,7 +130,6 @@ export default function LabelsModal({ products, onClose, onChanged }) {
           ))}</tbody>
         </table>
       </div>
-      {chosen[0] && <div className="label-preview" dangerouslySetInnerHTML={{ __html: barcodeSvg(chosen[0].code, { height: 40 }) }} />}
     </Modal>
   );
 }
