@@ -2,7 +2,7 @@
 # Pulls the POS version marked "latest" on GitHub Releases into the update folder that
 # https://pos.0x01source.com:9990/updates/ serves. Runs every 10 minutes (systemd timer
 # installed by install-inno.sh). Pre-releases are ignored: a version reaches customers only
-# after someone ticks «Set as the latest release» on GitHub.
+# after someone ticks «Set as the latest release» on GitHub (or runs it once with TAG=pos-v…).
 #
 # Safe swap: files are downloaded to a temp folder on the same disk, sizes checked, installers
 # moved in first and the latest*.yml files last, so an app never sees a version whose file is
@@ -18,7 +18,9 @@ AUTH=()
 
 log() { echo "[innoforge-updates] $*"; }
 
-json=$(curl -fsSL --max-time 30 "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/releases/latest") || { log "GitHub not reachable or no latest release"; exit 0; }
+# TAG=pos-v0.1.44 innoforge-updates-sync  → publish that exact release now (even a pre-release).
+if [ -n "${TAG:-}" ]; then where="tags/$TAG"; else where="latest"; fi
+json=$(curl -fsSL --max-time 30 "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/releases/$where") || { log "GitHub not reachable or no latest release"; exit 0; }
 tag=$(printf '%s' "$json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
 case "$tag" in pos-v*) ;; *) log "latest release $tag is not a POS release — nothing to do"; exit 0;; esac
 current=$(cat "$DEST/.release" 2>/dev/null || true)
