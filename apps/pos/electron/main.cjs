@@ -17,6 +17,7 @@ const { createRemote } = require('./remote.cjs');
 const { createLanServer } = require('./lan-server.cjs');
 const { createEtaSubmitter } = require('./eta-submitter.cjs');
 const { createZatcaSubmitter } = require('./zatca-submitter.cjs');
+const { createUaeSubmitter } = require('./uae-submitter.cjs');
 
 
 // Lets a portable install or tests keep data in a chosen folder.
@@ -30,6 +31,7 @@ let remoteInfo = null; // client mode: what the main computer said last (license
 let lanServer = null; // server mode
 let etaSubmitter = null; // e-invoices go out from the computer that holds the data
 let zatcaSubmitter = null;
+let uaeSubmitter = null;
 let mainWindow;
 let licenses;
 let license;
@@ -125,6 +127,8 @@ function boot() {
     zatcaSubmitter = createZatcaSubmitter({ queue: services.zatcaQueue, log: (...a) => console.error(...a), version: app.getVersion() });
     zatcaSubmitter.start();
     setTimeout(() => { if (licenseOk() && services.settings.get().zatca_auto) zatcaSubmitter.run(); }, 25000).unref?.();
+    uaeSubmitter = createUaeSubmitter({ queue: services.uaeQueue, log: (...a) => console.error(...a) });
+    uaeSubmitter.start();
   }
   kdsServer = createKdsServer({ services: svc, customerState: () => customerState });
   kdsServer.start().catch((err) => console.error('kitchen screen server', err));
@@ -467,6 +471,36 @@ ipcMain.handle('pos:zatcaRun', async () => {
   }
 });
 
+// ---------- UAE e-invoice ----------
+ipcMain.handle('pos:uaeRun', async () => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    if (!licenseOk()) throw new PosError('LICENSE_REQUIRED');
+    services.requirePerm('reports');
+    services.license.requireFeature('uae_einvoice');
+    return ok({ ...(await uaeSubmitter.run()), last: uaeSubmitter.state() });
+  } catch (err) {
+    return fail(err);
+  }
+});
+/** Saves the waiting documents as XML files (for an ASP portal upload) and marks them exported. */
+ipcMain.handle('pos:uaeExport', async () => {
+  try {
+    if (remote) throw new PosError('CLIENT_MODE');
+    services.requirePerm('settings');
+    services.license.requireFeature('uae_einvoice');
+    const docs = services.uaeQueue.toSend(1000);
+    if (!docs.length) return ok({ count: 0 });
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+    if (canceled || !filePaths[0]) return ok({ count: 0 });
+    for (const d of docs) fs.writeFileSync(path.join(filePaths[0], `${d.doc_no.replace(/[^\w.-]+/g, '_')}_${d.uuid}.xml`), d.xml);
+    services.uae.markExported(docs.map((d) => d.id));
+    return ok({ count: docs.length, folder: filePaths[0] });
+  } catch (err) {
+    return fail(err);
+  }
+});
+
 ipcMain.handle('pos:printers', async () => {
   try {
     return ok((await mainWindow.webContents.getPrintersAsync()).map((p) => ({ name: p.name, displayName: p.displayName || p.name, isDefault: p.isDefault })));
@@ -669,6 +703,7 @@ if (!app.requestSingleInstanceLock()) {
     lanServer?.stop();
     etaSubmitter?.stop();
     zatcaSubmitter?.stop();
+    uaeSubmitter?.stop();
     try { db?.close(); } catch { /* already closed */ }
     app.quit();
   });

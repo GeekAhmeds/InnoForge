@@ -9,6 +9,7 @@ import { GiftCards } from '../components/Coupons.jsx';
 import { Empty, Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { has } from '../lib/features.js';
+import { EMIRATES } from '../components/Uae.jsx';
 
 export default function Customers() {
   const { t } = useApp();
@@ -193,9 +194,10 @@ function CustomerModal({ customer, onClose, onSaved }) {
   const { t, tErr, notify, settings, can } = useApp();
   const isAdmin = can('customers_edit');
   const d = settings.decimals;
-  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '', eta: parseEta(customer.eta), zatca: parseEta(customer.zatca) });
+  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '', eta: parseEta(customer.eta), zatca: parseEta(customer.zatca), uae: parseEta(customer.uae) });
   const setEta = (k) => (e) => setF((x) => ({ ...x, eta: { ...x.eta, [k]: e.target.value } }));
   const setZ = (k) => (e) => setF((x) => ({ ...x, zatca: { ...x.zatca, [k]: e.target.value } }));
+  const setU = (k) => (e) => setF((x) => ({ ...x, uae: { ...x.uae, [k]: e.target.value } }));
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
   async function save(e) {
@@ -262,6 +264,22 @@ function CustomerModal({ customer, onClose, onSaved }) {
               <Field label={t('zatcaKey.zatca_district')}><input value={f.zatca.district || ''} onChange={setZ('district')} /></Field>
               <Field label={t('zatcaKey.zatca_city')}><input value={f.zatca.city || ''} onChange={setZ('city')} /></Field>
               <Field label={t('zatcaKey.zatca_postal')} hint={t('zatca.fiveDigits')}><input dir="ltr" maxLength={5} value={f.zatca.postal || ''} onChange={setZ('postal')} /></Field>
+            </div>
+          </div>
+        )}
+        {settings.country === 'AE' && has('uae_einvoice') && (
+          <div className="span2 sub-section">
+            <h4>🇦🇪 {t('uae.buyer')}</h4>
+            <p className="muted small">{t('uae.buyerHint')}</p>
+            <div className="grid3">
+              <Field label={t('uaeKey.uae_street')}><input value={f.uae.street || ''} onChange={setU('street')} /></Field>
+              <Field label={t('uaeKey.uae_city')}><input value={f.uae.city || ''} onChange={setU('city')} /></Field>
+              <Field label={t('uaeKey.uae_emirate')}>
+                <select value={f.uae.emirate || ''} onChange={setU('emirate')}><option value="">—</option>{EMIRATES.map((x) => <option key={x} value={x}>{t(`emirate.${x}`)}</option>)}</select>
+              </Field>
+              <Field label={t('uae.tl')}><input dir="ltr" value={f.uae.tl || ''} onChange={setU('tl')} /></Field>
+              <Field label={t('uae.tlAuthority')}><input value={f.uae.authority || ''} onChange={setU('authority')} /></Field>
+              <Field label={t('uae.buyerRef')}><input value={f.uae.reference || ''} onChange={setU('reference')} /></Field>
             </div>
           </div>
         )}

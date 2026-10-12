@@ -28,6 +28,8 @@ export const etaRun = () => unwrap(bridge.etaRun());
 export const etaTest = () => unwrap(bridge.etaTest());
 export const zatcaOnboard = (args) => unwrap(bridge.zatcaOnboard(args));
 export const zatcaRun = () => unwrap(bridge.zatcaRun());
+export const uaeRun = () => unwrap(bridge.uaeRun());
+export const uaeExport = () => unwrap(bridge.uaeExport());
 export const copyText = (text) => unwrap(bridge.copy(text));
 export const appVersion = () => unwrap(bridge.version());
 export const excelTemplate = (kind) => unwrap(bridge.excelTemplate(kind));

@@ -13,15 +13,16 @@ import LicenseTab from '../components/License.jsx';
 import Network from '../components/Network.jsx';
 import EtaSettings from '../components/Eta.jsx';
 import ZatcaSettings from '../components/Zatca.jsx';
+import UaeSettings from '../components/Uae.jsx';
 import { has } from '../lib/features.js';
 import { COUNTRIES, COUNTRY_FLAGS, countryName, countryPreset, einvoiceOf } from '../lib/countries.js';
 
-const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'network', 'eta', 'zatca', 'data', 'license', 'support'];
+const TABS = ['general', 'taxes', 'receipt', 'priceLists', 'promos', 'users', 'audit', 'tables', 'kitchen', 'devices', 'network', 'eta', 'zatca', 'uae', 'data', 'license', 'support'];
 // Which permission opens each tab.
 // Which licensed feature a tab needs.
 const EINVOICE_TABS = { eta: 'eta', zatca: 'zatca', uae: 'uae_einvoice' };
-const TAB_FEATURE = { eta: 'eta', zatca: 'zatca', priceLists: 'trading', tables: 'restaurant', kitchen: 'restaurant' };
-const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', network: 'settings', eta: 'settings', zatca: 'settings', data: 'backup', license: null, support: null };
+const TAB_FEATURE = { eta: 'eta', zatca: 'zatca', uae: 'uae_einvoice', priceLists: 'trading', tables: 'restaurant', kitchen: 'restaurant' };
+const TAB_PERM = { promos: 'settings', priceLists: 'settings', general: 'settings', taxes: 'settings', receipt: 'settings', users: 'users', audit: 'audit', tables: 'settings', kitchen: 'settings', devices: 'settings', network: 'settings', eta: 'settings', zatca: 'settings', uae: 'settings', data: 'backup', license: null, support: null };
 
 export default function Settings() {
   const { t, settings, can } = useApp();
@@ -29,7 +30,7 @@ export default function Settings() {
   const einvoice = einvoiceOf(settings);
   const tabs = TABS.filter((x) => (!EINVOICE_TABS[x] || EINVOICE_TABS[x] === einvoice) && (!['tables', 'kitchen'].includes(x) || sellScreens(settings).includes('restaurant')) && has(TAB_FEATURE[x]) && (x !== 'promos' || has('promotions') || has('coupons')) && (!TAB_PERM[x] || can(TAB_PERM[x])));
   const [tab, setTab] = useState(tabs[0]);
-  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', network: 'net.tab', eta: 'eta.tab', zatca: 'zatca.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
+  const label = { general: 'settings.business', taxes: 'settings.taxes', receipt: 'settings.receipt', priceLists: 'priceLists.title', promos: 'promos.tab', users: 'settings.users', audit: 'audit.title', tables: 'settings.tables', kitchen: 'kitchen.tab', devices: 'devices.tab', network: 'net.tab', eta: 'eta.tab', zatca: 'zatca.tab', uae: 'uae.tab', data: 'settings.data', license: 'license.tab', support: 'support.title' };
   return (
     <div className="page">
       <div className="page-head">
@@ -47,6 +48,7 @@ export default function Settings() {
       {tab === 'network' && <Network />}
       {tab === 'eta' && <EtaSettings />}
       {tab === 'zatca' && <ZatcaSettings />}
+      {tab === 'uae' && <UaeSettings />}
       {tab === 'data' && <Data />}
       {tab === 'license' && <LicenseTab />}
       {tab === 'support' && (

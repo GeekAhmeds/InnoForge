@@ -626,6 +626,39 @@ export const TOPICS = [
     },
   },
   {
+    id: 'uae', icon: '🇦🇪', group: 'money', feature: 'uae_einvoice',
+    ar: {
+      title: 'الفاتورة الإلكترونية الإماراتية (للشركات)',
+      intro: 'في الإمارات الفاتورة الإلكترونية إلزامية بين الشركات (من يناير 2027 للكبيرة ويوليو 2027 للباقي). البرنامج بيطلّع فاتورة كل شركة عندها رقم تسجيل ضريبي بصيغة PINT AE، ومزوّد الخدمة (ASP) اللي متعاقد معاه بيوصّلها.',
+      steps: [
+        'الإعدادات ← بيانات المنشأة: الدولة = الإمارات. والإعدادات ← الضرائب: رقم التسجيل الضريبي TRN (15 رقم).',
+        'اتعاقد مع مزوّد خدمة معتمد (ASP) من قايمة وزارة المالية.',
+        'الإعدادات ← الفاتورة الإلكترونية (الإمارات): الاسم القانوني، رقم الرخصة وجهتها، العنوان والإمارة، وطريقة التسليم: ملفات أو ربط مباشر بالـ API بتاع المزوّد.',
+        'في بيانات كل عميل شركة: الرقم الضريبي والعنوان والإمارة.',
+        'كل بيع أو مرتجع لعميل شركة بيظهر في صفحة «الفاتورة الإلكترونية (الإمارات)». في وضع الملفات اضغط «حفظ الملفات المستنية» وارفعهم على بوابة المزوّد.',
+      ],
+      tips: [
+        'البيع للأفراد مش بيطلع له فاتورة إلكترونية (خارج الإلزام حالياً).',
+        'الصيغة مبنية على المواصفات المنشورة، وأول فواتير لازم تتجرب على نظام الاختبار عند المزوّد.',
+      ],
+    },
+    en: {
+      title: 'UAE e-invoicing (business customers)',
+      intro: 'In the UAE e-invoicing is mandatory between businesses (from January 2027 for large ones, July 2027 for the rest). The app produces a PINT AE invoice for every customer with a tax registration number, and your service provider (ASP) delivers it.',
+      steps: [
+        'Settings → Business: country = UAE. Settings → Taxes: the tax registration number (TRN, 15 digits).',
+        "Sign up with an Accredited Service Provider (ASP) from the Ministry of Finance's list.",
+        "Settings → E-invoice (UAE): legal name, trade license and authority, address and emirate, and the hand-over: files, or a direct API connection to the provider.",
+        'On each business customer: the VAT number, address and emirate.',
+        'Every sale or return to a business shows on the "E-invoice (UAE)" page. In file mode press "Save waiting files" and upload them to the provider\'s portal.',
+      ],
+      tips: [
+        'Consumer sales get no e-invoice (outside the mandate for now).',
+        "The format follows the published specification; try the first invoices on the provider's test system.",
+      ],
+    },
+  },
+  {
     id: 'eta', icon: '🏛', group: 'money', feature: 'eta',
     ar: {
       title: 'الفاتورة والإيصال الإلكتروني (الضرائب)',

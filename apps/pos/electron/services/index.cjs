@@ -7,6 +7,7 @@ const { FULL, toJSON, COUNTRIES, DATA: EDITIONS_DATA } = require('../editions.cj
 const { buildCatalog } = require('./report-catalog.cjs');
 const etaDoc = require('../eta.cjs');
 const zatcaDoc = require('../zatca.cjs');
+const uaeDoc = require('../uae.cjs');
 
 const DEFAULT_SETTINGS = {
   setup_done: false,
@@ -117,11 +118,25 @@ const DEFAULT_SETTINGS = {
   zatca_secret: '',
   zatca_onboarded_env: '',
   zatca_cert_expires: '',
+  // UAE e-invoicing (PINT AE, B2B) — Settings → UAE e-invoice. The business's Accredited
+  // Service Provider (ASP) carries the documents; without one they are exported as files.
+  uae_enabled: false,
+  uae_mode: 'export', // export | asp
+  uae_auto: true,
+  uae_name: '', // legal name as on the trade license
+  uae_tl: '', // trade license number
+  uae_tl_authority: '', // issuing authority (e.g. DED Dubai)
+  uae_street: '',
+  uae_city: '',
+  uae_emirate: '', // AUH | DXB | SHJ | AJM | UAQ | RAK | FUJ
+  uae_asp_url: '', // the ASP's endpoint for UBL documents
+  uae_asp_header: 'Authorization',
+  uae_asp_key: '', // e.g. "Bearer …" or an API key
 };
 // Written only by the ZATCA onboarding, never by settings.save.
 const ZATCA_INTERNAL = ['zatca_serial', 'zatca_key', 'zatca_cert', 'zatca_secret', 'zatca_onboarded_env', 'zatca_cert_expires'];
 // Never sent to the window: settings.get shows "<key>_set" instead.
-const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key', 'zatca_key', 'zatca_secret'];
+const SECRET_KEYS = ['eta_client_secret', 'eta_pos_client_secret', 'eta_pos_key', 'zatca_key', 'zatca_secret', 'uae_asp_key'];
 
 // VAT registration numbers: Saudi (15 digits, starts and ends with 3), UAE TRN (15 digits).
 const VAT_NUMBER = { SA: /^3\d{13}3$/, AE: /^\d{15}$/ };
@@ -316,6 +331,9 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         const env = patch.zatca_env || cur.zatca_env;
         if (!cur.zatca_cert || cur.zatca_onboarded_env !== env) throw new PosError('ZATCA_NOT_ONBOARDED');
       }
+      if (patch?.uae_enabled) requireFeature('uae_einvoice');
+      if (patch && 'uae_mode' in patch && !['export', 'asp'].includes(patch.uae_mode)) throw new PosError('INVALID_SETTING', 'uae_mode');
+      if (patch && 'uae_emirate' in patch && patch.uae_emirate && !uaeDoc.EMIRATES.includes(patch.uae_emirate)) throw new PosError('INVALID_SETTING', 'uae_emirate');
       if (patch && 'zatca_env' in patch && !['sandbox', 'simulation', 'production'].includes(patch.zatca_env)) throw new PosError('INVALID_SETTING', 'zatca_env');
       // The kitchen screen key only changes through newKdsKey (forms send stale copies of it);
       // the e-invoice keys only through the onboarding.
@@ -1346,6 +1364,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         if (cart.quote_id) db.prepare("UPDATE quotes SET status = 'invoiced', order_id = ? WHERE id = ? AND status IN ('quote', 'order')").run(orderId, cart.quote_id);
         etaEnqueue(orderId);
         zatcaStamp(orderId);
+        uaeEnqueue(orderId);
         for (const g of granted) audit(g.action, { entity: 'order', entityId: orderId, approvedBy: g.approvedBy, details: { invoice: invoiceNo, ...((Array.isArray(g.details) ? { lines: g.details } : g.details)) } });
         // Orders paid straight away (takeaway, counter) still have to reach the kitchen.
         const tickets = priced.settings.kitchen_auto_send ? dispatchKitchen(getOrder(orderId)) : [];
@@ -1418,6 +1437,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         db.prepare('UPDATE orders SET refunded = refunded + ? WHERE id = ?').run(amount, orderId);
         etaEnqueue(orderId, returnId);
         zatcaStamp(orderId, returnId, str(reason));
+        uaeEnqueue(orderId, returnId, str(reason));
         if (order.customer_id && order.points_earned > 0 && order.total > 0) {
           const back = Math.min(order.points_earned, Math.round((order.points_earned * amount) / order.total));
           if (back) {
@@ -1972,6 +1992,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       c.terms_days = termsOf(c);
       c.eta = parseJson(c.eta, {});
       c.zatca = parseJson(c.zatca, {});
+      c.uae = parseJson(c.uae, {});
       return c;
     },
     /** Cashiers can add/edit contact details; credit limits, terms, discounts and price lists need customers_edit. */
@@ -1999,12 +2020,17 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       const zatca = zatcaIn && typeof zatcaIn === 'object'
         ? JSON.stringify(Object.fromEntries(['street', 'building', 'plot', 'district', 'city', 'postal'].map((k) => [k, str(zatcaIn[k])]).filter(([, v]) => v)))
         : existing?.zatca ?? '';
-      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct, eta, zatca];
+      // UAE buyer address, emirate and trade license for B2B e-invoices.
+      const uaeIn = typeof c.uae === 'string' ? parseJson(c.uae, null) : c.uae;
+      const uae = uaeIn && typeof uaeIn === 'object'
+        ? JSON.stringify(Object.fromEntries(['street', 'city', 'emirate', 'tl', 'authority', 'email', 'reference'].map((k) => [k, str(uaeIn[k])]).filter(([, v]) => v)))
+        : existing?.uae ?? '';
+      const vals = [str(c.name), phone, str(c.address), str(c.tax_number), str(c.notes), limit, active, priceList, terms, discountPct, eta, zatca, uae];
       if (c.id) {
-        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ?, eta = ?, zatca = ? WHERE id = ?').run(...vals, c.id);
+        db.prepare('UPDATE customers SET name = ?, phone = ?, address = ?, tax_number = ?, notes = ?, credit_limit = ?, active = ?, price_list_id = ?, payment_terms = ?, discount_percent = ?, eta = ?, zatca = ?, uae = ? WHERE id = ?').run(...vals, c.id);
         return c.id;
       }
-      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent, eta, zatca) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
+      return Number(db.prepare('INSERT INTO customers (name, phone, address, tax_number, notes, credit_limit, active, price_list_id, payment_terms, discount_percent, eta, zatca, uae) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...vals).lastInsertRowid);
     },
     /** Invoices, receipts, discounts, bounced cheques and returns in date order with a running balance. */
     statement({ id, from = null, to = null } = {}) {
@@ -4033,6 +4059,111 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     },
   };
 
+  // ---------- UAE e-invoicing (PINT AE) ----------
+  // B2B sales to VAT-registered customers become PINT AE documents, built at once and handed
+  // to the business's ASP by uae-submitter.cjs (or exported as files).
+  function uaeEnqueue(orderId, returnId = null, reason = '') {
+    const s = getSettings();
+    if (!s.uae_enabled || !has('uae_einvoice') || s.country !== 'AE') return null;
+    try {
+      const { order, items, customer, payment, invoiceNo } = zatcaInput(orderId, returnId);
+      if (customer) customer.uae = parseJson(db.prepare('SELECT uae FROM customers WHERE id = ?').get(customer.id)?.uae, {});
+      if (!uaeDoc.b2bBuyer(customer)) return null; // consumers are outside the mandate
+      const original = returnId ? { id: invoiceNo, date: String(db.prepare('SELECT completed_at FROM orders WHERE id = ?').get(orderId).completed_at).slice(0, 10) } : null;
+      const doc = { kind: returnId ? 'credit' : 'invoice', id: returnId ? `${invoiceNo}-R${returnId}` : invoiceNo, uuid: uaeDoc.uuid(), issued: order.completed_at, original, reason, payment };
+      const { xml } = uaeDoc.buildXml({ doc, order, items, customer, settings: s });
+      db.prepare('INSERT INTO uae_documents (order_id, return_id, kind, doc_no, uuid, xml) VALUES (?, ?, ?, ?, ?, ?)').run(orderId, returnId, doc.kind, doc.id, doc.uuid, xml);
+      return doc.uuid;
+    } catch (err) {
+      console.error('UAE e-invoice', err);
+      audit('uae_failed', { entity: 'order', entityId: orderId, details: { return: returnId, error: `${err.code || ''} ${err.message}`.trim() } });
+      return null;
+    }
+  }
+
+  const uae = {
+    summary() {
+      requirePerm('reports');
+      const s = getSettings(true);
+      const counts = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM uae_documents GROUP BY status').all().map((r) => [r.status, r.n]));
+      return { enabled: s.uae_enabled, mode: s.uae_mode, asp: !!s.uae_asp_url, counts, missing: uaeDoc.missingSettings(s) };
+    },
+    list({ status = '', search = '' } = {}) {
+      requirePerm('reports');
+      const where = ['1 = 1'];
+      const args = [];
+      if (status === 'attention') where.push("d.status IN ('error', 'rejected')");
+      else if (status) { where.push('d.status = ?'); args.push(str(status)); }
+      if (str(search)) { where.push('(d.doc_no LIKE ? OR d.uuid LIKE ?)'); args.push(`${str(search)}%`, `${str(search)}%`); }
+      return db.prepare(`SELECT d.id, d.order_id, d.return_id, d.kind, d.doc_no, d.uuid, d.status, d.error, d.created_at, d.sent_at, o.total, c.name AS customer
+        FROM uae_documents d JOIN orders o ON o.id = d.order_id LEFT JOIN customers c ON c.id = o.customer_id WHERE ${where.join(' AND ')} ORDER BY d.id DESC LIMIT 500`).all(...args).map(plain);
+    },
+    get(id) {
+      requirePerm('reports');
+      const r = db.prepare('SELECT * FROM uae_documents WHERE id = ?').get(int(id));
+      if (!r) throw new PosError('NOT_FOUND');
+      return plain(r);
+    },
+    /** Marks documents as handed over by file (export mode). */
+    markExported(ids = []) {
+      requirePerm('settings');
+      const stmt = db.prepare("UPDATE uae_documents SET status = 'exported', sent_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE id = ? AND status IN ('pending', 'error')");
+      transaction(db, () => { for (const id of ids) stmt.run(int(id)); });
+      return true;
+    },
+    retry(id) {
+      requirePerm('settings');
+      const r = db.prepare('SELECT * FROM uae_documents WHERE id = ?').get(int(id));
+      if (!r || !['error', 'rejected', 'skipped'].includes(r.status)) throw new PosError('ZATCA_NOT_RETRYABLE');
+      // Rebuilt from the sale and the current settings (a fixed address, TRN…).
+      const s = getSettings();
+      const { order, items, customer, payment, invoiceNo } = zatcaInput(r.order_id, r.return_id);
+      if (customer) customer.uae = parseJson(db.prepare('SELECT uae FROM customers WHERE id = ?').get(customer.id)?.uae, {});
+      const original = r.return_id ? { id: invoiceNo, date: String(db.prepare('SELECT completed_at FROM orders WHERE id = ?').get(r.order_id).completed_at).slice(0, 10) } : null;
+      const { xml } = uaeDoc.buildXml({ doc: { kind: r.kind, id: r.doc_no, uuid: r.uuid, issued: order.completed_at, original, payment }, order, items, customer, settings: s });
+      db.prepare("UPDATE uae_documents SET status = 'pending', error = '', xml = ?, updated_at = datetime('now', 'localtime') WHERE id = ?").run(xml, r.id);
+      audit('uae_retry', { entity: 'order', entityId: r.order_id, details: { doc: r.doc_no } });
+      return true;
+    },
+    skip(id) {
+      requirePerm('settings');
+      db.prepare("UPDATE uae_documents SET status = 'skipped', updated_at = datetime('now', 'localtime') WHERE id = ? AND status IN ('pending', 'error', 'rejected')").run(int(id));
+      return true;
+    },
+    /** Builds the document for an older sale (made before the e-invoice was switched on). */
+    add({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const o = db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo));
+      if (!o) throw new PosError('NOT_FOUND');
+      if (db.prepare("SELECT 1 FROM uae_documents WHERE order_id = ? AND return_id IS NULL AND status != 'skipped'").get(o.id)) throw new PosError('ZATCA_ALREADY');
+      if (!uaeEnqueue(o.id)) throw new PosError('UAE_BUYER');
+      return true;
+    },
+    preview({ invoiceNo } = {}) {
+      requirePerm('settings');
+      const s = getSettings();
+      const missing = uaeDoc.missingSettings(s);
+      if (missing.length) throw new PosError('UAE_MISSING', missing.join(','));
+      const o = invoiceNo
+        ? db.prepare("SELECT * FROM orders WHERE invoice_no = ? AND status = 'completed'").get(int(invoiceNo))
+        : db.prepare("SELECT o.* FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 'completed' AND c.tax_number != '' ORDER BY o.id DESC LIMIT 1").get();
+      if (!o) throw new PosError('NOT_FOUND');
+      const { order, items, customer, payment, invoiceNo: no } = zatcaInput(o.id);
+      if (customer) customer.uae = parseJson(db.prepare('SELECT uae FROM customers WHERE id = ?').get(customer.id)?.uae, {});
+      return { invoice_no: no, ...uaeDoc.buildXml({ doc: { kind: 'invoice', id: no, uuid: uaeDoc.uuid(), issued: order.completed_at, payment }, order, items, customer, settings: s }) };
+    },
+  };
+
+  /** For uae-submitter.cjs (main process only). */
+  const uaeQueue = {
+    settings: () => getSettings(true),
+    toSend: (limit = 100) => plainAll(db.prepare("SELECT * FROM uae_documents WHERE status = 'pending' ORDER BY id LIMIT ?").all(limit)),
+    result(id, { status, error = '', response = null }) {
+      db.prepare(`UPDATE uae_documents SET status = ?, error = ?, response = ?, attempts = attempts + 1, sent_at = CASE WHEN ? = 'sent' THEN datetime('now', 'localtime') ELSE sent_at END,
+        updated_at = datetime('now', 'localtime') WHERE id = ?`).run(status, String(error).slice(0, 4000), response ? String(response).slice(0, 20000) : '', status, id);
+    },
+  };
+
   /** Called by the main computer's network server for every request from another computer. */
   function admitDevice(id, name) {
     const dev = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
@@ -4050,7 +4181,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     session, settings, auth, users, categories, products, tables, shifts, orders, suppliers, purchases, expenses, customers, reports,
     auditLog, commissions, importer, priceLists, quotes, stockCounts, promotions, rebates, floor, kitchenStations, kds, purchaseOrders, drawer, modifiers, delivery, treasury, warehouses, installments, coupons, giftCards, employees, requireAdmin, requirePerm, audit, can,
     license: { get: () => toJSON(entitlements()), has, requireFeature },
-    devices, admitDevice, deviceId, eta, etaQueue, zatca, zatcaQueue,
+    devices, admitDevice, deviceId, eta, etaQueue, zatca, zatcaQueue, uae, uaeQueue,
   };
   // Whole namespaces that belong to a licensed feature. Read-only methods other screens rely
   // on stay open, so data made under a bigger license can still be seen.
@@ -4059,7 +4190,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     delivery: ['delivery'], priceLists: ['trading', ['list']], quotes: ['trading'], rebates: ['rebates'],
     installments: ['installments', ['get']], treasury: ['treasury', ['accounts']], warehouses: ['warehouses', ['list']],
     purchaseOrders: ['purchase_orders'], employees: ['employees'], promotions: ['promotions'], coupons: ['coupons'], giftCards: ['coupons'],
-    importer: ['excel'], commissions: ['commissions'], eta: ['eta'], zatca: ['zatca'],
+    importer: ['excel'], commissions: ['commissions'], eta: ['eta'], zatca: ['zatca'], uae: ['uae_einvoice'],
   };
   for (const [ns, [feature, open = []]] of Object.entries(LOCKED)) {
     for (const [name, fn] of Object.entries(api[ns])) {

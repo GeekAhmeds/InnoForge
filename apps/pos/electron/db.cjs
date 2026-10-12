@@ -944,6 +944,27 @@ const MIGRATIONS = [
   ALTER TABLE returns ADD COLUMN zatca_qr TEXT NOT NULL DEFAULT '';
   ALTER TABLE customers ADD COLUMN zatca TEXT NOT NULL DEFAULT ''; -- JSON { street, building, plot, district, city, postal }
   `,
+  // v20: UAE e-invoicing (PINT AE, B2B): documents handed to the business's service provider.
+  `
+  CREATE TABLE uae_documents (
+    id          INTEGER PRIMARY KEY,
+    order_id    INTEGER NOT NULL REFERENCES orders(id),
+    return_id   INTEGER REFERENCES returns(id),
+    kind        TEXT NOT NULL CHECK (kind IN ('invoice', 'credit')),
+    doc_no      TEXT NOT NULL,
+    uuid        TEXT NOT NULL,
+    xml         TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | sent | exported | rejected | error | skipped
+    error       TEXT NOT NULL DEFAULT '',
+    response    TEXT NOT NULL DEFAULT '',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    sent_at     TEXT
+  );
+  CREATE INDEX idx_uae_status ON uae_documents(status);
+  ALTER TABLE customers ADD COLUMN uae TEXT NOT NULL DEFAULT ''; -- JSON { street, city, emirate, tl, authority }
+  `,
 ];
 
 function openDatabase(file) {
