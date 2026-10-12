@@ -73,6 +73,8 @@ Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra
 | v16 | `employees`, `attendance`, `employee_moves`, `payrolls`; `coupons`, `orders.coupon_id/coupon_discount`; `gift_cards`, `gift_card_moves` |
 | v17 | `devices` (main + connected computers, active flag), `device_settings` (per-computer printers/drawer/scale/warehouse…), `shifts.device_id`, `orders.device_id` |
 | v18 | `eta_documents` (e-invoice/e-receipt queue), `products.eta_item_type/eta_item_code/eta_unit`, `customers.eta` (buyer type/ID/address JSON) |
+| v19 | `zatca_documents` (stamped Saudi invoices/credit notes in chain order: icv, uuid, hash, signed xml, qr, status), `orders.zatca_qr`, `returns.zatca_qr`, `customers.zatca` (buyer address JSON) |
+| v20 | `uae_documents` (PINT AE documents for the ASP), `customers.uae` (buyer address/emirate/license JSON) |
 
 Key relationships: an **order** is a cart that is `open` (held cart / table) then `completed` (gets `invoice_no`) or `void`. `orders.credit` is the part left on the customer's account. Stock is always in **base units** (`unit_factor` converts cartons). `stock_moves` is the stock ledger; `batches` hold expiry-tracked stock (FEFO).
 

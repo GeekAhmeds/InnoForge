@@ -8,6 +8,9 @@ screenshots, editions, download, how to activate, partners, FAQ and contact.
   the license-server portal lives at `/portal/` on the same host.
 - **Download links are live**: `app.js` reads `/updates/latest.yml` and `/updates/latest-linux.yml`
   (the files the POS app updates from), so the page always offers the version published there.
+- **Country switch** (🇪🇬 / 🇸🇦 / 🇦🇪, guessed from the time zone, kept in localStorage): wording, plan prices
+  and the contact form follow it. Prices and the offer bar come from the license server's public
+  `GET /api/v1/prices?country=…` (edit them in the portal → قائمة الأسعار / العروض).
 - **Contact form** posts to `/api/v1/lead` (license server) → Inno Source sees it in the portal under
   «📥 طلبات الموقع» (rate-limited, honeypot field `website`).
 - Screenshots in `assets/shots/*.webp` come from the real app (`apps/pos/tools/videos/promo-assets`);

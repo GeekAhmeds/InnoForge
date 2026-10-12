@@ -57,6 +57,8 @@ electron/
   exposed.cjs         namespaces callable from the window and from the network (EXPOSED / remoteAllowed)
   export-sheets.cjs   Excel export sheets (runs where the data is)
   eta.cjs, eta-submitter.cjs   Egyptian e-invoice / e-receipt: document JSON + serialization; token, sign, submit, poll
+  zatca.cjs, zatca-submitter.cjs   Saudi FATOORA (phase 2): UBL XML, hash, secp256k1 stamp, QR, CSR; onboarding, report/clear
+  uae.cjs, uae-submitter.cjs   UAE e-invoicing (PINT AE, B2B): XML; hand-over to the ASP
   kds-server.cjs, kds.html, customer.html   kitchen display + customer display (local HTTP server + standalone pages)
   rawprint.cjs        raw ESC/POS bytes to a printer (cash drawer kick)
 src/
@@ -76,7 +78,7 @@ docs/                 guide.html + developer docs
 
 1. **Money is integer minor units** (piasters) everywhere in the DB and services. Convert only at the UI edge with `toMinor` / `fromMinor` / `formatMoney` (`src/lib/money.js`). Quantities are REAL (weights, cartons).
 2. **The server prices everything.** The renderer sends product ids, quantities, units and *flags* (e.g. `price_override`); `priceCart()` re-reads prices, price lists, customer discounts and promotions from the DB. Never trust a total from the UI.
-3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v18**.
+3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v20**.
 4. **Every service method checks access first**: `requireUser()` or `requirePerm('perm', approval, extra)`. Restricted-but-approvable actions (`discount`, `price_override`, `credit_sale`, `refund`, `void`, `expenses`, `open_drawer`) throw `APPROVAL_REQUIRED`; the UI wraps calls in `withApproval(fn)` to get a supervisor PIN and retry.
 5. **Audit sensitive actions** with `audit('action_name', { entity, entityId, details, approvedBy })` and add `audit.action_name` (+ any `auditKey.*`) to both dictionaries.
 6. **Errors are `PosError(CODE)`**; the UI shows `t('err.CODE')`. Add new codes to both `ar.js` and `en.js`.
@@ -104,5 +106,6 @@ CI (`.github/workflows/pos-installer.yml`) builds Windows + Linux on every push 
 
 - Branch computers that keep selling while the main computer is unreachable (offline sync) — see `docs/FEATURES.md` → *Pending*.
 - The ETA e-invoice is built but has not been run against the live tax authority, and the USB-token signer is external — see `docs/FEATURES.md` row 17.
+- Saudi FATOORA passes ZATCA's own offline validator (`node tools/zatca-validate.cjs <SDK folder>`, Java 11) but has not been run on the simulation portal; keep that check green when touching `zatca.cjs` (the XML is written canonical on purpose — the hash depends on it). UAE PINT AE follows the published spec; the ASP checks the final rules.
 - Overall status (what is done, where, where we stopped): `docs/STATUS-AR.md`.
 - Update server: everything runs on the office server `inno` (Hetzner dropped). `ls.0x01source.com` → office IP; the app checks `https://pos.0x01source.com:9990/updates/` (since the build after 0.1.39). `apps/license-server/deploy/install-inno.sh` adds the license server + `/updates/` there without touching existing sites; installed and running on inno (Oct 12). Shipping = mark a GitHub pre-release `pos-v…` as Latest; inno pulls it every 10 min (`updates-sync.sh`, `innoforge-updates.timer`). See `docs/SERVER-SETUP-AR.md` → «وقفنا فين؟».

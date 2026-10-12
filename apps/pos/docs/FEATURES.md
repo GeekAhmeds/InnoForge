@@ -91,6 +91,16 @@ Known limits (by design, for now):
 - **Gift cards:** refunding an invoice paid by gift card pays back in cash, not onto the card.
 - **Payroll:** absence deduction is salary ÷ 30 per day marked *absent*; leave is paid; no overtime rules.
 
+## Countries and Gulf e-invoicing
+
+| Feature | Status | Code |
+|---|---|---|
+| Country (Egypt / Saudi Arabia / UAE): currency, VAT, VAT-number check, bilingual tax-invoice title, VAT per A4 line; a key may lock the copy to a country; reseller permits may list countries | ✅ | `editions.json` (`countries`), `editions.cjs` (`country`, `RESELLER_COUNTRY`), `checkCountry` in services, `src/lib/countries.js`, Setup / Settings |
+| QR code generator (byte mode, versions 1–40) | ✅ (checked with a real reader) | `src/lib/qr.js` |
+| Saudi FATOORA (ZATCA) phase 1 QR | ✅ | `src/lib/zatca-qr.js`, `lib/receipt.js` |
+| Saudi FATOORA phase 2: stamp every sale/return at once, ICV + PIH chain, simplified (reported) and standard (cleared) invoices, credit notes, device onboarding (CSR → compliance → production CSID), status page | ✅ passes ZATCA's own validator (SDK 238-R3.4.8) offline; ⏳ not yet run on the simulation portal | `electron/zatca.cjs`, `zatca-submitter.cjs`, `zatca.*` / `zatcaQueue`, `components/Zatca.jsx`, `tools/zatca-validate.cjs`, `test/zatca.test.cjs` |
+| UAE PINT AE (B2B) invoices and credit notes, hand-over to the ASP (generic POST) or XML export | ✅ invoice passes UBL XSD + EN16931; ⏳ PINT AE rules are checked by the ASP | `electron/uae.cjs`, `uae-submitter.cjs`, `uae.*` / `uaeQueue`, `components/Uae.jsx`, `test/uae.test.cjs` |
+
 ## Platform
 
 | Feature | Status | Code |
