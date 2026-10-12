@@ -193,8 +193,9 @@ function CustomerModal({ customer, onClose, onSaved }) {
   const { t, tErr, notify, settings, can } = useApp();
   const isAdmin = can('customers_edit');
   const d = settings.decimals;
-  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '', eta: parseEta(customer.eta) });
+  const [f, setF] = useState({ ...customer, credit_limit: customer.credit_limit ? fromMinor(customer.credit_limit, d) : '', eta: parseEta(customer.eta), zatca: parseEta(customer.zatca) });
   const setEta = (k) => (e) => setF((x) => ({ ...x, eta: { ...x.eta, [k]: e.target.value } }));
+  const setZ = (k) => (e) => setF((x) => ({ ...x, zatca: { ...x.zatca, [k]: e.target.value } }));
   const [priceLists] = useLoad(() => api.priceLists.list(), []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
   async function save(e) {
@@ -247,6 +248,20 @@ function CustomerModal({ customer, onClose, onSaved }) {
               <Field label={t('eta.city')}><input value={f.eta.regionCity || ''} onChange={setEta('regionCity')} /></Field>
               <Field label={t('eta.street')}><input value={f.eta.street || ''} onChange={setEta('street')} /></Field>
               <Field label={t('eta.building')}><input value={f.eta.buildingNumber || ''} onChange={setEta('buildingNumber')} /></Field>
+            </div>
+          </div>
+        )}
+        {settings.country === 'SA' && has('zatca') && (
+          <div className="span2 sub-section">
+            <h4>🇸🇦 {t('zatca.buyer')}</h4>
+            <p className="muted small">{t('zatca.buyerHint')}</p>
+            <div className="grid3">
+              <Field label={t('zatcaKey.zatca_street')}><input value={f.zatca.street || ''} onChange={setZ('street')} /></Field>
+              <Field label={t('zatcaKey.zatca_building')} hint={t('zatca.fourDigits')}><input dir="ltr" maxLength={4} value={f.zatca.building || ''} onChange={setZ('building')} /></Field>
+              <Field label={t('zatcaKey.zatca_plot')}><input dir="ltr" maxLength={4} value={f.zatca.plot || ''} onChange={setZ('plot')} /></Field>
+              <Field label={t('zatcaKey.zatca_district')}><input value={f.zatca.district || ''} onChange={setZ('district')} /></Field>
+              <Field label={t('zatcaKey.zatca_city')}><input value={f.zatca.city || ''} onChange={setZ('city')} /></Field>
+              <Field label={t('zatcaKey.zatca_postal')} hint={t('zatca.fiveDigits')}><input dir="ltr" maxLength={5} value={f.zatca.postal || ''} onChange={setZ('postal')} /></Field>
             </div>
           </div>
         )}

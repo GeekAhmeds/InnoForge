@@ -21,6 +21,7 @@ import Treasury from './pages/Treasury.jsx';
 import Employees from './pages/Employees.jsx';
 import Help from './pages/Help.jsx';
 import { EtaPage } from './components/Eta.jsx';
+import { ZatcaPage } from './components/Zatca.jsx';
 import SalesInvoice from './pages/SalesInvoice.jsx';
 import { SCREENS, homePage, sellScreens } from './lib/screens.js';
 import { has, setFeatures } from './lib/features.js';
@@ -62,7 +63,8 @@ const NAV = [
   { id: 'purchases', icon: '🚚', perm: 'purchases' },
   { id: 'reports', icon: '📊', perm: 'reports' },
   { id: 'employees', icon: '🧑‍💼', feature: 'employees' },
-  { id: 'eta', icon: '🏛', perm: 'reports', feature: 'eta', when: (s) => s.eta_enabled },
+  { id: 'eta', icon: '🏛', perm: 'reports', feature: 'eta', when: (s) => s.eta_enabled && (s.country || 'EG') === 'EG' },
+  { id: 'zatca', icon: '🇸🇦', perm: 'reports', feature: 'zatca', when: (s) => s.zatca_enabled && s.country === 'SA' },
   { id: 'shift', icon: '⏱' },
   { id: 'settings', icon: '⚙', perm: ['settings', 'users', 'audit', 'backup'] },
   { id: 'help', icon: '❓' },
@@ -146,7 +148,7 @@ function Shell({ settings, reloadSettings, license, setLicense }) {
     // Restaurants also get the delivery board right after the floor.
     if (screens.includes('restaurant') && has('delivery')) sellNav.splice(sellNav.findIndex((n) => n.id === 'floor') + 1, 0, { id: 'delivery', icon: '🛵', label: 'nav.delivery' });
     const nav = [...sellNav, ...NAV.filter((n) => has(n.feature) && (!n.when || n.when(settings)) && (!n.perm || [].concat(n.perm).some((p) => user.perms?.[p])))];
-    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, eta: EtaPage, help: Help, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
+    const Page = { dashboard: Dashboard, delivery: Delivery, treasury: Treasury, employees: Employees, eta: EtaPage, zatca: ZatcaPage, help: Help, pos: Pos, floor: Floor, invoice: SalesInvoice, orders: Orders, customers: Customers, products: Products, purchases: Purchases, reports: Reports, shift: Shift, settings: Settings }[page] || Pos;
     content = (
       <div className="shell">
         <aside className="sidebar">

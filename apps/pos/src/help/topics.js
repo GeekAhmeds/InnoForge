@@ -556,6 +556,76 @@ export const TOPICS = [
     },
   },
   {
+    id: 'country', icon: '🌍', group: 'money',
+    ar: {
+      title: 'الدولة: مصر أو السعودية أو الإمارات',
+      intro: 'البرنامج واحد في التلات دول. الدولة بتحدد العملة ونسبة الضريبة وشكل الفاتورة ونظام الفاتورة الإلكترونية.',
+      steps: [
+        'في أول تشغيل اختار الدولة، أو بعدين من الإعدادات ← بيانات المنشأة ← الدولة.',
+        'اختيار الدولة بيظبط العملة (جنيه / ريال / درهم) ونسبة الضريبة (السعودية 15%، الإمارات 5%). تقدر تعدّلهم.',
+        'اكتب الرقم الضريبي من الإعدادات ← الضرائب: السعودي 15 رقم أوله وآخره 3، والإماراتي (TRN) 15 رقم.',
+        'في السعودية والإمارات الإيصال والفاتورة بيطلعوا بعنوان «فاتورة ضريبية» بالعربي والإنجليزي، والفاتورة A4 فيها الضريبة لكل صنف.',
+        'في السعودية الإيصال عليه QR «فاتورة» اللي تطبيق الهيئة بيقراه.',
+      ],
+      tips: [
+        'لو الترخيص بتاعك لدولة معيّنة، الدولة بتبقى ثابتة ومش بتتغيّر.',
+      ],
+    },
+    en: {
+      title: 'Country: Egypt, Saudi Arabia or the UAE',
+      intro: 'The same app works in all three countries. The country sets the currency, VAT rate, invoice layout and e-invoice system.',
+      steps: [
+        'Pick the country on first start, or later in Settings → Business → Country.',
+        'Picking it sets the currency (EGP / SAR / AED) and VAT rate (Saudi 15%, UAE 5%). You can change them.',
+        'Enter the VAT number in Settings → Taxes: Saudi 15 digits starting and ending with 3, UAE TRN 15 digits.',
+        'In Saudi Arabia and the UAE receipts and invoices carry a bilingual "Tax Invoice" title, and A4 invoices show VAT per line.',
+        'In Saudi Arabia receipts carry the FATOORA QR that ZATCA\'s app reads.',
+      ],
+      tips: [
+        'When your license is for one country, the country is fixed.',
+      ],
+    },
+  },
+  {
+    id: 'zatca', icon: '🇸🇦', group: 'money', feature: 'zatca',
+    ar: {
+      title: 'الفاتورة الإلكترونية السعودية (فاتورة — ZATCA)',
+      intro: 'كل بيع بيتختم ساعة البيع بختم إلكتروني ويتربط بالفاتورة اللي قبله، والـ QR بيتطبع على الإيصال. البيع مش بيقف لو النت فاصل: الفواتير المبسطة بتتبلغ للهيئة لوحدها خلال 24 ساعة.',
+      steps: [
+        'الإعدادات ← بيانات المنشأة: الدولة = السعودية. والإعدادات ← الضرائب: الرقم الضريبي.',
+        'الإعدادات ← فاتورة (ZATCA): اختار البيئة («تجربة المطورين» أو «المحاكاة» الأول) واكتب بيانات المنشأة زي السجل: الاسم، السجل التجاري، الشارع، رقم المبنى (4 أرقام)، الحي، المدينة، الرمز البريدي (5 أرقام).',
+        'ادخل بوابة فاتورة (fatoora.zatca.gov.sa) ← تسجيل وحدة جديدة، واطلع رمز OTP. اكتبه واضغط «تسجيل الجهاز»: البرنامج بيعمل مفتاح الجهاز وطلب الشهادة ويبعت 6 فواتير فحص ويستلم الشهادة.',
+        'شغّل «ختم الفواتير وإرسالها». من هنا ورايح كل بيع ومرتجع بيتختم ويظهر في صفحة «فاتورة (ZATCA)» بحالته.',
+        'العميل الشركة: اكتب رقمه الضريبي وعنوانه كامل في بياناته، فياخد «فاتورة ضريبية» بتتعتمد من الهيئة، والـ QR بتاع الهيئة بيتطبع عليها.',
+        'لو فاتورة اترفضت: السبب مكتوب جنبها. صلّحه واضغط «إصدار من جديد».',
+        'لما كل حاجة تمشي على المحاكاة، غيّر البيئة لـ «الإنتاج» وسجّل الجهاز تاني برمز OTP من بوابة الإنتاج.',
+      ],
+      tips: [
+        'مفتاح الجهاز بيتعمل جوه البرنامج ومبيطلعش منه، ومش محتاج USB Token.',
+        'مع أكتر من جهاز: الختم والإرسال بيحصلوا على الجهاز الرئيسي (كله سلسلة واحدة).',
+        'الفواتير اتفحصت بأداة الفحص الرسمية بتاعة الهيئة (SDK 238-R3.4.8)، بس لازم أول عميل يتجرب على المحاكاة قبل الإنتاج.',
+      ],
+    },
+    en: {
+      title: 'Saudi e-invoicing (FATOORA — ZATCA)',
+      intro: 'Every sale is stamped at the moment of sale and chained to the previous invoice, and its QR is printed on the receipt. Selling never stops when the internet is down: simplified invoices are reported to ZATCA automatically within 24 hours.',
+      steps: [
+        'Settings → Business: country = Saudi Arabia. Settings → Taxes: the VAT number.',
+        'Settings → FATOORA (ZATCA): pick the environment (developer sandbox or simulation first) and enter the business exactly as registered: name, commercial registration, street, building no. (4 digits), district, city, postal code (5 digits).',
+        'In the FATOORA portal (fatoora.zatca.gov.sa) → onboard a new unit, get an OTP. Type it and press "Register device": the app creates the device key and certificate request, sends six compliance invoices and receives the certificate.',
+        'Turn on "Stamp and send invoices". From then on every sale and return is stamped and shows on the FATOORA page with its status.',
+        'Business customers: enter their VAT number and full address so they get a tax invoice cleared by ZATCA, printed with ZATCA\'s QR.',
+        'If an invoice is rejected, the reason is shown next to it. Fix it and press "Issue again".',
+        'Once everything works on simulation, switch to production and register the device again with an OTP from the production portal.',
+      ],
+      tips: [
+        'The device key is made inside the app and never leaves it; no USB token is needed.',
+        'With several computers, stamping and sending happen on the main computer (one chain).',
+        "The invoices were checked with ZATCA's own validator (SDK 238-R3.4.8), but try the first customer on simulation before production.",
+      ],
+    },
+  },
+  {
     id: 'eta', icon: '🏛', group: 'money', feature: 'eta',
     ar: {
       title: 'الفاتورة والإيصال الإلكتروني (الضرائب)',
