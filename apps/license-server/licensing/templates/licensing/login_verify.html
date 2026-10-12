@@ -1,0 +1,15 @@
+{% extends 'licensing/base.html' %}
+{% block title %}كود التحقق{% endblock %}
+{% block anon %}
+<div class="login-wrap">
+  <form class="login-card" method="post">{% csrf_token %}
+    <h1 style="margin-bottom:4px">🔐 كود التحقق</h1>
+    <p class="muted" style="margin-top:0">افتح تطبيق Google Authenticator (أو Microsoft Authenticator) واكتب الكود اللي ظاهر لـ InnoForge.</p>
+    {% if error %}<p class="bad">{{ error }}</p>{% endif %}
+    <label>الكود (6 أرقام)<input name="code" autofocus required autocomplete="one-time-code" inputmode="numeric" maxlength="20" class="mono" style="font-size:22px;letter-spacing:4px;text-align:center"></label>
+    <button class="btn primary" style="width:100%;margin-top:16px">تأكيد</button>
+    <p class="small muted" style="margin-bottom:0">الموبايل ضاع؟ اكتب واحد من أكواد الطوارئ اللي حفظتها (زي a1b2c3-d4e5f6)، أو كلّم Inno Source تشيل التحقق من حسابك.</p>
+    <p class="small"><a href="{% url 'login' %}">رجوع</a></p>
+  </form>
+</div>
+{% endblock %}

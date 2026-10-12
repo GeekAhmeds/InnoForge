@@ -37,6 +37,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    'licensing.auth.TwoStepMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -69,9 +70,13 @@ else:
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 10}},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+# Inno Source staff must use two-step login (an authenticator app code after the password).
+REQUIRE_2FA_STAFF = env_bool('REQUIRE_2FA_STAFF', True)
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
@@ -94,9 +99,15 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = env_bool('SECURE_COOKIES', True)
     CSRF_COOKIE_SECURE = env_bool('SECURE_COOKIES', True)
+    SECURE_HSTS_SECONDS = int(env('SECURE_HSTS_SECONDS', str(30 * 24 * 3600)))
 SESSION_COOKIE_AGE = 12 * 3600
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin'
 
 # ---- Licensing ----
 # The server signs keys with ITS OWN key, certified by Inno Source's offline vendor key

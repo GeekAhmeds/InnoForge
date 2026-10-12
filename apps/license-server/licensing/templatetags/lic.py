@@ -37,3 +37,11 @@ def days_label(d):
 @register.filter
 def get(d, k):
     return (d or {}).get(k)
+
+
+@register.filter
+def sub(a, b):
+    try:
+        return a - b
+    except TypeError:
+        return a

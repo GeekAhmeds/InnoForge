@@ -37,9 +37,13 @@ class Partner(models.Model):
     can_issue_directly = models.BooleanField('يطلّع مفاتيح على طول', default=True, help_text='لو لأ: طلباته بتستنى موافقة Inno Source')
     can_manage_children = models.BooleanField('يقدر يضيف وكلاء تحته', default=False)
     allow_trials = models.BooleanField('مسموح بمفاتيح تجربة مجانية', default=True)
+    require_2fa = models.BooleanField('لازم التحقق بخطوتين لمستخدميه', default=False,
+                                      help_text='كود من تطبيق Google Authenticator مع كلمة السر')
 
     # Money.
     discount_percent = models.DecimalField('الخصم من سعر القائمة %', max_digits=5, decimal_places=2, default=Decimal('0'))
+    commission_percent = models.DecimalField('عمولة على العملاء اللي بيجيبهم %', max_digits=5, decimal_places=2, default=Decimal('0'),
+                                             help_text='للمسوّقين: نسبة من سعر أي مفتاح Inno Source تبيعه لعميل جه عن طريقه — بتتضاف لرصيده')
     credit_limit = models.DecimalField('حد السحب على المكشوف', max_digits=12, decimal_places=2, default=Decimal('0'),
                                        help_text='يقدر يطلّع مفاتيح لحد ما رصيده يوصل للسالب ده')
 
@@ -105,6 +109,10 @@ class Customer(models.Model):
     city = models.CharField('المدينة', max_length=80, blank=True)
     activity = models.CharField('النشاط', max_length=80, blank=True, help_text='سوبر ماركت، مطعم، مكتبة…')
     tax_number = models.CharField('الرقم الضريبي', max_length=30, blank=True)
+    special_discount_percent = models.DecimalField('خصم خاص للعميل ده %', max_digits=5, decimal_places=2, default=Decimal('0'),
+                                                   help_text='Inno Source بس: بيتخصم من سعر أي مفتاح للعميل ده (حتى لو عن طريق شريك)')
+    referred_by = models.ForeignKey(Partner, verbose_name='جه عن طريق (مسوّق)', null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='referred_customers')
     notes = models.TextField('ملاحظات', blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -147,6 +155,9 @@ class License(models.Model):
     replaces = models.ForeignKey('self', verbose_name='بدل', null=True, blank=True, on_delete=models.SET_NULL, related_name='replaced_by')
     list_price = models.DecimalField('سعر القائمة', max_digits=12, decimal_places=2, default=Decimal('0'))
     price = models.DecimalField('السعر على الشريك', max_digits=12, decimal_places=2, default=Decimal('0'))
+    extra_discount_percent = models.DecimalField('خصم خاص %', max_digits=5, decimal_places=2, default=Decimal('0'))
+    customer_price = models.DecimalField('السعر اللي العميل دفعه', max_digits=12, decimal_places=2, null=True, blank=True)
+    referred_by = models.ForeignKey(Partner, verbose_name='عن طريق مسوّق', null=True, blank=True, on_delete=models.SET_NULL, related_name='referred_licenses')
     issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     notes = models.TextField('ملاحظات', blank=True)
 
@@ -186,6 +197,8 @@ class LicenseRequest(models.Model):
     limits = models.JSONField(default=dict, blank=True)
     days = models.PositiveIntegerField(default=365)
     replaces = models.ForeignKey(License, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    extra_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
+    customer_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     notes = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUSES, default=STATUS_PENDING)
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
@@ -210,8 +223,10 @@ class Transaction(models.Model):
     KIND_TRANSFER_IN = 'transfer_in'
     KIND_TRANSFER_OUT = 'transfer_out'
     KIND_ADJUST = 'adjust'
+    KIND_COMMISSION = 'commission'
+    KIND_PAYOUT = 'payout'
     KINDS = [(KIND_TOPUP, 'شحن رصيد'), (KIND_CHARGE, 'مفتاح'), (KIND_REFUND, 'استرجاع'), (KIND_TRANSFER_IN, 'تحويل وارد'),
-             (KIND_TRANSFER_OUT, 'تحويل لوكيل'), (KIND_ADJUST, 'تسوية')]
+             (KIND_TRANSFER_OUT, 'تحويل لوكيل'), (KIND_ADJUST, 'تسوية'), (KIND_COMMISSION, 'عمولة'), (KIND_PAYOUT, 'صرف مستحقات')]
 
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, related_name='transactions')
     kind = models.CharField(max_length=15, choices=KINDS)
@@ -309,3 +324,31 @@ class Lead(models.Model):
 
     def __str__(self):
         return f'{self.name} — {self.phone}'
+
+
+class UserSecurity(models.Model):
+    """Two-step login (TOTP codes from an authenticator app) and its recovery codes."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='security')
+    totp_secret = models.CharField(max_length=64, blank=True)
+    totp_enabled = models.BooleanField(default=False)
+    totp_last_step = models.BigIntegerField(default=0)  # a code is accepted once
+    recovery_codes = models.JSONField(default=list, blank=True)  # sha256 hashes, each usable once
+    enabled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'أمان الدخول'
+        verbose_name_plural = 'أمان الدخول'
+
+
+class LoginAttempt(models.Model):
+    """Every login try (for lock-out after repeated failures and for the security page)."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    ip = models.GenericIPAddressField(null=True, blank=True, db_index=True)
+    ok = models.BooleanField(default=False)
+    stage = models.CharField(max_length=10, default='password')  # password | code
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-at']

@@ -17,6 +17,7 @@ APP_PORT=${APP_PORT:-8020}              # local only
 DIR=${DIR:-/opt/innoforge}
 UPDATES=${UPDATES:-/srv/InnoForge/PoS}  # where the POS update files are (served at /updates/)
 CERT=${CERT:-/etc/letsencrypt/live/0x01source.com-0001}
+ADMIN_ALLOW=${ADMIN_ALLOW:-"127.0.0.1 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 100.64.0.0/10"}  # who may open /django-admin/ ("any" = everyone)
 REPO=${REPO:-https://github.com/GeekAhmeds/InnoForge.git}
 BRANCH=${BRANCH:-claude/amazing-noether-jd4woa}
 PROJECT=innoforge-licenses
@@ -112,9 +113,19 @@ BACKUP=/root/nginx-backup-$(date +%F-%H%M%S).tgz
 tar czf "$BACKUP" -C / etc/nginx
 ok "نسخة احتياطية: $BACKUP"
 mkdir -p "$UPDATES"
+ADMIN_RULES=""
+if [ "$ADMIN_ALLOW" != "any" ]; then
+  for net in $ADMIN_ALLOW; do ADMIN_RULES="$ADMIN_RULES        allow $net;
+"; done
+  ADMIN_RULES="$ADMIN_RULES        deny all;"
+fi
 cat > "$SITE" <<NGINX
 # InnoForge — website (/), license server portal (/portal/, /login/ …) + POS update files (/updates/).
 # Added by apps/license-server/deploy/install-inno.sh; remove with uninstall-inno.sh.
+
+# Slows down password guessing on the login pages and spam on the website form (per address).
+limit_req_zone \$binary_remote_addr zone=innoforge_login:10m rate=10r/m;
+
 server {
     listen $PORT ssl http2;
     server_name $HOST;
@@ -138,6 +149,24 @@ server {
         alias $UPDATES/;
         autoindex off;
         add_header Cache-Control "no-cache";
+    }
+    location ~ ^/(login/|api/v1/lead) {
+        limit_req zone=innoforge_login burst=10 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    # Advanced admin (django-admin): only from the office network / Tailscale (ADMIN_ALLOW).
+    location /django-admin/ {
+$ADMIN_RULES
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
     }
     location / {
         proxy_pass http://127.0.0.1:$APP_PORT;

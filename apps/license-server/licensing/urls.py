@@ -2,10 +2,12 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 from django.views.generic import RedirectView
 
-from . import api, views
+from . import api, auth, views
 
 urlpatterns = [
-    path('login/', auth_views.LoginView.as_view(template_name='licensing/login.html'), name='login'),
+    path('login/', auth.login_view, name='login'),
+    path('login/verify/', auth.verify_view, name='login_verify'),
+    path('security/', auth.security_page, name='security'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('password/', auth_views.PasswordChangeView.as_view(template_name='licensing/password.html', success_url='/portal/'), name='password'),
     # "/" is the public website (nginx serves apps/website); without nginx it goes to the portal.
@@ -30,7 +32,10 @@ urlpatterns = [
     path('partners/<int:pk>/edit/', views.partner_edit, name='partner_edit'),
     path('partners/<int:pk>/users/', views.partner_user_add, name='partner_user_add'),
     path('partners/<int:pk>/users/<int:user_id>/toggle/', views.partner_user_toggle, name='partner_user_toggle'),
+    path('partners/<int:pk>/users/<int:user_id>/reset/', views.partner_user_reset, name='partner_user_reset'),
     path('partners/<int:pk>/topup/', views.partner_topup, name='partner_topup'),
+    path('partners/<int:pk>/payout/', views.partner_payout, name='partner_payout'),
+    path('partners/<int:pk>/statement/', views.partner_statement, name='partner_statement'),
     path('partners/<int:pk>/transfer/', views.partner_transfer, name='partner_transfer'),
     path('account/', views.my_account, name='account'),
     path('wallet/', views.wallet, name='wallet'),

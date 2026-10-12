@@ -24,6 +24,11 @@
       <label>رقم الجهاز (من شاشة التفعيل عند العميل)<input name="machine" class="mono" required placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" value="{{ post.machine }}"></label>
       {% include 'licensing/_license_fields.html' %}
       <label class="full" style="flex-direction:row;gap:8px;color:#111827"><input type="checkbox" name="trial" id="trial" value="1"> مفتاح تجربة مجاني (أقصى 14 يوم، مرة واحدة لكل جهاز)</label>
+      <label>{% if is_vendor %}خصم خاص على المفتاح ده %{% else %}طلب خصم خاص % (بموافقة Inno Source){% endif %}
+        <input name="extra_discount" type="number" min="0" max="100" step="0.01" value="{{ post.extra_discount }}" placeholder="0">
+        <span class="small">{% if is_vendor %}فوق خصم الشريك، وInno Source بتتحمله. فاضي = الخصم الخاص المسجل على العميل (لو فيه).{% else %}لو كتبت نسبة، المفتاح بيتبعت كطلب ويستنى موافقة Inno Source.{% endif %}</span></label>
+      <label>السعر اللي العميل هيدفعه (اختياري)<input name="customer_price" type="number" min="0" step="0.01" value="{{ post.customer_price }}">
+        <span class="small">لحساباتك بس (ربحك = سعر العميل − سعرك). مش بيأثر على الرصيد.</span></label>
       <label class="full">ملاحظات<input name="notes" value="{{ post.notes }}"></label>
     </div>
   </div>
@@ -54,6 +59,8 @@
       if (!r) return;
       if (!r.ok) { box.innerHTML = `<span class="bad">${r.error}</span>`; return; }
       box.innerHTML = `السعر: <b>${r.price} ${cur}</b>` + (r.list_price !== r.price ? ` <span class="muted small">(سعر القائمة ${r.list_price})</span>` : '') +
+        (Number(r.extra) ? ` <span class="badge">خصم خاص ${r.extra}%</span>` : '') +
+        (r.needs_approval ? ` <span class="small bad">— محتاج موافقة Inno Source</span>` : '') +
         (r.available !== undefined ? ` <span class="muted small">— المتاح في رصيدك ${r.available}</span>` : '');
     }, 250);
   };

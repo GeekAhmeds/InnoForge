@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from . import editions as E
@@ -124,8 +124,19 @@ def _price(item, code, days):
     return _money(base * Decimal(days) / Decimal(365))
 
 
-def quote(edition, addons, limits, days, partner=None, kind=License.KIND_NEW):
-    """(list price, what the partner pays)."""
+def _percent(x):
+    try:
+        x = _money(x or 0)
+    except Exception as err:
+        raise LicenseError('نسبة الخصم لازم تكون رقم') from err
+    if x < 0 or x > 100:
+        raise LicenseError('نسبة الخصم لازم تكون من 0 لـ 100')
+    return x
+
+
+def quote(edition, addons, limits, days, partner=None, kind=License.KIND_NEW, extra_discount=0):
+    """(list price, what the partner pays). extra_discount = a special discount Inno Source
+    gives on this key (or this customer) on top of the partner's own discount; Inno Source bears it."""
     if kind == License.KIND_TRIAL:
         return Decimal('0'), Decimal('0')
     total = _price(Price.ITEM_EDITION, edition, days)
@@ -142,7 +153,9 @@ def quote(edition, addons, limits, days, partner=None, kind=License.KIND_NEW):
             total += unit * extra
     total = _money(total)
     discount = partner.discount_percent if partner else Decimal('0')
-    return total, _money(total * (Decimal('100') - discount) / Decimal('100'))
+    price = total * (Decimal('100') - discount) / Decimal('100')
+    price = price * (Decimal('100') - _percent(extra_discount)) / Decimal('100')
+    return total, _money(price)
 
 
 # ---------------------------------------------------------------- issuing
@@ -215,8 +228,14 @@ def _sign(customer, partner, machine, edition, addons, limits, issued, expires):
 
 @transaction.atomic
 def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, days=365, kind=License.KIND_NEW,
-          replaces=None, expires_at=None, notes='', ip=None, charge=None):
-    """Signs a key, records it and charges the partner. Everything or nothing."""
+          replaces=None, expires_at=None, notes='', ip=None, charge=None, extra_discount_percent=None, customer_price=None,
+          referred_by=None):
+    """Signs a key, records it and charges the partner. Everything or nothing.
+
+    extra_discount_percent: a special discount on this key (default: the customer's special discount).
+    Only Inno Source sets one; a partner asks for it through a request (approve_request).
+    customer_price: what the partner charged its customer (for its own records and profit).
+    referred_by: the marketer who brought the customer (default: customer.referred_by) — earns a commission."""
     machine_n = signing.normalize_machine(machine)
     if not machine_n:
         raise LicenseError('رقم الجهاز لازم يكون 20 حرف/رقم زي 7F3A-91C2-04BE-D5E8-2A6F')
@@ -230,9 +249,20 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
             raise LicenseError('مفاتيح التجربة مش مسموحة لحسابك')
         if License.objects.filter(machine=machine_n, kind=License.KIND_TRIAL).exists():
             raise LicenseError('الجهاز ده خد تجربة قبل كده')
+    special = _percent(customer.special_discount_percent)
+    extra = special if extra_discount_percent in (None, '') else _percent(extra_discount_percent)
+    if extra != special and not is_vendor(user):
+        raise LicenseError('الخصم الخاص محتاج موافقة Inno Source — ابعته كطلب')
+    if customer_price not in (None, ''):
+        customer_price = _money(customer_price)
+        if customer_price < 0:
+            raise LicenseError('سعر العميل مينفعش يكون بالسالب')
+    else:
+        customer_price = None
+    referrer = referred_by if referred_by is not None else customer.referred_by
     # Moving or upgrading keeps the end date the key already had.
     check_allowed(partner, edition, addons, limits, None if kind in (License.KIND_TRANSFER, License.KIND_UPGRADE) else days)
-    list_price, price = quote(edition, addons, limits, days, partner, kind) if charge is None else (charge, charge)
+    list_price, price = quote(edition, addons, limits, days, partner, kind, extra) if charge is None else (charge, charge)
     if partner is not None:
         locked = Partner.objects.select_for_update().get(pk=partner.pk)
         if price and locked.balance - price < -locked.credit_limit:
@@ -243,18 +273,35 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
     key = _sign(customer, partner, machine_n, edition, addons, limits, issued, expires_at)
     lic = License.objects.create(customer=customer, partner=partner, machine=machine_n, kind=kind, edition=edition, addons=addons,
                                  limits=limits, days=days, issued_at=issued, expires_at=expires_at, key=key, replaces=replaces,
-                                 list_price=list_price, price=price, issued_by=user, notes=notes)
+                                 list_price=list_price, price=price, issued_by=user, notes=notes, extra_discount_percent=extra,
+                                 customer_price=customer_price, referred_by=referrer)
     if replaces is not None:
         License.objects.filter(pk=replaces.pk).update(status=License.STATUS_REPLACED)
     if partner is not None and price:
         Transaction.objects.create(partner=partner, kind=Transaction.KIND_CHARGE, amount=-price, license=lic,
                                    note=f'{lic.get_kind_display()} — {customer.name} — {E.edition_name(edition)}', created_by=user)
+    commission = _commission(user, lic, referrer, partner, price)
     audit(user, f'license_{kind}', partner=partner, ip=ip, license=lic.id, customer=customer.name, machine=machine_n, edition=edition,
-          addons=addons, limits=limits, days=days, price=str(price))
+          addons=addons, limits=limits, days=days, price=str(price), extra_discount=str(extra),
+          **({'commission': str(commission), 'referred_by': referrer.code} if commission else {}))
     return lic
 
 
-def renew(user, lic, days, *, partner, ip=None):
+def _commission(user, lic, referrer, seller, price):
+    """A marketer earns its percent of what Inno Source got for a key sold to a customer it
+    brought. It is added to the marketer's balance; Inno Source pays it out (payout)."""
+    if referrer is None or not price or not referrer.commission_percent or not referrer.active:
+        return Decimal('0')
+    if seller is not None and referrer.id in [seller.id] + [a.id for a in seller.ancestors()]:
+        return Decimal('0')  # the seller's own chain already earns through its discount
+    amount = _money(price * referrer.commission_percent / Decimal('100'))
+    if amount:
+        Transaction.objects.create(partner=referrer, kind=Transaction.KIND_COMMISSION, amount=amount, license=lic,
+                                   note=f'عمولة {referrer.commission_percent}% — {lic.customer.name}', created_by=user)
+    return amount
+
+
+def renew(user, lic, days, *, partner, ip=None, extra_discount_percent=None, customer_price=None):
     """Same computer, same contents, longer: starts when the current key ends (or today)."""
     lic.refresh_from_db()  # never act on a stale copy (it may have been replaced meanwhile)
     if lic.status == License.STATUS_REVOKED:
@@ -266,7 +313,8 @@ def renew(user, lic, days, *, partner, ip=None):
         raise LicenseError('اختار مدة التجديد')
     start = max(lic.expires_at, timezone.now())
     return issue(user, partner=partner, customer=lic.customer, machine=lic.machine, edition=lic.edition, addons=lic.addons,
-                 limits=lic.limits, days=days, kind=License.KIND_RENEWAL, replaces=lic, expires_at=start + timedelta(days=days), ip=ip)
+                 limits=lic.limits, days=days, kind=License.KIND_RENEWAL, replaces=lic, expires_at=start + timedelta(days=days), ip=ip,
+                 extra_discount_percent=extra_discount_percent, customer_price=customer_price)
 
 
 def upgrade(user, lic, *, partner, edition, addons, limits, ip=None):
@@ -278,8 +326,9 @@ def upgrade(user, lic, *, partner, edition, addons, limits, ip=None):
     if lic.expires_at and lic.expired:
         raise LicenseError('المفتاح منتهي — جدده الأول')
     addons, limits, _ = _clean(edition, addons, limits, left)
-    new_list, new_price = quote(edition, addons, limits, left, partner)
-    old_list, old_price = quote(lic.edition, lic.addons, lic.limits, left, partner)
+    special = lic.customer.special_discount_percent
+    new_list, new_price = quote(edition, addons, limits, left, partner, extra_discount=special)
+    old_list, old_price = quote(lic.edition, lic.addons, lic.limits, left, partner, extra_discount=special)
     charge = max(Decimal('0'), new_price - old_price)
     check_allowed(partner, edition, addons, limits, None)
     return issue(user, partner=partner, customer=lic.customer, machine=lic.machine, edition=edition, addons=addons, limits=limits,
@@ -311,6 +360,10 @@ def revoke(user, lic, *, refund=False, note='', ip=None):
     lic.save(update_fields=['status', 'notes'])
     if refund and lic.partner_id and lic.price:
         Transaction.objects.create(partner=lic.partner, kind=Transaction.KIND_REFUND, amount=lic.price, license=lic, note=note, created_by=user)
+    if refund:  # the money went back, so does the marketer's commission
+        for t in Transaction.objects.filter(license=lic, kind=Transaction.KIND_COMMISSION):
+            Transaction.objects.create(partner=t.partner, kind=Transaction.KIND_ADJUST, amount=-t.amount, license=lic,
+                                       note=f'إلغاء عمولة — {note}'.strip(' —'), created_by=user)
     audit(user, 'license_revoke', partner=lic.partner, ip=ip, license=lic.id, refund=bool(refund), note=note)
     return lic
 
@@ -342,27 +395,80 @@ def transfer_balance(user, source, target, amount, *, note='', ip=None):
     audit(user, 'wallet_transfer', partner=source, ip=ip, to=target.code, amount=str(amount))
 
 
+@transaction.atomic
+def payout(user, partner, amount, *, reference='', note='', ip=None):
+    """Inno Source paid a partner what it is owed (commissions, or a balance refund)."""
+    amount = _money(amount)
+    if amount <= 0:
+        raise LicenseError('اكتب مبلغ أكبر من صفر')
+    locked = Partner.objects.select_for_update().get(pk=partner.pk)
+    if locked.balance < amount:
+        raise LicenseError(f'المستحق له {locked.balance} بس')
+    Transaction.objects.create(partner=partner, kind=Transaction.KIND_PAYOUT, amount=-amount, reference=reference, note=note, created_by=user)
+    audit(user, 'wallet_payout', partner=partner, ip=ip, amount=str(amount), reference=reference)
+
+
+def statement(partner, start=None, end=None):
+    """Account statement: opening balance, every movement with a running balance, totals per kind,
+    closing balance. start/end are dates (end inclusive)."""
+    qs = partner.transactions.select_related('license', 'license__customer', 'created_by').order_by('created_at', 'id')
+    before = Decimal('0')
+    if start:
+        before = qs.filter(created_at__date__lt=start).aggregate(s=models.Sum('amount'))['s'] or Decimal('0')
+        qs = qs.filter(created_at__date__gte=start)
+    if end:
+        qs = qs.filter(created_at__date__lte=end)
+    running, rows, totals = before, [], {}
+    kinds = dict(Transaction.KINDS)
+    for t in qs:
+        running += t.amount
+        rows.append((t, running))
+        totals[t.kind] = totals.get(t.kind, Decimal('0')) + t.amount
+    sales = License.objects.filter(partner=partner).exclude(customer_price=None)
+    if start:
+        sales = sales.filter(issued_at__date__gte=start)
+    if end:
+        sales = sales.filter(issued_at__date__lte=end)
+    agg = sales.aggregate(c=models.Sum('customer_price'), p=models.Sum('price'))
+    return {'opening': before, 'closing': running, 'rows': rows,
+            'totals': [(kinds.get(k, k), v) for k, v in totals.items()],
+            'debit': sum((t.amount for t, _ in rows if t.amount < 0), Decimal('0')),
+            'credit': sum((t.amount for t, _ in rows if t.amount > 0), Decimal('0')),
+            'customer_sales': agg['c'] or Decimal('0'), 'customer_cost': agg['p'] or Decimal('0')}
+
+
 # ---------------------------------------------------------------- requests
-def create_request(user, *, partner, customer, machine, edition, addons, limits, days, kind=License.KIND_NEW, replaces=None, notes=''):
+def create_request(user, *, partner, customer, machine, edition, addons, limits, days, kind=License.KIND_NEW, replaces=None, notes='',
+                   extra_discount_percent=0, customer_price=None):
     machine_n = signing.normalize_machine(machine)
     if not machine_n:
         raise LicenseError('رقم الجهاز لازم يكون 20 حرف/رقم')
     addons, limits, days = _clean(edition, addons, limits, days)
     check_allowed(partner, edition, addons, limits, days)
+    extra = _percent(extra_discount_percent)
+    customer_price = _money(customer_price) if customer_price not in (None, '') else None
     req = LicenseRequest.objects.create(partner=partner, customer=customer, machine=machine_n, kind=kind, edition=edition, addons=addons,
-                                        limits=limits, days=days, replaces=replaces, notes=notes, requested_by=user)
+                                        limits=limits, days=days, replaces=replaces, notes=notes, requested_by=user,
+                                        extra_discount_percent=extra, customer_price=customer_price)
     audit(user, 'request_create', partner=partner, request=req.id, customer=customer.name)
     return req
 
 
-def approve_request(user, req, *, ip=None):
+def approve_request(user, req, *, ip=None, extra_discount_percent=None):
+    """Inno Source approves (it may change the asked-for special discount, e.g. 90% → 50%)."""
     if req.status != LicenseRequest.STATUS_PENDING:
         raise LicenseError('الطلب ده اتحسم قبل كده')
+    if not is_vendor(user):
+        raise LicenseError('الموافقة لـ Inno Source بس')
+    extra = req.extra_discount_percent if extra_discount_percent in (None, '') else _percent(extra_discount_percent)
     if req.kind == License.KIND_RENEWAL and req.replaces:
-        lic = renew(user, req.replaces, req.days, partner=req.partner, ip=ip)
+        lic = renew(user, req.replaces, req.days, partner=req.partner, ip=ip, extra_discount_percent=extra or None,
+                    customer_price=req.customer_price)
     else:
         lic = issue(user, partner=req.partner, customer=req.customer, machine=req.machine, edition=req.edition, addons=req.addons,
-                    limits=req.limits, days=req.days, kind=req.kind, replaces=req.replaces, notes=req.notes, ip=ip)
+                    limits=req.limits, days=req.days, kind=req.kind, replaces=req.replaces, notes=req.notes, ip=ip,
+                    extra_discount_percent=extra or None, customer_price=req.customer_price)
+    req.extra_discount_percent = extra
     req.status, req.license, req.decided_by, req.decided_at = LicenseRequest.STATUS_APPROVED, lic, user, timezone.now()
     req.save()
     return lic

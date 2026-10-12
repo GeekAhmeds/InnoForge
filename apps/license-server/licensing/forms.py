@@ -10,7 +10,7 @@ from .models import Customer, Partner, PartnerUser
 class CustomerForm(forms.ModelForm):
     class Meta:
         model = Customer
-        fields = ['name', 'contact', 'phone', 'email', 'city', 'activity', 'tax_number', 'partner', 'notes']
+        fields = ['name', 'contact', 'phone', 'email', 'city', 'activity', 'tax_number', 'partner', 'special_discount_percent', 'referred_by', 'notes']
         widgets = {'notes': forms.Textarea(attrs={'rows': 3})}
 
     def __init__(self, *args, user=None, **kwargs):
@@ -18,10 +18,26 @@ class CustomerForm(forms.ModelForm):
         self.fields['partner'].queryset = S.visible_partners(user)
         self.fields['partner'].required = False
         me = S.partner_of(user)
+        if me is not None:
+            # Special discounts and marketers are Inno Source's decision.
+            self.fields.pop('special_discount_percent')
+            self.fields.pop('referred_by')
+        else:
+            self.fields['referred_by'].queryset = Partner.objects.filter(active=True)
+            self.fields['referred_by'].empty_label = '—'
         if me is not None and not me.children.exists():
             del self.fields['partner']  # a partner without agents: always its own customer
         else:
             self.fields['partner'].empty_label = 'Inno Source مباشرة' if me is None else f'{me.code} (أنا)'
+
+    def clean_special_discount_percent(self):
+        return _pct(self.cleaned_data.get('special_discount_percent'))
+
+
+def _pct(v):
+    if v is not None and (v < 0 or v > 100):
+        raise forms.ValidationError('النسبة لازم تكون من 0 لـ 100')
+    return v
 
 
 def _codes(post_value, universe):
@@ -35,7 +51,7 @@ class PartnerForm(forms.ModelForm):
     class Meta:
         model = Partner
         fields = ['code', 'name', 'kind', 'parent', 'phone', 'email', 'city', 'address', 'active', 'max_days', 'can_issue_directly',
-                  'can_manage_children', 'allow_trials', 'discount_percent', 'credit_limit', 'notes']
+                  'can_manage_children', 'allow_trials', 'require_2fa', 'discount_percent', 'commission_percent', 'credit_limit', 'notes']
         widgets = {'notes': forms.Textarea(attrs={'rows': 3})}
 
     def __init__(self, *args, parent=None, **kwargs):
@@ -43,13 +59,19 @@ class PartnerForm(forms.ModelForm):
         self.parent_partner = parent
         if parent is not None:
             # A distributor manages its own agents: no money terms, no parent choice.
-            for f in ('parent', 'discount_percent', 'credit_limit', 'can_manage_children'):
+            for f in ('parent', 'discount_percent', 'commission_percent', 'credit_limit', 'can_manage_children'):
                 self.fields.pop(f, None)
             self.fields['kind'].choices = [c for c in Partner.KINDS if c[0] != Partner.KIND_DISTRIBUTOR]
         else:
             self.fields['parent'].required = False
             if self.instance.pk:
                 self.fields['parent'].queryset = Partner.objects.exclude(pk__in=self.instance.scope_ids())
+
+    def clean_discount_percent(self):
+        return _pct(self.cleaned_data.get('discount_percent'))
+
+    def clean_commission_percent(self):
+        return _pct(self.cleaned_data.get('commission_percent'))
 
     def clean(self):
         data = super().clean()

@@ -30,6 +30,7 @@
         <a href="/django-admin/">⚙ الإدارة المتقدمة</a>
       {% endif %}
       <a href="/" target="_blank">🌐 الموقع</a>
+      <a href="{% url 'security' %}" class="{% if u == 'security' %}on{% endif %}">🔐 أمان حسابي</a>
       <a href="{% url 'password' %}">🔒 تغيير كلمة السر</a>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>↩ خروج</button></form>
     </nav>

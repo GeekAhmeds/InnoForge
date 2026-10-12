@@ -7,6 +7,8 @@
   <dt>المسؤول</dt><dd>{{ c.contact|default:"—" }}</dd><dt>التليفون</dt><dd class="mono">{{ c.phone|default:"—" }}</dd>
   <dt>المدينة</dt><dd>{{ c.city|default:"—" }}</dd><dt>النشاط</dt><dd>{{ c.activity|default:"—" }}</dd>
   <dt>الرقم الضريبي</dt><dd>{{ c.tax_number|default:"—" }}</dd><dt>الشريك</dt><dd>{{ c.partner|default:"Inno Source مباشرة" }}</dd>
+  {% if c.special_discount_percent %}<dt>خصم خاص</dt><dd><span class="badge">{{ c.special_discount_percent }}%</span> <span class="small muted">على أي مفتاح للعميل ده</span></dd>{% endif %}
+  {% if is_vendor and c.referred_by %}<dt>جه عن طريق</dt><dd><a href="{% url 'partner' c.referred_by.pk %}">{{ c.referred_by }}</a></dd>{% endif %}
   {% if c.notes %}<dt>ملاحظات</dt><dd>{{ c.notes|linebreaksbr }}</dd>{% endif %}
 </dl></div>
 <div class="card"><h2>التراخيص</h2>

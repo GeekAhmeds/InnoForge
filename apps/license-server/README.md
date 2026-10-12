@@ -28,9 +28,12 @@ DJANGO_TESTING=1 python manage.py test licensing               # tests (uses nod
 ```
 config/                 settings (env vars, see .env.example), urls
 licensing/models.py     Partner (+ parent), PartnerUser, Customer, License, LicenseRequest, Transaction, Price, AuditLog, ApiKey
-licensing/services.py   ALL business rules (rules(), quote(), issue/renew/upgrade/transfer/revoke, wallet, requests, API keys)
+licensing/services.py   ALL business rules (rules(), quote() with special discounts, issue/renew/upgrade/transfer/revoke,
+                        marketer commissions, wallet: topup/transfer/payout/statement, requests, API keys)
 licensing/signing.py    key format, JSON.stringify-compatible bytes, server key + permit
 licensing/editions.py   editions.json helpers (same rules as the app)
+licensing/security.py   two-step login (TOTP, recovery codes), lock-out after failed tries
+licensing/auth.py       login + code step, TwoStepMiddleware, «أمان حسابي» page, admin login → portal login
 licensing/views.py      portal (staff = everything; partner users = their partner and its agents)
 licensing/api.py        /api/v1/* (Bearer ifk_… keys)
 licensing/templates/    pages; static/licensing/app.css

@@ -1,0 +1,48 @@
+{% extends 'licensing/base.html' %}
+{% block title %}أمان حسابي{% endblock %}
+{% block content %}
+<div class="head"><h1>🔐 أمان حسابي</h1></div>
+{% if codes %}
+<div class="card" style="border:2px solid #f59e0b"><h2>أكواد الطوارئ — احفظها دلوقتي (مش هتظهر تاني)</h2>
+  <p class="small">كل كود بيشتغل مرة واحدة بدل كود التطبيق لو الموبايل ضاع. اطبعها أو احفظها في مكان آمن بعيد عن الموبايل.</p>
+  <div class="key" style="columns:2">{% for c in codes %}{{ c }}<br>{% endfor %}</div>
+  <div class="row" style="margin-top:8px"><button class="btn" type="button" onclick="print()">🖨 طباعة</button></div>
+</div>
+{% endif %}
+<div class="grid">
+<div class="card"><h2>التحقق بخطوتين {% if s.totp_enabled %}<span class="badge good">شغال</span>{% else %}<span class="badge bad">مقفول</span>{% endif %}</h2>
+{% if s.totp_enabled %}
+  <p>كل دخول بيطلب كلمة السر + كود من تطبيق الموبايل. اتشغل {{ s.enabled_at|date:"Y-m-d" }}. أكواد الطوارئ الباقية: <b>{{ remaining }}</b>.</p>
+  <form method="post" class="row">{% csrf_token %}
+    <input name="code" placeholder="كود من التطبيق" required class="mono" style="max-width:180px" inputmode="numeric" autocomplete="one-time-code">
+    <button class="btn" name="action" value="recovery">أكواد طوارئ جديدة</button>
+    {% if not required %}<button class="btn danger" name="action" value="disable" onclick="return confirm('تقفل التحقق بخطوتين؟')">قفل التحقق</button>{% endif %}
+  </form>
+  {% if required %}<p class="small muted">حسابك لازم يفضل عليه التحقق بخطوتين. لو غيرت الموبايل: Inno Source تشيله وانت تشغله تاني.</p>{% endif %}
+{% else %}
+  {% if required %}<ul class="messages"><li class="warning">حسابك لازم يشتغل عليه التحقق بخطوتين قبل ما تكمل.</li></ul>{% endif %}
+  <ol>
+    <li>نزّل على موبايلك <b>Google Authenticator</b> أو <b>Microsoft Authenticator</b>.</li>
+    <li>من التطبيق اختار «إضافة» ← «مسح رمز QR» وصوّر الكود ده:</li>
+  </ol>
+  <div style="background:#fff;display:inline-block;padding:6px;border:1px solid #e5e7eb;border-radius:8px;width:220px">{{ qr|safe }}</div>
+  <p class="small">مش عارف تصوّر؟ اختار «إدخال مفتاح» واكتب: <span class="mono">{{ secret }}</span></p>
+  <form method="post" class="row">{% csrf_token %}<input type="hidden" name="action" value="enable">
+    <input name="code" placeholder="الكود اللي ظهر في التطبيق" required class="mono" style="max-width:220px" inputmode="numeric" autocomplete="one-time-code">
+    <button class="btn primary">تشغيل</button>
+  </form>
+{% endif %}
+</div>
+<div class="card"><h2>آخر محاولات الدخول لحسابك</h2>
+  <table><tr><th>الوقت</th><th>العنوان</th><th>الخطوة</th><th></th></tr>
+  {% for a in attempts %}<tr><td>{{ a.at|date:"Y-m-d H:i" }}</td><td class="mono small">{{ a.ip|default:"—" }}</td><td>{% if a.stage == 'code' %}الكود{% else %}كلمة السر{% endif %}</td>
+    <td>{% if a.ok %}<span class="badge good">نجح</span>{% else %}<span class="badge bad">فشل</span>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="4" class="muted">—</td></tr>{% endfor %}</table>
+  <p class="small muted">لو شايف محاولات مش بتاعتك: غيّر كلمة السر و<a href="{% url 'password' %}">شغّل التحقق بخطوتين</a>.</p>
+</div>
+</div>
+{% if failed %}<div class="card"><h2>آخر محاولات الدخول الفاشلة (كل الحسابات)</h2>
+  <table><tr><th>الوقت</th><th>اسم الدخول</th><th>العنوان</th><th>الخطوة</th></tr>
+  {% for a in failed %}<tr><td>{{ a.at|date:"Y-m-d H:i" }}</td><td class="mono">{{ a.username }}</td><td class="mono small">{{ a.ip|default:"—" }}</td><td>{% if a.stage == 'code' %}الكود{% else %}كلمة السر{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="4" class="muted">مفيش</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

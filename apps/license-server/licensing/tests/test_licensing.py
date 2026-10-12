@@ -48,7 +48,7 @@ def node_verify(key, vendor_pub_pem, machine=MACHINE):
 class Base(TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.override = override_settings(KEYS_DIR=self.tmp, SIGNING_KEY_FILE=self.tmp / 'server-private.pem', SIGNING_PERMIT_FILE=self.tmp / 'server.cert')
+        self.override = override_settings(REQUIRE_2FA_STAFF=False, KEYS_DIR=self.tmp, SIGNING_KEY_FILE=self.tmp / 'server-private.pem', SIGNING_PERMIT_FILE=self.tmp / 'server.cert')
         self.override.enable()
         self.vendor_key = Ed25519PrivateKey.generate()
         self.vendor_pub_pem = self.vendor_key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
@@ -297,3 +297,161 @@ class WebsiteLeadTests(Base):
         self.client.force_login(u)
         self.assertEqual(self.client.get(reverse('leads')).status_code, 403)
         self.assertRedirects(self.client.get('/'), reverse('dashboard'), fetch_redirect_response=False)
+
+
+class DiscountAndSettlementTests(Base):
+    def test_special_discount_customer_and_key(self):
+        # Customer special discount: applied automatically on top of the partner's discount; Inno Source bears it.
+        self.cust.special_discount_percent = Decimal('50')
+        self.cust.save()
+        self.topup(self.agent, 10000)
+        lic = S.issue(self.staff, partner=self.agent, customer=self.cust, machine=MACHINE, edition='market', days=365)
+        self.assertEqual((lic.list_price, lic.price, lic.extra_discount_percent), (Decimal('3000'), Decimal('1200'), Decimal('50')))
+        # A one-off 90% on a key, set by Inno Source.
+        c2 = Customer.objects.create(name='صديق', partner=None)
+        lic2 = S.issue(self.staff, partner=None, customer=c2, machine='1111-BBBB-CCCC-DDDD-1234', edition='market', days=365, extra_discount_percent='90')
+        self.assertEqual(lic2.price, Decimal('300'))
+        with self.assertRaises(S.LicenseError):
+            S.issue(self.staff, partner=None, customer=c2, machine='1111-BBBB-CCCC-DDDD-1235', edition='market', days=365, extra_discount_percent='120')
+
+    def test_partner_special_discount_needs_approval(self):
+        self.topup(self.agent, 10000)
+        u = User.objects.create_user('ag', password='y' * 12)
+        PartnerUser.objects.create(user=u, partner=self.agent, role=PartnerUser.ROLE_OWNER)
+        with self.assertRaises(S.LicenseError):  # a partner can't give itself a special discount
+            S.issue(u, partner=self.agent, customer=self.cust, machine=MACHINE, edition='market', days=365, extra_discount_percent='90')
+        self.client.force_login(u)
+        q = self.client.get(reverse('quote'), {'edition': 'market', 'days': '365', 'customer': self.cust.pk, 'extra_discount': '90'}).json()
+        self.assertTrue(q['needs_approval'])
+        self.assertEqual(q['price'], '240.00')
+        r = self.client.post(reverse('license_new'), {'customer': self.cust.pk, 'machine': MACHINE, 'edition': 'market', 'days': '365',
+                                                      'extra_discount': '90', 'customer_price': '1500'})
+        self.assertRedirects(r, reverse('requests'))
+        req = LicenseRequest.objects.get()
+        self.assertEqual((req.extra_discount_percent, req.customer_price), (Decimal('90'), Decimal('1500')))
+        self.assertFalse(License.objects.exists())
+        # Inno Source approves but gives 50% instead of 90%.
+        self.client.force_login(self.staff)
+        r = self.client.post(reverse('request_decide', args=[req.pk, 'approve']), {'extra_discount': '50'})
+        lic = License.objects.get()
+        self.assertEqual((lic.price, lic.extra_discount_percent, lic.customer_price), (Decimal('1200'), Decimal('50'), Decimal('1500')))
+        self.assertEqual(self.agent.balance, Decimal('8800'))
+        self.assertContains(self.client.get(reverse('license', args=[lic.pk])), 'خصم خاص 50')
+
+    def test_marketer_commission_payout_and_statement(self):
+        marketer = Partner.objects.create(code='M1', name='مسوّق', kind=Partner.KIND_RESELLER, commission_percent=Decimal('10'))
+        c = Customer.objects.create(name='مطعم', referred_by=marketer)
+        lic = S.issue(self.staff, partner=None, customer=c, machine=MACHINE, edition='market', days=365)
+        self.assertEqual(lic.referred_by, marketer)
+        self.assertEqual(marketer.balance, Decimal('300'))  # 10% of 3000
+        S.payout(self.staff, marketer, Decimal('200'), reference='كاش')
+        self.assertEqual(marketer.balance, Decimal('100'))
+        with self.assertRaises(S.LicenseError):
+            S.payout(self.staff, marketer, Decimal('101'))
+        # Refunding the key takes the commission back.
+        S.revoke(self.staff, lic, refund=True, note='رجع')
+        self.assertEqual(marketer.balance, Decimal('-200'))
+        st = S.statement(marketer)
+        self.assertEqual((st['opening'], st['closing'], len(st['rows'])), (Decimal('0'), Decimal('-200'), 3))
+        later = S.statement(marketer, start=timezone.localdate() + timedelta(days=1))
+        self.assertEqual((later['opening'], later['rows']), (Decimal('-200'), []))
+        # The seller's own chain never earns a commission on its own sale.
+        self.cust.referred_by = self.dist
+        self.cust.save()
+        self.dist.commission_percent = Decimal('5')
+        self.dist.save()
+        self.topup(self.agent, 10000)
+        S.issue(self.staff, partner=self.agent, customer=self.cust, machine='1111-BBBB-CCCC-DDDD-1234', edition='market', days=365)
+        self.assertFalse(Transaction.objects.filter(partner=self.dist, kind=Transaction.KIND_COMMISSION).exists())
+
+    def test_statement_page_and_csv(self):
+        self.topup(self.agent, 1000)
+        self.client.force_login(self.staff)
+        r = self.client.get(reverse('partner_statement', args=[self.agent.pk]))
+        self.assertContains(r, 'رصيد آخر المدة')
+        csv = self.client.get(reverse('partner_statement', args=[self.agent.pk]), {'export': 'csv'})
+        self.assertIn('closing', csv.content.decode())
+        self.assertEqual(self.client.get(reverse('wallet')).status_code, 200)
+        u = User.objects.create_user('other', password='y' * 12)
+        PartnerUser.objects.create(user=u, partner=Partner.objects.create(code='B1', name='b'), role=PartnerUser.ROLE_OWNER)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get(reverse('partner_statement', args=[self.agent.pk])).status_code, 404)
+
+
+class LoginSecurityTests(Base):
+    def login(self, username, password, **extra):
+        return self.client.post(reverse('login'), {'username': username, 'password': password, **extra})
+
+    def test_lockout_after_failed_tries(self):
+        for _ in range(5):
+            self.assertContains(self.login('admin', 'wrong-password'), 'غلط')
+        r = self.login('admin', 'x' * 12)  # the right password, but locked now
+        self.assertContains(r, 'اتقفل')
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_two_step_login(self):
+        from licensing import security as SEC
+        secret = SEC.new_secret()
+        codes = SEC.enable(self.staff, secret, SEC.code_now(secret))
+        self.assertEqual(len(codes), 8)
+        r = self.login('admin', 'x' * 12, next='/licenses/')
+        self.assertRedirects(r, reverse('login_verify'))
+        self.assertNotIn('_auth_user_id', self.client.session)
+        self.assertEqual(self.client.get(reverse('licenses')).status_code, 302)
+        self.assertContains(self.client.post(reverse('login_verify'), {'code': '000000'}), 'الكود غلط')
+        # The code used while enabling can't be used again; a recovery code works once.
+        r = self.client.post(reverse('login_verify'), {'code': codes[0]})
+        self.assertRedirects(r, '/licenses/')
+        self.client.logout()
+        self.login('admin', 'x' * 12)
+        self.assertContains(self.client.post(reverse('login_verify'), {'code': codes[0]}), 'الكود غلط')
+        # force_login (or any other way in) without the code is thrown out.
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.get(reverse('dashboard')).status_code, 302)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_totp_codes(self):
+        from licensing import security as SEC
+        secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'  # RFC 6238 test key "12345678901234567890"
+        self.assertEqual(SEC.code_now(secret, at=59), '287082')
+        self.assertEqual(SEC.match_step(secret, '287082', at=59), 1)
+        self.assertEqual(SEC.match_step(secret, '287082', at=59 + 30), 1)  # one step of clock drift
+        self.assertIsNone(SEC.match_step(secret, '287082', at=59 + 90))
+        self.assertIsNone(SEC.match_step(secret, '287082', at=59, last_step=1))  # already used
+
+    @override_settings(REQUIRE_2FA_STAFF=True)
+    def test_staff_must_set_up_two_step(self):
+        from licensing import security as SEC
+        self.client.force_login(self.staff)
+        self.assertRedirects(self.client.get(reverse('licenses')), reverse('security'))
+        page = self.client.get(reverse('security'))
+        self.assertContains(page, '<svg')
+        secret = self.client.session['totp_setup']
+        r = self.client.post(reverse('security'), {'action': 'enable', 'code': SEC.code_now(secret)})
+        self.assertContains(r, 'أكواد الطوارئ')
+        self.assertEqual(self.client.get(reverse('licenses')).status_code, 200)
+        # Partner users only when their partner requires it.
+        u = User.objects.create_user('ag', password='y' * 12)
+        PartnerUser.objects.create(user=u, partner=self.agent, role=PartnerUser.ROLE_OWNER)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get(reverse('licenses')).status_code, 200)
+        self.agent.require_2fa = True
+        self.agent.save()
+        self.assertRedirects(self.client.get(reverse('licenses')), reverse('security'))
+
+    def test_admin_login_goes_through_portal_login_and_reset(self):
+        r = self.client.get('/django-admin/')
+        self.assertEqual(r.status_code, 302)
+        r = self.client.get(r['Location'])
+        self.assertTrue(r['Location'].startswith(reverse('login')))
+        from licensing import security as SEC
+        u = User.objects.create_user('ag', password='y' * 12)
+        PartnerUser.objects.create(user=u, partner=self.agent, role=PartnerUser.ROLE_OWNER)
+        secret = SEC.new_secret()
+        SEC.enable(u, secret, SEC.code_now(secret))
+        self.client.force_login(self.staff)
+        self.client.post(reverse('partner_user_reset', args=[self.agent.pk, u.pk]), {'what': '2fa'})
+        self.assertFalse(SEC.enabled(User.objects.get(pk=u.pk)))
+        r = self.client.post(reverse('partner_user_reset', args=[self.agent.pk, u.pk]), {'what': 'password'}, follow=True)
+        self.assertContains(r, 'كلمة السر المؤقتة')
+        self.assertFalse(User.objects.get(pk=u.pk).check_password('y' * 12))

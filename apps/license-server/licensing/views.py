@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import editions as E
+from . import security as SEC
 from . import services as S
 from . import signing
 from .forms import CustomerForm, PartnerForm, PartnerUserForm
@@ -236,14 +237,19 @@ def license_new(request):
             else:
                 cust = get_object_or_404(scoped_customers(request.user), pk=request.POST['customer'])
             seller = p if p is not None else cust.partner
-            if p is not None and not p.can_issue_directly:
+            extra = (request.POST.get('extra_discount') or '').strip()
+            customer_price = (request.POST.get('customer_price') or '').strip() or None
+            wants_discount = p is not None and extra and Decimal(extra) != cust.special_discount_percent
+            if p is not None and (not p.can_issue_directly or wants_discount):
                 S.create_request(request.user, partner=p, customer=cust, machine=request.POST.get('machine', ''), kind=kind,
-                                 notes=request.POST.get('notes', ''), **data)
-                messages.success(request, 'اتبعت الطلب لـ Inno Source — هيظهرلك المفتاح أول ما يتوافق عليه')
+                                 notes=request.POST.get('notes', ''), extra_discount_percent=extra or 0, customer_price=customer_price, **data)
+                messages.success(request, 'اتبعت الطلب لـ Inno Source' + (' (فيه خصم خاص محتاج موافقة)' if wants_discount else '') +
+                                 ' — هيظهرلك المفتاح أول ما يتوافق عليه')
                 return redirect('requests')
             lic = S.issue(request.user, partner=seller, customer=cust, machine=request.POST.get('machine', ''), kind=kind,
-                          notes=request.POST.get('notes', ''), ip=client_ip(request), **data)
-        except (S.LicenseError, ValueError) as err:
+                          notes=request.POST.get('notes', ''), ip=client_ip(request), extra_discount_percent=extra or None,
+                          customer_price=customer_price, **data)
+        except (S.LicenseError, ValueError, InvalidOperation) as err:
             messages.error(request, str(err) if isinstance(err, S.LicenseError) else 'راجع الأرقام')
             return render(request, 'licensing/license_form.html', ctx)
         messages.success(request, 'المفتاح اتعمل ✓ — ابعته للعميل')
@@ -262,13 +268,19 @@ def quote(request):
         kind = License.KIND_TRIAL if request.GET.get('trial') else License.KIND_NEW
         addons, limits, days = S._clean(data['edition'], data['addons'], data['limits'], data['days'])
         S.check_allowed(p, data['edition'], addons, limits, days)
-        list_price, price = S.quote(data['edition'], addons, limits, days, p, kind)
-        out = {'ok': True, 'list_price': str(list_price), 'price': str(price)}
+        cust = scoped_customers(request.user).filter(pk=request.GET.get('customer')).first() if (request.GET.get('customer') or '').isdigit() else None
+        special = cust.special_discount_percent if cust else Decimal('0')
+        extra = (request.GET.get('extra_discount') or '').strip()
+        extra = Decimal(extra) if extra else special
+        list_price, price = S.quote(data['edition'], addons, limits, days, p, kind, extra)
+        out = {'ok': True, 'list_price': str(list_price), 'price': str(price), 'extra': str(extra)}
+        if S.partner_of(request.user) is not None and extra != special:
+            out['needs_approval'] = True
         if p is not None:
             out['balance'] = str(p.balance)
             out['available'] = str(p.balance + p.credit_limit)
         return JsonResponse(out)
-    except (S.LicenseError, ValueError, KeyError) as err:
+    except (S.LicenseError, ValueError, KeyError, InvalidOperation) as err:
         return JsonResponse({'ok': False, 'error': str(err) if isinstance(err, S.LicenseError) else 'بيانات ناقصة'})
 
 
@@ -349,7 +361,8 @@ def requests_list(request):
     rows = []
     for r in qs[:200]:
         try:
-            lp, price = S.quote(r.edition, r.addons, r.limits, r.days, r.partner, r.kind)
+            lp, price = S.quote(r.edition, r.addons, r.limits, r.days, r.partner, r.kind,
+                                r.extra_discount_percent or r.customer.special_discount_percent)
         except S.LicenseError:
             price = None
         rows.append((r, price, E.edition_name(r.edition), [E.feature_name(a) for a in r.addons]))
@@ -361,7 +374,8 @@ def requests_list(request):
 def request_decide(request, pk, decision):
     req = get_object_or_404(LicenseRequest, pk=pk)
     if decision == 'approve':
-        lic = run(request, lambda: S.approve_request(request.user, req, ip=client_ip(request)), 'اتوافق ✓ واتعمل المفتاح')
+        lic = run(request, lambda: S.approve_request(request.user, req, ip=client_ip(request),
+                                                     extra_discount_percent=request.POST.get('extra_discount')), 'اتوافق ✓ واتعمل المفتاح')
         if lic:
             return redirect('license', pk=lic.pk)
     else:
@@ -431,6 +445,8 @@ def partner_detail(request, pk):
         'edition_names': [E.edition_name(e) for e in (E.editions() if '*' in r.get('editions', []) else r.get('editions', []))],
         'addon_names': 'كل الإضافات' if '*' in r.get('addons', []) else '، '.join(E.feature_name(a) for a in r.get('addons', [])) or '—',
         'user_form': PartnerUserForm(),
+        'two_step': {u.user_id for u in partner.users.all() if SEC.enabled(u.user)},
+        'referred_count': partner.referred_customers.count(),
     })
 
 
@@ -469,6 +485,79 @@ def partner_user_toggle(request, pk, user_id):
     link.user.save(update_fields=['is_active'])
     S.audit(request.user, 'partner_user_toggle', partner=partner, username=link.user.username, active=link.user.is_active)
     return redirect('partner', pk=partner.pk)
+
+
+@require_POST
+@portal_required
+def partner_user_reset(request, pk, user_id):
+    """Inno Source (or the partner's owner) resets a user's password or two-step login (lost phone)."""
+    partner = get_object_or_404(S.visible_partners(request.user), pk=pk)
+    if S.partner_of(request.user) is not None:
+        owner_required(request)
+    link = get_object_or_404(PartnerUser, partner=partner, user_id=user_id)
+    if link.user_id == request.user.id:
+        raise PermissionDenied
+    what = request.POST.get('what')
+    if what == 'password':
+        import secrets
+        temp = secrets.token_urlsafe(9)
+        link.user.set_password(temp)
+        link.user.save(update_fields=['password'])
+        messages.success(request, f'كلمة السر المؤقتة لـ «{link.user.username}»: {temp} — ابعتهاله وخليه يغيرها أول ما يدخل (مش هتظهر تاني)')
+    elif what == '2fa':
+        SEC.disable(link.user)
+        messages.success(request, f'اتشال التحقق بخطوتين من «{link.user.username}» — هيشغّله تاني من موبايله الجديد')
+    else:
+        raise PermissionDenied
+    S.audit(request.user, f'partner_user_reset_{what}', partner=partner, ip=client_ip(request), username=link.user.username)
+    return redirect('partner', pk=partner.pk)
+
+
+def _amount(request):
+    try:
+        return Decimal(request.POST.get('amount') or '0')
+    except InvalidOperation:
+        return Decimal('0')
+
+
+@require_POST
+@vendor_required
+def partner_payout(request, pk):
+    partner = get_object_or_404(Partner, pk=pk)
+    run(request, lambda: S.payout(request.user, partner, _amount(request), reference=request.POST.get('reference', ''),
+                                  note=request.POST.get('note', ''), ip=client_ip(request)), 'اتسجل الصرف ✓')
+    return redirect('partner', pk=partner.pk)
+
+
+def _date(value):
+    from datetime import date
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+@portal_required
+def partner_statement(request, pk):
+    """Account statement for a period (opening balance, movements, closing balance) — print or CSV."""
+    partner = get_object_or_404(S.visible_partners(request.user), pk=pk)
+    today = timezone.localdate()
+    start = _date(request.GET.get('from')) or today.replace(day=1)
+    end = _date(request.GET.get('to')) or today
+    st = S.statement(partner, start, end)
+    if request.GET.get('export') == 'csv':
+        import csv
+        resp = HttpResponse(content_type='text/csv; charset=utf-8')
+        resp['Content-Disposition'] = f'attachment; filename="statement-{partner.code}-{start}-{end}.csv"'
+        resp.write('\ufeff')
+        w = csv.writer(resp)
+        w.writerow(['date', 'kind', 'note', 'reference', 'amount', 'balance'])
+        w.writerow([start.isoformat(), 'opening', '', '', '', st['opening']])
+        for t, bal in st['rows']:
+            w.writerow([timezone.localtime(t.created_at).strftime('%Y-%m-%d %H:%M'), t.get_kind_display(), t.note, t.reference, t.amount, bal])
+        w.writerow([end.isoformat(), 'closing', '', '', '', st['closing']])
+        return resp
+    return render(request, 'licensing/statement.html', {'p': partner, 'st': st, 'start': start, 'end': end})
 
 
 @require_POST
@@ -570,8 +659,13 @@ def wallet(request):
         totals = me.transactions.values('kind').annotate(s=Sum('amount'))
     page = Paginator(qs, 50).get_page(request.GET.get('page'))
     kinds = dict(Transaction.KINDS)
-    return render(request, 'licensing/wallet.html', {'page': page, 'me': me, 'balance': me.balance if me else None,
-                                                     'totals': [(kinds.get(t['kind'], t['kind']), t['s']) for t in totals]})
+    ctx = {'page': page, 'me': me, 'balance': me.balance if me else None,
+           'totals': [(kinds.get(t['kind'], t['kind']), t['s']) for t in totals]}
+    if me is None:
+        bal = Partner.objects.annotate(b=Sum('transactions__amount')).exclude(b=None).exclude(b=0).order_by('b')
+        ctx['owe_us'] = [x for x in bal if x.b < 0]       # used credit: they owe Inno Source
+        ctx['we_owe'] = [x for x in bal if x.b > 0]       # prepaid balance or earned commissions
+    return render(request, 'licensing/wallet.html', ctx)
 
 
 @vendor_required

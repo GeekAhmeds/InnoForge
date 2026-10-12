@@ -5,11 +5,13 @@
   <form class="login-card" method="post">{% csrf_token %}
     <h1 style="margin-bottom:4px">🔑 InnoForge</h1>
     <p class="muted" style="margin-top:0">بوابة التراخيص — Inno Source وشركاؤها</p>
-    {% if form.errors %}<p class="bad">اسم الدخول أو كلمة السر غلط</p>{% endif %}
-    <label>اسم الدخول<input name="username" autofocus required autocomplete="username"></label>
+    {% if messages %}{% for m in messages %}<p class="bad">{{ m }}</p>{% endfor %}{% endif %}
+    {% if error %}<p class="bad">{{ error }}</p>{% endif %}
+    <label>اسم الدخول<input name="username" autofocus required autocomplete="username" maxlength="150"></label>
     <label style="margin-top:10px">كلمة السر<input type="password" name="password" required autocomplete="current-password"></label>
     <input type="hidden" name="next" value="{{ next }}">
     <button class="btn primary" style="width:100%;margin-top:16px">دخول</button>
+    <p class="small muted" style="margin-bottom:0">بعد 5 محاولات غلط الدخول بيتقفل ربع ساعة.</p>
   </form>
 </div>
 {% endblock %}

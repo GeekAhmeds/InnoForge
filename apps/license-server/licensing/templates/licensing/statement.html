@@ -1,0 +1,32 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}كشف حساب {{ p.code }}{% endblock %}
+{% block content %}
+<div class="head"><h1>📒 كشف حساب — {{ p.name }} <span class="muted mono" style="font-size:15px">{{ p.code }}</span></h1>
+  <a class="btn noprint" href="{% url 'partner' p.pk %}">صفحة الشريك</a></div>
+<form class="card row noprint" method="get">
+  <label>من<input type="date" name="from" value="{{ start|date:'Y-m-d' }}"></label>
+  <label>إلى<input type="date" name="to" value="{{ end|date:'Y-m-d' }}"></label>
+  <button class="btn primary">عرض</button>
+  <button class="btn" type="button" onclick="print()">🖨 طباعة / PDF</button>
+  <a class="btn" href="?from={{ start|date:'Y-m-d' }}&to={{ end|date:'Y-m-d' }}&export=csv">⬇ Excel (CSV)</a>
+</form>
+<div class="stats">
+  <div class="stat"><small>رصيد أول المدة</small><b>{{ st.opening|money }}</b></div>
+  <div class="stat"><small>له (شحن، عمولات، مرتجعات)</small><b class="good">{{ st.credit|money }}</b></div>
+  <div class="stat"><small>عليه (مفاتيح، صرف)</small><b class="bad">{{ st.debit|money }}</b></div>
+  <div class="stat strong"><small>رصيد آخر المدة {% if st.closing < 0 %}(عليه){% elif st.closing > 0 %}(ليه){% endif %}</small><b>{{ st.closing|money }} {{ currency }}</b></div>
+</div>
+{% if st.totals %}<div class="card"><h2>الإجمالي حسب النوع</h2><dl class="kv">{% for name, v in st.totals %}<dt>{{ name }}</dt><dd>{{ v|money }}</dd>{% endfor %}</dl>
+  {% if st.customer_sales %}<p class="small">مبيعاته لعملائه في المدة (اللي سجّلها): {{ st.customer_sales|money }} — تكلفتها عليه: {{ st.customer_cost|money }} — ربحه: <b>{{ st.customer_sales|sub:st.customer_cost|money }}</b></p>{% endif %}
+</div>{% endif %}
+<div class="card"><table>
+  <tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>الرصيد</th></tr>
+  <tr><td>{{ start|date:"Y-m-d" }}</td><td colspan="3" class="muted">رصيد أول المدة</td><td>{{ st.opening|money }}</td></tr>
+  {% for t, bal in st.rows %}<tr><td>{{ t.created_at|date:"Y-m-d H:i" }}</td><td>{{ t.get_kind_display }}</td>
+    <td>{% if t.license %}<a href="{% url 'license' t.license.pk %}">{{ t.note }}</a>{% else %}{{ t.note }}{% endif %}{% if t.reference %} <span class="small muted">({{ t.reference }})</span>{% endif %}</td>
+    <td class="{% if t.amount < 0 %}bad{% else %}good{% endif %}">{{ t.amount|money }}</td><td>{{ bal|money }}</td></tr>
+  {% empty %}<tr><td colspan="5" class="muted">مفيش حركات في المدة دي</td></tr>{% endfor %}
+  <tr><td>{{ end|date:"Y-m-d" }}</td><td colspan="3"><b>رصيد آخر المدة</b></td><td><b>{{ st.closing|money }}</b></td></tr>
+</table></div>
+<p class="small muted">الرصيد بالموجب = فلوس ليه عند Inno Source (شحن مقدم أو عمولات). بالسالب = عليه لـ Inno Source (استخدم حد السحب على المكشوف).</p>
+{% endblock %}

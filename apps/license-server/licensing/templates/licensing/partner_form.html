@@ -26,10 +26,10 @@
     </div>
   </div>
   <div class="card"><h2>الصلاحيات والحساب</h2><div class="grid">
-    {% for f in form %}{% if f.name in 'active,can_issue_directly,can_manage_children,allow_trials' %}
+    {% for f in form %}{% if f.name in 'active,can_issue_directly,can_manage_children,allow_trials,require_2fa' %}
       <label style="flex-direction:row;gap:8px;color:#111827">{{ f }} {{ f.label }}{% if f.help_text %} <span class="small muted">— {{ f.help_text }}</span>{% endif %}</label>
     {% endif %}{% endfor %}
-    {% for f in form %}{% if f.name in 'discount_percent,credit_limit,notes' %}
+    {% for f in form %}{% if f.name in 'discount_percent,commission_percent,credit_limit,notes' %}
       <label class="{% if f.name == 'notes' %}full{% endif %}">{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>
     {% endif %}{% endfor %}
   </div></div>

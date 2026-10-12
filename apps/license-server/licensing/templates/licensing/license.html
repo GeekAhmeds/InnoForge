@@ -24,7 +24,10 @@
     <dt>ينتهي</dt><dd>{% if lic.expires_at %}{{ lic.expires_at|date:"Y-m-d" }}{% if lic.expired %} <span class="badge bad">منتهي</span>{% else %} <span class="muted">(باقي {{ lic.days_left }} يوم)</span>{% endif %}{% else %}مدى الحياة{% endif %}</dd>
     <dt>الحالة</dt><dd>{{ lic.get_status_display }}</dd>
     <dt>الشريك</dt><dd>{{ lic.partner|default:"Inno Source مباشرة" }}</dd>
-    <dt>السعر</dt><dd>{{ lic.price|money }} {{ currency }}{% if is_vendor and lic.list_price != lic.price %} <span class="muted small">(القائمة {{ lic.list_price|money }})</span>{% endif %}</dd>
+    <dt>السعر</dt><dd>{{ lic.price|money }} {{ currency }}{% if is_vendor and lic.list_price != lic.price %} <span class="muted small">(القائمة {{ lic.list_price|money }})</span>{% endif %}
+      {% if lic.extra_discount_percent %} <span class="badge">خصم خاص {{ lic.extra_discount_percent }}%</span>{% endif %}</dd>
+    {% if lic.customer_price is not None %}<dt>العميل دفع</dt><dd>{{ lic.customer_price|money }} <span class="muted small">(الربح {{ lic.customer_price|sub:lic.price|money }})</span></dd>{% endif %}
+    {% if is_vendor and lic.referred_by %}<dt>عن طريق</dt><dd><a href="{% url 'partner' lic.referred_by.pk %}">{{ lic.referred_by }}</a></dd>{% endif %}
     {% if lic.notes %}<dt>ملاحظات</dt><dd>{{ lic.notes|linebreaksbr }}</dd>{% endif %}
   </dl></div>
   {% if lic.status == 'active' %}

@@ -6,5 +6,14 @@
   {% if me %}<div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ currency }}</b></div>{% endif %}
   {% for name, s in totals %}<div class="stat"><small>{{ name }}</small><b>{{ s|money }}</b></div>{% endfor %}
 </div>
+{% if me %}<p><a class="btn" href="{% url 'partner_statement' me.pk %}">📒 كشف حساب بفترة (طباعة / Excel)</a></p>{% endif %}
+{% if not me %}<div class="grid">
+  <div class="card"><h2>عليهم لـ Inno Source (رصيد بالسالب)</h2><table><tr><th>الشريك</th><th>عليه</th><th>حد المكشوف</th><th></th></tr>
+    {% for x in owe_us %}<tr><td><a href="{% url 'partner' x.pk %}">{{ x }}</a></td><td class="bad">{{ x.b|money }}</td><td>{{ x.credit_limit|money }}</td><td><a href="{% url 'partner_statement' x.pk %}">كشف</a></td></tr>
+    {% empty %}<tr><td colspan="4" class="muted">مفيش</td></tr>{% endfor %}</table></div>
+  <div class="card"><h2>ليهم عند Inno Source (رصيد مقدم / عمولات)</h2><table><tr><th>الشريك</th><th>ليه</th><th></th></tr>
+    {% for x in we_owe %}<tr><td><a href="{% url 'partner' x.pk %}">{{ x }}</a>{% if x.commission_percent %} <span class="badge">مسوّق {{ x.commission_percent }}%</span>{% endif %}</td><td class="good">{{ x.b|money }}</td><td><a href="{% url 'partner_statement' x.pk %}">كشف</a></td></tr>
+    {% empty %}<tr><td colspan="3" class="muted">مفيش</td></tr>{% endfor %}</table></div>
+</div>{% endif %}
 <div class="card">{% include 'licensing/_tx_rows.html' with rows=page show_partner=is_vendor %}{% include 'licensing/_pager.html' %}</div>
 {% endblock %}

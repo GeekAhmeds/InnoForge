@@ -2,11 +2,12 @@
 {% block title %}{{ p.name }}{% endblock %}
 {% block content %}
 <div class="head"><h1>🤝 {{ p.name }} <span class="muted mono" style="font-size:15px">{{ p.code }}</span></h1>
-  {% if not is_me %}<a class="btn" href="{% url 'partner_edit' p.pk %}">✎ تعديل</a>{% endif %}</div>
+  <div class="row"><a class="btn" href="{% url 'partner_statement' p.pk %}">📒 كشف حساب</a>{% if not is_me %}<a class="btn" href="{% url 'partner_edit' p.pk %}">✎ تعديل</a>{% endif %}</div></div>
 <div class="stats">
   <div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ currency }}</b></div>
   <div class="stat"><small>حد السحب على المكشوف</small><b>{{ p.credit_limit|money }}</b></div>
   <div class="stat"><small>الخصم من سعر القائمة</small><b>{{ p.discount_percent }}%</b></div>
+  {% if p.commission_percent %}<div class="stat"><small>عمولة على عملاء جابهم</small><b>{{ p.commission_percent }}%</b><small>{{ referred_count }} عميل</small></div>{% endif %}
   <div class="stat"><small>النوع</small><b style="font-size:17px">{{ p.get_kind_display }}</b>{% if p.parent %}<small>تابع لـ {{ p.parent }}</small>{% endif %}</div>
 </div>
 <div class="grid">
@@ -29,6 +30,13 @@
       <label class="full">ملاحظة<input name="note"></label>
       <div><button class="btn primary">سجّل</button></div>
     </form>
+    {% if balance > 0 %}<details style="margin-top:12px"><summary>💸 صرف مستحقات له (عمولات / رد رصيد) — المستحق {{ balance|money }}</summary>
+    <form method="post" action="{% url 'partner_payout' p.pk %}" class="grid" style="margin-top:10px">{% csrf_token %}
+      <label>المبلغ اللي اتدفعله<input name="amount" type="number" step="0.01" min="0.01" max="{{ balance|stringformat:'s' }}" required></label>
+      <label>المرجع (تحويل / إيصال)<input name="reference"></label>
+      <label class="full">ملاحظة<input name="note"></label>
+      <div><button class="btn primary">سجّل الصرف</button></div>
+    </form></details>{% endif %}
     {% elif can_transfer %}
     <form method="post" action="{% url 'partner_transfer' p.pk %}" class="grid">{% csrf_token %}
       <label>المبلغ<input name="amount" type="number" step="0.01" min="0.01" required></label>
@@ -39,11 +47,15 @@
   </div>
 </div>
 <div class="card"><h2>حسابات الدخول</h2>
-  <table><tr><th>اسم الدخول</th><th>الاسم</th><th>الدور</th><th>الحالة</th><th></th></tr>
+  {% if p.require_2fa %}<p class="small">🔐 الشريك ده لازم مستخدمينه يدخلوا بالتحقق بخطوتين.</p>{% endif %}
+  <table><tr><th>اسم الدخول</th><th>الاسم</th><th>الدور</th><th>التحقق بخطوتين</th><th>الحالة</th><th></th></tr>
   {% for u in users %}<tr><td class="mono">{{ u.user.username }}</td><td>{{ u.user.get_full_name }}</td><td>{{ u.get_role_display }}</td>
+    <td>{% if u.user_id in two_step %}<span class="badge good">شغال</span>{% else %}<span class="muted">—</span>{% endif %}</td>
     <td>{% if u.user.is_active %}<span class="badge good">شغال</span>{% else %}<span class="badge bad">موقوف</span>{% endif %}</td>
-    <td>{% if is_owner and u.user != user %}<form method="post" action="{% url 'partner_user_toggle' p.pk u.user.pk %}">{% csrf_token %}<button class="btn">{% if u.user.is_active %}إيقاف{% else %}تشغيل{% endif %}</button></form>{% endif %}</td></tr>
-  {% empty %}<tr><td colspan="5" class="muted">لسه مفيش — اعمل حساب تحت عشان يدخل البوابة</td></tr>{% endfor %}</table>
+    <td>{% if is_owner and u.user != user %}<form method="post" action="{% url 'partner_user_toggle' p.pk u.user.pk %}">{% csrf_token %}<button class="btn">{% if u.user.is_active %}إيقاف{% else %}تشغيل{% endif %}</button></form>
+      <form method="post" action="{% url 'partner_user_reset' p.pk u.user.pk %}" style="display:inline" onsubmit="return confirm('تعمل كلمة سر مؤقتة جديدة؟')">{% csrf_token %}<button class="btn" name="what" value="password">كلمة سر جديدة</button></form>
+      {% if u.user_id in two_step %}<form method="post" action="{% url 'partner_user_reset' p.pk u.user.pk %}" style="display:inline" onsubmit="return confirm('تشيل التحقق بخطوتين (موبايل ضاع)؟')">{% csrf_token %}<button class="btn" name="what" value="2fa">شيل التحقق</button></form>{% endif %}{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="6" class="muted">لسه مفيش — اعمل حساب تحت عشان يدخل البوابة</td></tr>{% endfor %}</table>
   {% if is_owner %}<details style="margin-top:10px"><summary>+ حساب دخول جديد</summary>
     <form method="post" action="{% url 'partner_user_add' p.pk %}" class="grid" style="margin-top:10px">{% csrf_token %}
       {% for f in user_form %}<label>{{ f.label }}{{ f }}</label>{% endfor %}
