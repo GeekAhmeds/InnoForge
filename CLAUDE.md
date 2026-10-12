@@ -3,6 +3,7 @@
 Monorepo for InnoForge apps:
 - **InnoForge POS** in `apps/pos` — an offline Electron point-of-sale sold by Inno Source.
 - **License server** in `apps/license-server` — Django portal where Inno Source and its partners issue POS license keys (read its `CLAUDE.md`).
+- **Website** in `apps/website` — the public Arabic landing page (features, screenshots, download, activation, contact), served next to the portal (see its `README.md`).
 
 - Start with `apps/pos/CLAUDE.md` (rules, commands, layout), then `apps/pos/docs/ARCHITECTURE.md`
   and `apps/pos/docs/FEATURES.md`. An Arabic overview is in `apps/pos/docs/SYSTEM-AR.md`.

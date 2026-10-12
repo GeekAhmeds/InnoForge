@@ -113,7 +113,7 @@ tar czf "$BACKUP" -C / etc/nginx
 ok "نسخة احتياطية: $BACKUP"
 mkdir -p "$UPDATES"
 cat > "$SITE" <<NGINX
-# InnoForge — license server (/) + POS update files (/updates/).
+# InnoForge — website (/), license server portal (/portal/, /login/ …) + POS update files (/updates/).
 # Added by apps/license-server/deploy/install-inno.sh; remove with uninstall-inno.sh.
 server {
     listen $PORT ssl http2;
@@ -124,6 +124,16 @@ server {
     client_max_body_size 5m;
     add_header X-Content-Type-Options nosniff always;
 
+    # The public website (apps/website): the home page and its files.
+    location = / {
+        root $DIR/apps/website;
+        try_files /index.html =404;
+        add_header Cache-Control "no-cache";
+    }
+    location /site/ {
+        alias $DIR/apps/website/;
+        expires 7d;
+    }
     location /updates/ {
         alias $UPDATES/;
         autoindex off;
@@ -185,6 +195,8 @@ say "7) التأكد"
 sleep 1
 H=$(curl -sk --noproxy '*' --resolve "$HOST:$PORT:127.0.0.1" "https://$HOST:$PORT/healthz" || true)
 echo "   سيرفر التراخيص: $H"
+W=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$HOST:$PORT:127.0.0.1" "https://$HOST:$PORT/" || true)
+echo "   الموقع (الصفحة الرئيسية): $W"
 U=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$HOST:$PORT:127.0.0.1" "https://$HOST:$PORT/updates/latest.yml" || true)
 echo "   ملفات التحديث (/updates/latest.yml): $U"
 if [ -n "$EXISTING" ]; then
@@ -204,7 +216,7 @@ cat <<NEXT
   2) المفتاح العام اللي فوق ← اعمل بيه تصريح من license-generator.html («تصاريح الموزّعين»):
      الكود SERVER، الاسم Inno Source، كل الباقات والإضافات، أقصى مدة «من غير حد»، ساري سنتين.
      وبعدين الصق التصريح في الموقع ← 🛡 توقيع السيرفر.
-  3) الموقع: https://$HOST:$PORT      التحديثات: https://$HOST:$PORT/updates/
+  3) الموقع: https://$HOST:$PORT   بوابة التراخيص: https://$HOST:$PORT/portal/   التحديثات: https://$HOST:$PORT/updates/
 للتراجع عن كل حاجة: sudo bash $DIR/apps/license-server/deploy/uninstall-inno.sh
 ========================================================================
 NEXT

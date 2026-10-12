@@ -1,13 +1,17 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
+from django.views.generic import RedirectView
 
 from . import api, views
 
 urlpatterns = [
     path('login/', auth_views.LoginView.as_view(template_name='licensing/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
-    path('password/', auth_views.PasswordChangeView.as_view(template_name='licensing/password.html', success_url='/'), name='password'),
-    path('', views.dashboard, name='dashboard'),
+    path('password/', auth_views.PasswordChangeView.as_view(template_name='licensing/password.html', success_url='/portal/'), name='password'),
+    # "/" is the public website (nginx serves apps/website); without nginx it goes to the portal.
+    path('', RedirectView.as_view(pattern_name='dashboard')),
+    path('portal/', views.dashboard, name='dashboard'),
+    path('leads/', views.leads, name='leads'),
     path('customers/', views.customers, name='customers'),
     path('customers/new/', views.customer_edit, name='customer_new'),
     path('customers/<int:pk>/', views.customer, name='customer'),
@@ -34,6 +38,7 @@ urlpatterns = [
     path('signing/', views.signing_page, name='signing'),
     path('audit/', views.audit_log, name='audit'),
     # JSON API for partners' own systems.
+    path('api/v1/lead', api.lead, name='api_lead'),
     path('api/v1/me', api.me, name='api_me'),
     path('api/v1/quote', api.quote, name='api_quote'),
     path('api/v1/licenses', api.licenses, name='api_licenses'),

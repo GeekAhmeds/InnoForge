@@ -33,7 +33,8 @@ sudo bash install-inno.sh
 - **قبله:** اعمل سجل DNS نوعه **A** اسمه `pos` يشاور على IP المكتب (زي `ls`).
 - **بعده:** نفّذ الخطوات اللي بيطبعها في الآخر.
 - **النتيجة:**
-  - الموقع على `https://pos.0x01source.com:9990`.
+  - الموقع التعريفي على `https://pos.0x01source.com:9990`.
+  - بوابة التراخيص على `https://pos.0x01source.com:9990/portal/`، والدخول من `/login/`.
   - ملفات تحديث البرنامج على `https://pos.0x01source.com:9990/updates/`.
 - **للتراجع:** `sudo bash /opt/innoforge/apps/license-server/deploy/uninstall-inno.sh`.
 

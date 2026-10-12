@@ -267,3 +267,33 @@ class PortalAndApiTests(Base):
                              content_type='application/json', **h)
         self.assertEqual(r.status_code, 422)
         self.assertEqual(len(self.client.get(f'/api/v1/licenses?machine={MACHINE}', **h).json()['licenses']), 1)
+
+
+class WebsiteLeadTests(Base):
+    def test_contact_form_is_saved_and_shown_to_inno_source(self):
+        from django.core.cache import cache
+        from licensing.models import Lead
+        cache.clear()
+        post = lambda d: self.client.post('/api/v1/lead', json.dumps(d), content_type='application/json')  # noqa: E731
+        self.assertEqual(post({'name': 'أحمد', 'phone': '12'}).status_code, 422)  # phone too short
+        r = post({'name': 'أحمد', 'phone': '01000000000', 'business': 'ماركت', 'kind': 'trial', 'message': 'عايز أجرب'})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(post({'name': 'bot', 'phone': '01000000000', 'website': 'spam'}).json(), {'ok': True})
+        self.assertEqual(Lead.objects.count(), 1)  # the honeypot one is dropped
+        lead = Lead.objects.get()
+        self.assertEqual(lead.kind, 'trial')
+        for _ in range(5):
+            post({'name': 'x', 'phone': '01000000000'})
+        self.assertEqual(post({'name': 'x', 'phone': '01000000000'}).status_code, 429)
+        # Only Inno Source staff see the requests.
+        self.client.force_login(self.staff)
+        page = self.client.get(reverse('leads'))
+        self.assertContains(page, 'عايز أجرب')
+        self.client.post(reverse('leads'), {'id': lead.pk, 'status': 'contacted', 'assigned_to': self.agent.pk, 'notes': 'كلمته'})
+        lead.refresh_from_db()
+        self.assertEqual((lead.status, lead.assigned_to, lead.notes), ('contacted', self.agent, 'كلمته'))
+        u = User.objects.create_user('p1', password='z' * 12)
+        PartnerUser.objects.create(user=u, partner=self.agent, role=PartnerUser.ROLE_OWNER)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get(reverse('leads')).status_code, 403)
+        self.assertRedirects(self.client.get('/'), reverse('dashboard'), fetch_redirect_response=False)

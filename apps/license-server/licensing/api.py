@@ -9,7 +9,9 @@ from django.views.decorators.http import require_GET, require_http_methods
 from . import editions as E
 from . import services as S
 from . import signing
-from .models import License
+from django.core.cache import cache
+
+from .models import Lead, License
 
 
 def api_auth(view):
@@ -96,3 +98,27 @@ def renew(request, pk):
         return JsonResponse({'ok': False, 'error': 'this account needs approval — use the portal'}, status=403)
     new = S.renew(None, lic, int(request.json.get('days') or 365), partner=p, ip=request.META.get('REMOTE_ADDR'))
     return JsonResponse({'ok': True, 'license': license_json(new)}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def lead(request):
+    """The website's contact form. Public: small, rate-limited, with a honeypot field."""
+    ip = request.META.get('HTTP_X_REAL_IP') or request.META.get('REMOTE_ADDR')
+    key = f'lead:{ip}'
+    if cache.get(key, 0) >= 5:
+        return JsonResponse({'ok': False, 'error': 'كتير — جرّب بعد شوية'}, status=429)
+    try:
+        d = json.loads(request.body or b'{}')
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'invalid'}, status=400)
+    if d.get('website'):  # bots fill the hidden field
+        return JsonResponse({'ok': True})
+    name, phone = str(d.get('name', '')).strip()[:100], str(d.get('phone', '')).strip()[:30]
+    if not name or sum(c.isdigit() for c in phone) < 8:
+        return JsonResponse({'ok': False, 'error': 'اكتب الاسم ورقم موبايل صحيح'}, status=422)
+    kind = d.get('kind') if d.get('kind') in dict(Lead.KINDS) else 'quote'
+    Lead.objects.create(name=name, phone=phone, business=str(d.get('business', '')).strip()[:150], city=str(d.get('city', '')).strip()[:80],
+                        kind=kind, message=str(d.get('message', '')).strip()[:1000], ip=ip)
+    cache.set(key, cache.get(key, 0) + 1, 3600)
+    return JsonResponse({'ok': True}, status=201)

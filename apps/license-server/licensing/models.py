@@ -282,3 +282,30 @@ class ApiKey(models.Model):
     class Meta:
         verbose_name = 'مفتاح API'
         verbose_name_plural = 'مفاتيح API'
+
+
+class Lead(models.Model):
+    """Someone who filled in the contact form on the website (quote, trial, demo, partner…)."""
+
+    KINDS = [('quote', 'عرض سعر'), ('trial', 'تجربة مجانية'), ('demo', 'شرح البرنامج'), ('partner', 'عايز يبقى شريك'), ('support', 'دعم فني')]
+    STATUSES = [('new', 'جديد'), ('contacted', 'اتكلمنا معاه'), ('won', 'اشترى'), ('lost', 'مش مهتم')]
+
+    name = models.CharField('الاسم', max_length=100)
+    phone = models.CharField('الموبايل', max_length=30)
+    business = models.CharField('النشاط', max_length=150, blank=True)
+    city = models.CharField('المدينة', max_length=80, blank=True)
+    kind = models.CharField('الطلب', max_length=10, choices=KINDS, default='quote')
+    message = models.TextField('الرسالة', blank=True)
+    status = models.CharField('الحالة', max_length=10, choices=STATUSES, default='new')
+    notes = models.TextField('ملاحظات المتابعة', blank=True)
+    assigned_to = models.ForeignKey(Partner, verbose_name='اتحوّل لشريك', null=True, blank=True, on_delete=models.SET_NULL, related_name='leads')
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = 'طلب من الموقع'
+        verbose_name_plural = 'طلبات الموقع'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} — {self.phone}'

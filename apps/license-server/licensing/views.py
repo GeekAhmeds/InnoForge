@@ -19,7 +19,7 @@ from . import editions as E
 from . import services as S
 from . import signing
 from .forms import CustomerForm, PartnerForm, PartnerUserForm
-from .models import ApiKey, AuditLog, Customer, License, LicenseRequest, Partner, PartnerUser, Transaction
+from .models import ApiKey, AuditLog, Lead, Customer, License, LicenseRequest, Partner, PartnerUser, Transaction
 
 User = get_user_model()
 
@@ -572,3 +572,29 @@ def wallet(request):
     kinds = dict(Transaction.KINDS)
     return render(request, 'licensing/wallet.html', {'page': page, 'me': me, 'balance': me.balance if me else None,
                                                      'totals': [(kinds.get(t['kind'], t['kind']), t['s']) for t in totals]})
+
+
+@vendor_required
+def leads(request):
+    """Website contact requests: follow up, mark, or hand to a partner."""
+    if request.method == 'POST':
+        lead = get_object_or_404(Lead, pk=request.POST.get('id'))
+        if request.POST.get('status') in dict(Lead.STATUSES):
+            lead.status = request.POST['status']
+        if 'notes' in request.POST:
+            lead.notes = request.POST['notes'][:2000]
+        partner_id = request.POST.get('assigned_to')
+        if partner_id is not None:
+            lead.assigned_to = Partner.objects.filter(pk=partner_id).first() if partner_id else None
+        lead.save()
+        S.audit(request.user, 'lead_update', ip=client_ip(request), lead=lead.id, status=lead.status)
+        messages.success(request, 'اتحفظ')
+        return redirect(f"{request.path}?status={request.GET.get('status', '')}")
+    st = request.GET.get('status', 'new')
+    qs = Lead.objects.select_related('assigned_to')
+    if st:
+        qs = qs.filter(status=st)
+    counts = {k: Lead.objects.filter(status=k).count() for k, _ in Lead.STATUSES}
+    page = Paginator(qs, 40).get_page(request.GET.get('page'))
+    return render(request, 'licensing/leads.html', {'page': page, 'status': st, 'statuses': Lead.STATUSES, 'counts': counts,
+                                                    'partners': Partner.objects.filter(active=True)})

@@ -23,11 +23,13 @@
       <div class="sep"></div>
       {% if me %}<a href="{% url 'account' %}">👤 حسابي وصلاحياتي</a>{% if is_owner %}<a href="{% url 'api_keys' %}">🔌 ربط API</a>{% endif %}{% endif %}
       {% if is_vendor %}
+        <a href="{% url 'leads' %}" class="{% if u == 'leads' %}on{% endif %}">📥 طلبات الموقع {% if new_leads_nav %}<span class="count">{{ new_leads_nav }}</span>{% endif %}</a>
         <a href="{% url 'signing' %}" class="{% if u == 'signing' %}on{% endif %}">🛡 توقيع السيرفر</a>
         <a href="{% url 'audit' %}" class="{% if u == 'audit' %}on{% endif %}">📜 سجل النشاط</a>
         <a href="/django-admin/licensing/price/">🏷 قائمة الأسعار</a>
         <a href="/django-admin/">⚙ الإدارة المتقدمة</a>
       {% endif %}
+      <a href="/" target="_blank">🌐 الموقع</a>
       <a href="{% url 'password' %}">🔒 تغيير كلمة السر</a>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>↩ خروج</button></form>
     </nav>

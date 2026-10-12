@@ -40,6 +40,7 @@
 | **الفاتورة والإيصال الإلكتروني** (جديد) | الإعدادات ← الفاتورة الإلكترونية + صفحة 🏛 الفاتورة الإلكترونية | `electron/eta.cjs`, `eta-submitter.cjs`, `components/Eta.jsx` |
 | **سيرفر التراخيص** (جديد) — Inno Source والموزّعين والوكلاء بيطلّعوا المفاتيح منه | موقع (Django) بيترفع على السيرفر | `apps/license-server/` — الرفع: `apps/license-server/docs/DEPLOY-AR.md` |
 | صفحة الموزّعين (من غير سيرفر) | ملف HTML | `apps/pos/tools/reseller-portal.html` + قسم «تصاريح الموزّعين» في المولّد |
+| **الموقع التعريفي** (جديد) — مميزات، صور، باقات، تحميل، تفعيل، تواصل | `https://pos.0x01source.com:9990/` | `apps/website/` — طلبات «تواصل معانا» بتظهر في بوابة التراخيص ← 📥 طلبات الموقع |
 
 الدليل الكامل للمستخدم: `docs/guide.html`. الأسعار المقترحة: `docs/PRICING-AR.md`. السيرفر: `docs/SERVER-SETUP-AR.md`.
 

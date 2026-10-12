@@ -1,0 +1,25 @@
+{% extends 'licensing/base.html' %}
+{% block title %}طلبات الموقع{% endblock %}
+{% block content %}
+<div class="head"><h1>📥 طلبات الموقع</h1><a class="btn" href="/#contact" target="_blank">فتح الموقع</a></div>
+<div class="tabs">
+  {% for k, label in statuses %}<a class="{% if status == k %}on{% endif %}" href="?status={{ k }}">{{ label }}{% for kk, n in counts.items %}{% if kk == k %} ({{ n }}){% endif %}{% endfor %}</a>{% endfor %}
+  <a class="{% if not status %}on{% endif %}" href="?status=">الكل</a>
+</div>
+<div class="card"><table>
+  <tr><th>التاريخ</th><th>الاسم</th><th>الموبايل</th><th>النشاط / المدينة</th><th>الطلب</th><th>الرسالة</th><th>المتابعة</th></tr>
+  {% for l in page %}<tr>
+    <td class="small">{{ l.created_at|date:"Y-m-d H:i" }}</td>
+    <td><b>{{ l.name }}</b></td>
+    <td class="mono"><a href="tel:{{ l.phone }}">{{ l.phone }}</a><div class="small"><a target="_blank" rel="noreferrer" href="https://wa.me/2{{ l.phone|cut:' '|cut:'+' }}">واتساب</a></div></td>
+    <td>{{ l.business|default:"—" }}<div class="small muted">{{ l.city }}</div></td>
+    <td><span class="badge {% if l.kind == 'partner' %}warn{% endif %}">{{ l.get_kind_display }}</span></td>
+    <td class="small" style="max-width:260px">{{ l.message|linebreaksbr }}</td>
+    <td><form method="post" class="grid" style="grid-template-columns:1fr;gap:6px;min-width:220px">{% csrf_token %}<input type="hidden" name="id" value="{{ l.pk }}">
+      <select name="status">{% for k, label in statuses %}<option value="{{ k }}" {% if l.status == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select name="assigned_to"><option value="">— Inno Source —</option>{% for p in partners %}<option value="{{ p.pk }}" {% if l.assigned_to_id == p.pk %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+      <input name="notes" value="{{ l.notes }}" placeholder="ملاحظات">
+      <button class="btn">حفظ</button></form></td>
+  </tr>{% empty %}<tr><td colspan="7" class="muted">مفيش طلبات</td></tr>{% endfor %}
+</table>{% include 'licensing/_pager.html' %}</div>
+{% endblock %}
