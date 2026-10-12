@@ -85,7 +85,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://0x01source.com:7999/srv/InnoForge/PoS/",
+        "url": "https://pos.0x01source.com:9990/updates/",
         "channel": "latest"
       }
     ],

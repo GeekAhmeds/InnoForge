@@ -557,7 +557,7 @@ npm run dist:win</code></pre>
         </ul>
         <h3>إزاي بيشتغل عند العميل؟</h3>
         <ol>
-          <li>لما يكون فيه إنترنت، البرنامج بيدوّر على تحديث بعد التشغيل بنص دقيقة، وبعدها كل 6 ساعات، على <code>https://0x01source.com:7999/srv/InnoForge/PoS/</code>.</li>
+          <li>لما يكون فيه إنترنت، البرنامج بيدوّر على تحديث بعد التشغيل بنص دقيقة، وبعدها كل 6 ساعات، على <code>https://pos.0x01source.com:9990/updates/</code>.</li>
           <li>لو لقى إصدار أحدث، بينزّله في الخلفية والعميل شغّال عادي.</li>
           <li><b>بيتأكد إن التحديث موقّع بمفتاحك.</b> لو حد اخترق السيرفر وحط ملف تاني، البرنامج بيرفضه ومش بيثبّته.</li>
           <li>بيظهر شريط فوق: "الإصدار X نزل وجاهز للتثبيت"، وفيه زرار <b>إعادة التشغيل والتثبيت</b>. ولو العميل اختار "بعدين"، التحديث بيتثبّت لوحده لما يقفل البرنامج.</li>
@@ -591,8 +591,8 @@ npm run dist:win</code></pre>
           </li>
           <li>خلاص! كل الأجهزة هتلاقي التحديث في خلال ساعات.</li>
         </ol>
-        <div class="note"><b>💡 ملف التسطيب للعملاء الجداد</b>هو نفسه ملف <code>.exe</code> اللي على السيرفر. تقدر تدّي العميل لينك التحميل على طول: <code>https://0x01source.com:7999/srv/InnoForge/PoS/InnoForge-POS-Setup-x.y.z.exe</code>. ويفضل تسيب النسخ القديمة على السيرفر كام يوم بعد التحديث.</div>
-        <div class="warn"><b>⚠️ مهم في السيرفر</b>لازم الرابط <code>https://0x01source.com:7999/srv/InnoForge/PoS/latest.yml</code> يفتح من أي جهاز بشهادة HTTPS سليمة (مش Self-signed)، وإلا البرنامج مش هيقدر يقرأ التحديثات.</div>
+        <div class="note"><b>💡 ملف التسطيب للعملاء الجداد</b>هو نفسه ملف <code>.exe</code> اللي على السيرفر. تقدر تدّي العميل لينك التحميل على طول: <code>https://pos.0x01source.com:9990/updates/InnoForge-POS-Setup-x.y.z.exe</code>. ويفضل تسيب النسخ القديمة على السيرفر كام يوم بعد التحديث.</div>
+        <div class="warn"><b>⚠️ مهم في السيرفر</b>لازم الرابط <code>https://pos.0x01source.com:9990/updates/latest.yml</code> يفتح من أي جهاز بشهادة HTTPS سليمة (مش Self-signed)، وإلا البرنامج مش هيقدر يقرأ التحديثات.</div>
         <div class="good"><b>رفع تلقائي:</b> لو ضفت بيانات السيرفر في أسرار GitHub (POS_DEPLOY_HOST وPOS_DEPLOY_USER وPOS_DEPLOY_KEY وPOS_DEPLOY_PATH ومعاهم POS_SIGNING_KEY)، أي تعديل يتدمج في فرع main بيترفع على السيرفر لوحده، وكل البرامج المتسطبة بتحدّث نفسها.</div>
       </div>
       <div lang="en">
@@ -606,7 +606,7 @@ npm run dist:win</code></pre>
         </ul>
         <h3>How it works on the customer's PC</h3>
         <ol>
-          <li>When there's internet, the app checks <code>https://0x01source.com:7999/srv/InnoForge/PoS/</code> 30 seconds after starting and then every 6 hours.</li>
+          <li>When there's internet, the app checks <code>https://pos.0x01source.com:9990/updates/</code> 30 seconds after starting and then every 6 hours.</li>
           <li>If a newer version exists, it downloads in the background while they keep working.</li>
           <li><b>It verifies the update is signed with your key.</b> If someone hacks the server and swaps the file, the app refuses to install it.</li>
           <li>A bar appears: "Version X is ready to install" with a <b>Restart & install</b> button. If they choose "Later", it installs when they close the app.</li>
@@ -640,8 +640,8 @@ npm run dist:win</code></pre>
           </li>
           <li>Done! Every PC picks up the update within hours.</li>
         </ol>
-        <div class="note"><b>💡 Installer for new customers</b>It's the same <code>.exe</code> on the server, so you can give customers a direct link: <code>https://0x01source.com:7999/srv/InnoForge/PoS/InnoForge-POS-Setup-x.y.z.exe</code>. Keep older versions on the server for a few days after an update.</div>
-        <div class="warn"><b>⚠️ Server requirement</b><code>https://0x01source.com:7999/srv/InnoForge/PoS/latest.yml</code> must open from any computer with a valid HTTPS certificate (not self-signed), otherwise the app can't read updates.</div>
+        <div class="note"><b>💡 Installer for new customers</b>It's the same <code>.exe</code> on the server, so you can give customers a direct link: <code>https://pos.0x01source.com:9990/updates/InnoForge-POS-Setup-x.y.z.exe</code>. Keep older versions on the server for a few days after an update.</div>
+        <div class="warn"><b>⚠️ Server requirement</b><code>https://pos.0x01source.com:9990/updates/latest.yml</code> must open from any computer with a valid HTTPS certificate (not self-signed), otherwise the app can't read updates.</div>
         <div class="good"><b>Automatic upload:</b> once the server details are in GitHub secrets (POS_DEPLOY_HOST, POS_DEPLOY_USER, POS_DEPLOY_KEY, POS_DEPLOY_PATH plus POS_SIGNING_KEY), every change merged into main is uploaded to the server on its own and all installed copies update themselves.</div>
       </div>
     </section>

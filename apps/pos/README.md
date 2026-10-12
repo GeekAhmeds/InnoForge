@@ -80,7 +80,7 @@ security fuses: asar integrity check, load only from asar, no `ELECTRON_RUN_AS_N
 
 ## Automatic updates
 
-Installed apps check `https://0x01source.com:7999/srv/InnoForge/PoS/` (the `build.publish` URL in `package.json`) 30 s after
+Installed apps check `https://pos.0x01source.com:9990/updates/` (the `build.publish` URL in `package.json`) 30 s after
 start and every 6 h. They download new versions in the background and install them on restart. Offline, they just
 keep working.
 

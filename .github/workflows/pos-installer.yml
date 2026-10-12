@@ -7,11 +7,11 @@ name: POS installer
 #
 # Repository secrets (Settings → Secrets and variables → Actions):
 #   POS_SIGNING_KEY   contents of pos-license-private.pem (signs updates; required to publish)
-#   POS_DEPLOY_HOST   server host name for upload over SSH, e.g. 0x01source.com
+#   POS_DEPLOY_HOST   server host name for upload over SSH, e.g. ls.0x01source.com (the office server inno)
 #   POS_DEPLOY_PORT   SSH port (default 22)
 #   POS_DEPLOY_USER   SSH user that can write to the update folder
 #   POS_DEPLOY_KEY    SSH private key for that user
-#   POS_DEPLOY_PATH   folder served at https://0x01source.com:7999/srv/InnoForge/PoS/
+#   POS_DEPLOY_PATH   folder served at https://pos.0x01source.com:9990/updates/ (/srv/InnoForge/PoS on inno)
 #   Optional, when the update server is not reachable from the internet (e.g. an office
 #   server behind a public front server): SSH goes through that front server first.
 #   POS_DEPLOY_PROXY_HOST, POS_DEPLOY_PROXY_PORT (default 22), POS_DEPLOY_PROXY_USER, POS_DEPLOY_PROXY_KEY
