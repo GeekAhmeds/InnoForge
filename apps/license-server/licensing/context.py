@@ -15,5 +15,5 @@ def portal(request):
         pending = LicenseRequest.objects.filter(status=LicenseRequest.STATUS_PENDING).count()
         new_leads = Lead.objects.filter(status='new').count()
     link = getattr(user, 'partner_link', None)
-    return {'me': me, 'is_vendor': vendor, 'pending_requests_nav': pending, 'new_leads_nav': new_leads, 'currency': settings.CURRENCY,
+    return {'me': me, 'is_vendor': vendor, 'pending_requests_nav': pending, 'new_leads_nav': new_leads, 'currency': me.currency_symbol if me is not None else settings.CURRENCY,
             'is_owner': vendor or (link is not None and link.role == 'owner')}

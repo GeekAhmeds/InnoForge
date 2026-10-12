@@ -1,0 +1,18 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}قائمة الأسعار{% endblock %}
+{% block content %}
+<div class="head"><h1>🏷 قائمة الأسعار</h1></div>
+<div class="tabs">{% for code, sym in currencies %}<a class="{% if code == currency_code %}on{% endif %}" href="?currency={{ code }}">{{ code }} — {{ sym }}</a>{% endfor %}</div>
+<p class="muted small">كل مفتاح بيتسعّر بعملة دولة العميل (مصر جنيه، السعودية ريال، الإمارات درهم). المدة اللي مالهاش سعر بتتحسب من سعر السنة بالنسبة (مدى الحياة لازم سعره يتكتب). خانة فاضية = مفيش سعر. العروض والخصومات بتتخصم من هنا.</p>
+<form method="post">{% csrf_token %}
+{% for item, title, days, rows in groups %}
+<div class="card"><h2>{{ title }}</h2>
+  <table><tr><th></th>{% for d, label in days %}<th>{{ label }}</th>{% endfor %}</tr>
+  {% for code, name, cells in rows %}<tr><td>{{ name }} <span class="muted small mono">{{ code }}</span></td>
+    {% for d, amount in cells %}<td><input name="p__{{ item }}__{{ code }}__{{ d }}" type="number" step="0.01" min="0" value="{% if amount is not None %}{{ amount|stringformat:'s' }}{% endif %}" style="max-width:140px"></td>{% endfor %}</tr>
+  {% endfor %}</table>
+</div>
+{% endfor %}
+<div class="row"><button class="btn primary">حفظ أسعار {{ currency_code }}</button></div>
+</form>
+{% endblock %}

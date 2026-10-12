@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from . import editions as E
 from . import signing
-from .models import ALL, ApiKey, AuditLog, Customer, License, LicenseRequest, Partner, Price, Transaction
+from .models import ALL, CURRENCIES, ApiKey, AuditLog, Customer, License, LicenseRequest, Offer, Partner, Price, Transaction
 
 TRIAL_MAX_DAYS = 14
 DURATIONS = [(14, 'تجربة — 14 يوم'), (30, 'شهر'), (90, '3 شهور'), (180, '6 شهور'), (365, 'سنة'), (730, 'سنتين'), (0, 'مدى الحياة')]
@@ -110,8 +110,8 @@ def _money(x):
     return Decimal(x).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
-def _price(item, code, days):
-    rows = {p.days: p.amount for p in Price.objects.filter(item=item, code=code)}
+def _price(item, code, days, currency='EGP'):
+    rows = {p.days: p.amount for p in Price.objects.filter(item=item, code=code, currency=currency)}
     if days in rows:
         return rows[days]
     if days == 0:
@@ -134,28 +134,57 @@ def _percent(x):
     return x
 
 
-def quote(edition, addons, limits, days, partner=None, kind=License.KIND_NEW, extra_discount=0):
-    """(list price, what the partner pays). extra_discount = a special discount Inno Source
-    gives on this key (or this customer) on top of the partner's own discount; Inno Source bears it."""
+def quote(edition, addons, limits, days, partner=None, kind=License.KIND_NEW, extra_discount=0, currency='EGP', offer=None):
+    """(list price, what the partner pays), in `currency`. An offer comes off the list price first;
+    then the partner's discount; then extra_discount = a special discount Inno Source gives on this
+    key (or this customer). Inno Source bears the offer and the special discount."""
     if kind == License.KIND_TRIAL:
         return Decimal('0'), Decimal('0')
-    total = _price(Price.ITEM_EDITION, edition, days)
+    total = _price(Price.ITEM_EDITION, edition, days, currency)
     for a in addons:
-        total += _price(Price.ITEM_ADDON, a, days)
+        total += _price(Price.ITEM_ADDON, a, days, currency)
     base = E.effective_limits(edition, [], {})
     eff = E.effective_limits(edition, addons, limits)
     for k, v in eff.items():
         if base.get(k) and (v == 0 or v > base[k]):
             extra = 0 if v == 0 else v - base[k]
-            unit = _price(Price.ITEM_LIMIT, k, days)
+            unit = _price(Price.ITEM_LIMIT, k, days, currency)
             if v == 0 and unit:
                 raise LicenseError(f'{E.data()["limits"][k]["ar"]} «بدون حد» محتاج باقة أعلى (أو حدد رقم)')
             total += unit * extra
     total = _money(total)
     discount = partner.discount_percent if partner else Decimal('0')
-    price = total * (Decimal('100') - discount) / Decimal('100')
+    price = total * (Decimal('100') - (offer.percent if offer else Decimal('0'))) / Decimal('100')
+    price = price * (Decimal('100') - discount) / Decimal('100')
     price = price * (Decimal('100') - _percent(extra_discount)) / Decimal('100')
     return total, _money(price)
+
+
+def find_offer(code, edition, country, kind=License.KIND_NEW):
+    """The offer a key gets: the one its promo code names, else the best automatic one."""
+    if kind in (License.KIND_TRIAL, License.KIND_TRANSFER, License.KIND_UPGRADE):
+        if code:
+            raise LicenseError('كود الخصم للمفاتيح الجديدة بس')
+        return None
+
+    def fits(o):
+        return (o.running() and E.allowed(o.editions or ['*'], edition) and ('*' in (o.countries or ['*']) or country in o.countries)
+                and (kind == License.KIND_NEW or not o.new_only))
+    code = (code or '').strip()
+    if code:
+        offer = Offer.objects.filter(code__iexact=code).first()
+        if offer is None or not fits(offer):
+            raise LicenseError('كود الخصم مش صالح أو خلص')
+        return offer
+    best = None
+    for o in Offer.objects.filter(code='', active=True):
+        if fits(o) and (best is None or o.percent > best.percent):
+            best = o
+    return best
+
+
+def currency_of(customer):
+    return CURRENCIES.get(getattr(customer, 'country', '') or 'EG', 'EGP')
 
 
 # ---------------------------------------------------------------- issuing
@@ -180,6 +209,8 @@ def _clean(edition, addons, limits, days):
 def permit_allows(permit, payload):
     """Python copy of resellerAllows() in apps/pos/electron/editions.cjs, so a key the app
     would refuse is never handed out."""
+    if permit.get('countries') and permit['countries'] != '*' and payload.get('country') not in permit['countries']:
+        return 'تصريح السيرفر مش بيسمح بالدولة دي'
     if permit.get('editions') != '*' and payload['edition'] not in (permit.get('editions') or []):
         return 'تصريح السيرفر مش بيسمح بالباقة دي'
     if permit.get('addons') != '*' and any(a not in (permit.get('addons') or []) for a in payload.get('addons', [])):
@@ -217,6 +248,8 @@ def _sign(customer, partner, machine, edition, addons, limits, issued, expires):
         payload['addons'] = addons
     if limits:
         payload['limits'] = limits
+    if getattr(customer, 'country', ''):
+        payload['country'] = customer.country  # the copy only works as a business in this country
     payload['reseller'] = permit['id']
     if partner:
         payload['seller'] = {'code': partner.code, 'name': partner.name, 'phone': partner.phone}
@@ -229,7 +262,7 @@ def _sign(customer, partner, machine, edition, addons, limits, issued, expires):
 @transaction.atomic
 def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, days=365, kind=License.KIND_NEW,
           replaces=None, expires_at=None, notes='', ip=None, charge=None, extra_discount_percent=None, customer_price=None,
-          referred_by=None):
+          referred_by=None, offer_code=''):
     """Signs a key, records it and charges the partner. Everything or nothing.
 
     extra_discount_percent: a special discount on this key (default: the customer's special discount).
@@ -242,6 +275,9 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
     addons, limits, days = _clean(edition, addons, limits, days)
     if partner is not None and customer.partner_id not in partner.scope_ids():
         raise LicenseError('العميل ده مش تبعك')
+    if partner is not None and customer.country != partner.country:
+        raise LicenseError('حسابك للبيع في دولته بس — العميل ده في دولة تانية')
+    currency = currency_of(customer)
     if kind == License.KIND_TRIAL:
         if not days or days > TRIAL_MAX_DAYS:
             raise LicenseError(f'التجربة أقصاها {TRIAL_MAX_DAYS} يوم')
@@ -262,7 +298,8 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
     referrer = referred_by if referred_by is not None else customer.referred_by
     # Moving or upgrading keeps the end date the key already had.
     check_allowed(partner, edition, addons, limits, None if kind in (License.KIND_TRANSFER, License.KIND_UPGRADE) else days)
-    list_price, price = quote(edition, addons, limits, days, partner, kind, extra) if charge is None else (charge, charge)
+    offer = find_offer(offer_code, edition, customer.country, kind) if charge is None else None
+    list_price, price = quote(edition, addons, limits, days, partner, kind, extra, currency, offer) if charge is None else (charge, charge)
     if partner is not None:
         locked = Partner.objects.select_for_update().get(pk=partner.pk)
         if price and locked.balance - price < -locked.credit_limit:
@@ -274,7 +311,9 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
     lic = License.objects.create(customer=customer, partner=partner, machine=machine_n, kind=kind, edition=edition, addons=addons,
                                  limits=limits, days=days, issued_at=issued, expires_at=expires_at, key=key, replaces=replaces,
                                  list_price=list_price, price=price, issued_by=user, notes=notes, extra_discount_percent=extra,
-                                 customer_price=customer_price, referred_by=referrer)
+                                 customer_price=customer_price, referred_by=referrer, currency=currency, offer=offer)
+    if offer is not None:
+        Offer.objects.filter(pk=offer.pk).update(used=models.F('used') + 1)
     if replaces is not None:
         License.objects.filter(pk=replaces.pk).update(status=License.STATUS_REPLACED)
     if partner is not None and price:
@@ -282,7 +321,8 @@ def issue(user, *, partner, customer, machine, edition, addons=(), limits=None, 
                                    note=f'{lic.get_kind_display()} — {customer.name} — {E.edition_name(edition)}', created_by=user)
     commission = _commission(user, lic, referrer, partner, price)
     audit(user, f'license_{kind}', partner=partner, ip=ip, license=lic.id, customer=customer.name, machine=machine_n, edition=edition,
-          addons=addons, limits=limits, days=days, price=str(price), extra_discount=str(extra),
+          addons=addons, limits=limits, days=days, price=str(price), currency=currency, extra_discount=str(extra),
+          **({'offer': offer.name} if offer else {}),
           **({'commission': str(commission), 'referred_by': referrer.code} if commission else {}))
     return lic
 
@@ -327,8 +367,9 @@ def upgrade(user, lic, *, partner, edition, addons, limits, ip=None):
         raise LicenseError('المفتاح منتهي — جدده الأول')
     addons, limits, _ = _clean(edition, addons, limits, left)
     special = lic.customer.special_discount_percent
-    new_list, new_price = quote(edition, addons, limits, left, partner, extra_discount=special)
-    old_list, old_price = quote(lic.edition, lic.addons, lic.limits, left, partner, extra_discount=special)
+    cur = currency_of(lic.customer)
+    new_list, new_price = quote(edition, addons, limits, left, partner, extra_discount=special, currency=cur)
+    old_list, old_price = quote(lic.edition, lic.addons, lic.limits, left, partner, extra_discount=special, currency=cur)
     charge = max(Decimal('0'), new_price - old_price)
     check_allowed(partner, edition, addons, limits, None)
     return issue(user, partner=partner, customer=lic.customer, machine=lic.machine, edition=edition, addons=addons, limits=limits,
@@ -439,7 +480,7 @@ def statement(partner, start=None, end=None):
 
 # ---------------------------------------------------------------- requests
 def create_request(user, *, partner, customer, machine, edition, addons, limits, days, kind=License.KIND_NEW, replaces=None, notes='',
-                   extra_discount_percent=0, customer_price=None):
+                   extra_discount_percent=0, customer_price=None, offer_code=''):
     machine_n = signing.normalize_machine(machine)
     if not machine_n:
         raise LicenseError('رقم الجهاز لازم يكون 20 حرف/رقم')
@@ -449,7 +490,7 @@ def create_request(user, *, partner, customer, machine, edition, addons, limits,
     customer_price = _money(customer_price) if customer_price not in (None, '') else None
     req = LicenseRequest.objects.create(partner=partner, customer=customer, machine=machine_n, kind=kind, edition=edition, addons=addons,
                                         limits=limits, days=days, replaces=replaces, notes=notes, requested_by=user,
-                                        extra_discount_percent=extra, customer_price=customer_price)
+                                        extra_discount_percent=extra, customer_price=customer_price, offer_code=(offer_code or '').strip())
     audit(user, 'request_create', partner=partner, request=req.id, customer=customer.name)
     return req
 
@@ -467,7 +508,7 @@ def approve_request(user, req, *, ip=None, extra_discount_percent=None):
     else:
         lic = issue(user, partner=req.partner, customer=req.customer, machine=req.machine, edition=req.edition, addons=req.addons,
                     limits=req.limits, days=req.days, kind=req.kind, replaces=req.replaces, notes=req.notes, ip=ip,
-                    extra_discount_percent=extra or None, customer_price=req.customer_price)
+                    extra_discount_percent=extra or None, customer_price=req.customer_price, offer_code=req.offer_code)
     req.extra_discount_percent = extra
     req.status, req.license, req.decided_by, req.decided_at = LicenseRequest.STATUS_APPROVED, lic, user, timezone.now()
     req.save()

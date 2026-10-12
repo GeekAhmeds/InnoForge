@@ -5,7 +5,7 @@
 <form method="post">{% csrf_token %}
   {% if form.non_field_errors %}<ul class="messages">{% for e in form.non_field_errors %}<li class="error">{{ e }}</li>{% endfor %}</ul>{% endif %}
   <div class="card"><h2>البيانات</h2><div class="grid">
-    {% for f in form %}{% if f.name in 'code,name,kind,parent,phone,email,city,address' %}
+    {% for f in form %}{% if f.name in 'code,name,kind,parent,phone,email,country,city,address' %}
       <label>{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>
     {% endif %}{% endfor %}
   </div></div>

@@ -20,7 +20,7 @@ from . import security as SEC
 from . import services as S
 from . import signing
 from .forms import CustomerForm, PartnerForm, PartnerUserForm
-from .models import ApiKey, AuditLog, Lead, Customer, License, LicenseRequest, Partner, PartnerUser, Transaction
+from .models import CURRENCIES, CURRENCY_SYMBOLS, COUNTRIES, ApiKey, AuditLog, Lead, Customer, License, LicenseRequest, Offer, Partner, PartnerUser, Price, Transaction
 
 User = get_user_model()
 
@@ -129,6 +129,7 @@ def dashboard(request):
         'expired_recent': lic.filter(expires_at__lte=now, expires_at__gt=now - timedelta(days=60)).order_by('-expires_at')[:10],
         'month_count': issued_month.count(),
         'month_sales': issued_month.aggregate(s=Sum('price'))['s'] or Decimal('0'),
+        'month_by_currency': [(CURRENCY_SYMBOLS.get(r['currency'], r['currency']), r['s']) for r in issued_month.values('currency').annotate(s=Sum('price')).order_by('currency')],
         'recent': scoped_licenses(request.user)[:8],
         'customers_count': scoped_customers(request.user).count(),
     }
@@ -165,6 +166,8 @@ def customer_edit(request, pk=None):
         c = form.save(commit=False)
         if p is not None and c.partner_id not in p.scope_ids():
             c.partner = p  # a partner's customers always stay in its own scope
+        if p is not None:
+            c.country = p.country
         c.save()
         S.audit(request.user, 'customer_save', partner=c.partner, ip=client_ip(request), customer=c.id, name=c.name)
         messages.success(request, 'اتحفظ')
@@ -222,7 +225,7 @@ def license_new(request):
     p = S.partner_of(request.user)
     choices = form_choices(p)
     customer_id = request.GET.get('customer') or request.POST.get('customer')
-    ctx = {'choices': choices, 'customers': scoped_customers(request.user).order_by('name'), 'selected_customer': customer_id,
+    ctx = {'choices': choices, 'customers': scoped_customers(request.user).order_by('name'), 'selected_customer': customer_id, 'countries': COUNTRIES,
            'partners': S.visible_partners(request.user) if p is None else None, 'post': request.POST}
     if request.method == 'POST':
         data = read_license_form(request.POST)
@@ -232,8 +235,9 @@ def license_new(request):
                 owner = p
                 if p is None and request.POST.get('for_partner'):
                     owner = get_object_or_404(Partner, pk=request.POST['for_partner'])
+                country = owner.country if owner is not None else (request.POST.get('new_country') or 'EG')
                 cust = S.find_or_create_customer(owner, request.POST.get('new_name'), request.POST.get('new_phone', '').strip(),
-                                                 city=request.POST.get('new_city', '').strip(), activity=request.POST.get('new_activity', '').strip())
+                                                 city=request.POST.get('new_city', '').strip(), activity=request.POST.get('new_activity', '').strip(), country=country)
             else:
                 cust = get_object_or_404(scoped_customers(request.user), pk=request.POST['customer'])
             seller = p if p is not None else cust.partner
@@ -242,13 +246,14 @@ def license_new(request):
             wants_discount = p is not None and extra and Decimal(extra) != cust.special_discount_percent
             if p is not None and (not p.can_issue_directly or wants_discount):
                 S.create_request(request.user, partner=p, customer=cust, machine=request.POST.get('machine', ''), kind=kind,
-                                 notes=request.POST.get('notes', ''), extra_discount_percent=extra or 0, customer_price=customer_price, **data)
+                                 notes=request.POST.get('notes', ''), extra_discount_percent=extra or 0, customer_price=customer_price,
+                                 offer_code=request.POST.get('offer_code', ''), **data)
                 messages.success(request, 'اتبعت الطلب لـ Inno Source' + (' (فيه خصم خاص محتاج موافقة)' if wants_discount else '') +
                                  ' — هيظهرلك المفتاح أول ما يتوافق عليه')
                 return redirect('requests')
             lic = S.issue(request.user, partner=seller, customer=cust, machine=request.POST.get('machine', ''), kind=kind,
                           notes=request.POST.get('notes', ''), ip=client_ip(request), extra_discount_percent=extra or None,
-                          customer_price=customer_price, **data)
+                          customer_price=customer_price, offer_code=request.POST.get('offer_code', ''), **data)
         except (S.LicenseError, ValueError, InvalidOperation) as err:
             messages.error(request, str(err) if isinstance(err, S.LicenseError) else 'راجع الأرقام')
             return render(request, 'licensing/license_form.html', ctx)
@@ -272,8 +277,13 @@ def quote(request):
         special = cust.special_discount_percent if cust else Decimal('0')
         extra = (request.GET.get('extra_discount') or '').strip()
         extra = Decimal(extra) if extra else special
-        list_price, price = S.quote(data['edition'], addons, limits, days, p, kind, extra)
-        out = {'ok': True, 'list_price': str(list_price), 'price': str(price), 'extra': str(extra)}
+        country = cust.country if cust else (p.country if p is not None else request.GET.get('new_country') or 'EG')
+        currency = CURRENCIES.get(country, 'EGP')
+        offer = S.find_offer(request.GET.get('offer_code', ''), data['edition'], country, kind)
+        list_price, price = S.quote(data['edition'], addons, limits, days, p, kind, extra, currency, offer)
+        out = {'ok': True, 'list_price': str(list_price), 'price': str(price), 'extra': str(extra), 'currency': CURRENCY_SYMBOLS.get(currency, currency)}
+        if offer:
+            out['offer'] = f'{offer.name} −{offer.percent}%'
         if S.partner_of(request.user) is not None and extra != special:
             out['needs_approval'] = True
         if p is not None:
@@ -361,8 +371,9 @@ def requests_list(request):
     rows = []
     for r in qs[:200]:
         try:
+            offer = S.find_offer(r.offer_code, r.edition, r.customer.country, r.kind)
             lp, price = S.quote(r.edition, r.addons, r.limits, r.days, r.partner, r.kind,
-                                r.extra_discount_percent or r.customer.special_discount_percent)
+                                r.extra_discount_percent or r.customer.special_discount_percent, S.currency_of(r.customer), offer)
         except S.LicenseError:
             price = None
         rows.append((r, price, E.edition_name(r.edition), [E.feature_name(a) for a in r.addons]))
@@ -412,6 +423,7 @@ def partner_edit(request, pk=None):
         partner = form.save(commit=False)
         if me is not None:
             partner.parent = me
+            partner.country = me.country
             partner.discount_percent = min(partner.discount_percent, me.discount_percent)
             partner.can_issue_directly = partner.can_issue_directly and me.can_issue_directly
         try:
@@ -692,3 +704,64 @@ def leads(request):
     page = Paginator(qs, 40).get_page(request.GET.get('page'))
     return render(request, 'licensing/leads.html', {'page': page, 'status': st, 'statuses': Lead.STATUSES, 'counts': counts,
                                                     'partners': Partner.objects.filter(active=True)})
+
+
+# ------------------------------------------------------------------ vendor: prices and offers
+PRICE_DAYS = {Price.ITEM_EDITION: [(365, 'سنة'), (30, 'شهر'), (0, 'مدى الحياة')], Price.ITEM_ADDON: [(365, 'سنة'), (0, 'مدى الحياة')],
+              Price.ITEM_LIMIT: [(365, 'سنة'), (0, 'مدى الحياة')]}
+
+
+def price_rows(currency):
+    have = {(p.item, p.code, p.days): p.amount for p in Price.objects.filter(currency=currency)}
+    groups = [
+        (Price.ITEM_EDITION, 'الباقات', [(e, E.edition_name(e)) for e in E.editions()]),
+        (Price.ITEM_ADDON, 'الإضافات (فوق الباقة)', [(f, E.feature_name(f)) for f in E.features()]),
+        (Price.ITEM_LIMIT, 'زيادة في الحدود (للوحدة)', [(k, E.data()['limits'][k]['ar']) for k in E.limit_kinds()]),
+    ]
+    return [(item, title, PRICE_DAYS[item], [(code, name, [(d, have.get((item, code, d))) for d, _ in PRICE_DAYS[item]]) for code, name in rows])
+            for item, title, rows in groups]
+
+
+@vendor_required
+def prices(request):
+    """The list prices in each currency (a key is priced in its customer's country currency)."""
+    currency = request.GET.get('currency') if request.GET.get('currency') in CURRENCY_SYMBOLS else 'EGP'
+    if request.method == 'POST':
+        changed = 0
+        with transaction.atomic():
+            for key, value in request.POST.items():
+                if not key.startswith('p__'):
+                    continue
+                _, item, code, days = key.split('__')
+                value = value.strip()
+                if value == '':
+                    changed += Price.objects.filter(item=item, code=code, days=int(days), currency=currency).delete()[0]
+                    continue
+                try:
+                    amount = Decimal(value)
+                except InvalidOperation:
+                    continue
+                obj, created = Price.objects.get_or_create(item=item, code=code, days=int(days), currency=currency, defaults={'amount': amount})
+                if not created and obj.amount != amount:
+                    obj.amount = amount
+                    obj.save(update_fields=['amount'])
+                    changed += 1
+                changed += created
+        S.audit(request.user, 'prices_save', ip=client_ip(request), currency=currency, changed=changed)
+        messages.success(request, f'اتحفظت الأسعار ({changed} تغيير)')
+        return redirect(f"{request.path}?currency={currency}")
+    return render(request, 'licensing/prices.html', {'groups': price_rows(currency), 'currency_code': currency, 'currencies': list(CURRENCY_SYMBOLS.items())})
+
+
+@vendor_required
+def offers(request, pk=None):
+    from .forms import OfferForm
+    obj = get_object_or_404(Offer, pk=pk) if pk else None
+    form = OfferForm(request.POST or None, instance=obj)
+    if request.method == 'POST' and form.is_valid():
+        o = form.save()
+        S.audit(request.user, 'offer_save', ip=client_ip(request), offer=o.id, name=o.name, percent=str(o.percent), code=o.code)
+        messages.success(request, 'اتحفظ العرض')
+        return redirect('offers')
+    rows = Offer.objects.annotate(n=Count('licenses'))
+    return render(request, 'licensing/offers.html', {'form': form, 'obj': obj, 'rows': rows, 'choices': form_choices(None), 'countries': COUNTRIES})

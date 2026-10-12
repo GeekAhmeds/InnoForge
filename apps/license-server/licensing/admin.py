@@ -1,7 +1,7 @@
 """Django admin: direct editing for Inno Source staff (the portal is the everyday tool)."""
 from django.contrib import admin
 
-from .models import ApiKey, Lead, AuditLog, Customer, License, LicenseRequest, Partner, PartnerUser, Price, Transaction
+from .models import ApiKey, Lead, AuditLog, Customer, License, LicenseRequest, Offer, Partner, PartnerUser, Price, Transaction
 
 
 class PartnerUserInline(admin.TabularInline):
@@ -37,9 +37,9 @@ class LicenseAdmin(admin.ModelAdmin):
 
 @admin.register(Price)
 class PriceAdmin(admin.ModelAdmin):
-    list_display = ('item', 'code', 'days', 'amount')
+    list_display = ('item', 'code', 'days', 'currency', 'amount')
+    list_filter = ('currency', 'item')
     list_editable = ('amount',)
-    list_filter = ('item',)
 
 
 @admin.register(Transaction)
@@ -64,3 +64,9 @@ class LeadAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'name', 'phone', 'business', 'city', 'kind', 'status', 'assigned_to')
     list_filter = ('status', 'kind')
     search_fields = ('name', 'phone', 'business')
+
+
+@admin.register(Offer)
+class OfferAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'percent', 'starts_at', 'ends_at', 'used', 'max_uses', 'public', 'active')
+    list_filter = ('active', 'public')

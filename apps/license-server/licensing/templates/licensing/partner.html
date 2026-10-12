@@ -4,10 +4,11 @@
 <div class="head"><h1>🤝 {{ p.name }} <span class="muted mono" style="font-size:15px">{{ p.code }}</span></h1>
   <div class="row"><a class="btn" href="{% url 'partner_statement' p.pk %}">📒 كشف حساب</a>{% if not is_me %}<a class="btn" href="{% url 'partner_edit' p.pk %}">✎ تعديل</a>{% endif %}</div></div>
 <div class="stats">
-  <div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ currency }}</b></div>
+  <div class="stat strong"><small>الرصيد</small><b>{{ balance|money }} {{ p.currency_symbol }}</b></div>
   <div class="stat"><small>حد السحب على المكشوف</small><b>{{ p.credit_limit|money }}</b></div>
   <div class="stat"><small>الخصم من سعر القائمة</small><b>{{ p.discount_percent }}%</b></div>
   {% if p.commission_percent %}<div class="stat"><small>عمولة على عملاء جابهم</small><b>{{ p.commission_percent }}%</b><small>{{ referred_count }} عميل</small></div>{% endif %}
+  <div class="stat"><small>الدولة</small><b style="font-size:17px">{{ p.get_country_display }}</b><small>{{ p.currency }}</small></div>
   <div class="stat"><small>النوع</small><b style="font-size:17px">{{ p.get_kind_display }}</b>{% if p.parent %}<small>تابع لـ {{ p.parent }}</small>{% endif %}</div>
 </div>
 <div class="grid">

@@ -6,7 +6,7 @@
   <ul class="messages"><li class="warning">⚠ السيرفر لسه مش جاهز يوقّع مفاتيح ({{ signing.reason }}). كمّل الإعداد من <a href="{% url 'signing' %}">توقيع السيرفر</a>.</li></ul>
 {% endif %}
 <div class="stats">
-  {% if me %}<div class="stat strong"><small>رصيدك</small><b>{{ balance|money }} {{ currency }}</b></div>{% else %}<div class="stat strong"><small>مبيعات الشهر (على الشركاء)</small><b>{{ month_sales|money }} {{ currency }}</b></div>{% endif %}
+  {% if me %}<div class="stat strong"><small>رصيدك</small><b>{{ balance|money }} {{ currency }}</b></div>{% else %}<div class="stat strong"><small>مبيعات الشهر (على الشركاء)</small><b>{% for sym, s in month_by_currency %}{{ s|money }} {{ sym }}{% if not forloop.last %}<br>{% endif %}{% empty %}0{% endfor %}</b></div>{% endif %}
   <div class="stat"><small>مفاتيح الشهر ده</small><b>{{ month_count }}</b></div>
   <div class="stat"><small>تراخيص شغالة</small><b>{{ active_count }}</b></div>
   <div class="stat"><small>العملاء</small><b>{{ customers_count }}</b></div>

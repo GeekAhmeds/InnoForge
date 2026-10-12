@@ -4,13 +4,13 @@ from django.contrib.auth.password_validation import validate_password
 
 from . import editions as E
 from . import services as S
-from .models import Customer, Partner, PartnerUser
+from .models import COUNTRIES, Customer, Offer, Partner, PartnerUser
 
 
 class CustomerForm(forms.ModelForm):
     class Meta:
         model = Customer
-        fields = ['name', 'contact', 'phone', 'email', 'city', 'activity', 'tax_number', 'partner', 'special_discount_percent', 'referred_by', 'notes']
+        fields = ['name', 'contact', 'phone', 'email', 'country', 'city', 'activity', 'tax_number', 'partner', 'special_discount_percent', 'referred_by', 'notes']
         widgets = {'notes': forms.Textarea(attrs={'rows': 3})}
 
     def __init__(self, *args, user=None, **kwargs):
@@ -22,6 +22,7 @@ class CustomerForm(forms.ModelForm):
             # Special discounts and marketers are Inno Source's decision.
             self.fields.pop('special_discount_percent')
             self.fields.pop('referred_by')
+            self.fields.pop('country')  # a partner's customers are in its own country
         else:
             self.fields['referred_by'].queryset = Partner.objects.filter(active=True)
             self.fields['referred_by'].empty_label = '—'
@@ -50,7 +51,7 @@ class PartnerForm(forms.ModelForm):
 
     class Meta:
         model = Partner
-        fields = ['code', 'name', 'kind', 'parent', 'phone', 'email', 'city', 'address', 'active', 'max_days', 'can_issue_directly',
+        fields = ['code', 'name', 'kind', 'parent', 'phone', 'email', 'country', 'city', 'address', 'active', 'max_days', 'can_issue_directly',
                   'can_manage_children', 'allow_trials', 'require_2fa', 'discount_percent', 'commission_percent', 'credit_limit', 'notes']
         widgets = {'notes': forms.Textarea(attrs={'rows': 3})}
 
@@ -59,7 +60,7 @@ class PartnerForm(forms.ModelForm):
         self.parent_partner = parent
         if parent is not None:
             # A distributor manages its own agents: no money terms, no parent choice.
-            for f in ('parent', 'discount_percent', 'commission_percent', 'credit_limit', 'can_manage_children'):
+            for f in ('parent', 'discount_percent', 'commission_percent', 'credit_limit', 'can_manage_children', 'country'):
                 self.fields.pop(f, None)
             self.fields['kind'].choices = [c for c in Partner.KINDS if c[0] != Partner.KIND_DISTRIBUTOR]
         else:
@@ -117,3 +118,37 @@ class PartnerUserForm(forms.Form):
         pw = self.cleaned_data['password']
         validate_password(pw)
         return pw
+
+
+class OfferForm(forms.ModelForm):
+    """Editions and countries come from checkboxes (see the template)."""
+
+    class Meta:
+        model = Offer
+        fields = ['name', 'code', 'percent', 'starts_at', 'ends_at', 'new_only', 'max_uses', 'public', 'active']
+        widgets = {'starts_at': forms.DateInput(attrs={'type': 'date'}), 'ends_at': forms.DateInput(attrs={'type': 'date'})}
+
+    def clean_percent(self):
+        return _pct(self.cleaned_data.get('percent'))
+
+    def clean_code(self):
+        code = (self.cleaned_data.get('code') or '').strip().upper()
+        if code and Offer.objects.filter(code__iexact=code).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('الكود ده مستخدم في عرض تاني')
+        return code
+
+    def clean(self):
+        data = super().clean()
+        data['editions'] = _codes(self.data.getlist('editions'), E.editions()) or ['*']
+        data['countries'] = _codes(self.data.getlist('countries'), [c for c, _ in COUNTRIES]) or ['*']
+        if data.get('ends_at') and data.get('starts_at') and data['ends_at'] < data['starts_at']:
+            raise forms.ValidationError('تاريخ النهاية قبل البداية')
+        return data
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.editions = self.cleaned_data['editions']
+        obj.countries = self.cleaned_data['countries']
+        if commit:
+            obj.save()
+        return obj

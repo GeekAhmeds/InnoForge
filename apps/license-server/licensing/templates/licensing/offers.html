@@ -1,0 +1,33 @@
+{% extends 'licensing/base.html' %}{% load lic %}
+{% block title %}العروض{% endblock %}
+{% block content %}
+<div class="head"><h1>🎁 العروض وأكواد الخصم</h1></div>
+<p class="muted small">العرض بيتخصم من سعر القائمة قبل خصم الشريك (Inno Source بتتحمله). من غير كود: بيتطبق لوحده على كل مفتاح مطابق ويظهر على الموقع. بكود: العميل أو الشريك يكتب الكود في صفحة المفتاح الجديد.</p>
+<div class="card"><table>
+  <tr><th>العرض</th><th>الكود</th><th>الخصم</th><th>المدة</th><th>الباقات / الدول</th><th>اتستخدم</th><th>الحالة</th><th></th></tr>
+  {% for o in rows %}<tr>
+    <td>{{ o.name }}{% if o.public %} <span class="badge">على الموقع</span>{% endif %}</td>
+    <td>{% if o.code %}<span class="mono">{{ o.code }}</span>{% else %}<span class="muted">تلقائي</span>{% endif %}</td><td dir="ltr">{{ o.percent|stringformat:"s" }}%</td>
+    <td class="small">{{ o.starts_at|date:"Y-m-d" }} ← {{ o.ends_at|date:"Y-m-d"|default:"مفتوح" }}</td>
+    <td class="small">{% if '*' in o.editions %}كل الباقات{% else %}{% for e in o.editions %}{{ e|edition }} {% endfor %}{% endif %} · {% if '*' in o.countries %}كل الدول{% else %}{{ o.countries|join:"، " }}{% endif %}{% if o.new_only %} · جديد بس{% endif %}</td>
+    <td>{{ o.used }}{% if o.max_uses %} / {{ o.max_uses }}{% endif %}</td>
+    <td>{% if o.running %}<span class="badge good">شغال</span>{% elif o.active %}<span class="badge">مش في مدته</span>{% else %}<span class="badge bad">موقوف</span>{% endif %}</td>
+    <td><a href="{% url 'offer_edit' o.pk %}">تعديل</a></td></tr>
+  {% empty %}<tr><td colspan="8" class="muted">مفيش عروض لسه</td></tr>{% endfor %}
+</table></div>
+<form method="post" class="card">{% csrf_token %}
+  <h2>{% if obj %}تعديل «{{ obj.name }}»{% else %}عرض جديد{% endif %}</h2>
+  {% if form.non_field_errors %}<p class="bad">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+  <div class="grid">
+    {% for f in form %}{% if f.name in 'name,code,percent,starts_at,ends_at,max_uses' %}<label>{{ f.label }}{{ f }}{% if f.help_text %}<span class="small">{{ f.help_text }}</span>{% endif %}{% for e in f.errors %}<span class="bad">{{ e }}</span>{% endfor %}</label>{% endif %}{% endfor %}
+    {% for f in form %}{% if f.name in 'new_only,public,active' %}<label style="flex-direction:row;gap:8px;color:#111827">{{ f }} {{ f.label }}{% if f.help_text %} <span class="small muted">— {{ f.help_text }}</span>{% endif %}</label>{% endif %}{% endfor %}
+  </div>
+  <div class="muted small" style="margin:10px 0 6px">الباقات</div>
+  <div class="checks"><label><input type="checkbox" name="editions" value="*" {% if not obj or '*' in obj.editions %}checked{% endif %}> <b>كل الباقات</b></label>
+    {% for code, name, ed in choices.editions %}<label><input type="checkbox" name="editions" value="{{ code }}" {% if obj and code in obj.editions %}checked{% endif %}> {{ name }}</label>{% endfor %}</div>
+  <div class="muted small" style="margin:10px 0 6px">الدول</div>
+  <div class="checks"><label><input type="checkbox" name="countries" value="*" {% if not obj or '*' in obj.countries %}checked{% endif %}> <b>كل الدول</b></label>
+    {% for c, n in countries %}<label><input type="checkbox" name="countries" value="{{ c }}" {% if obj and c in obj.countries %}checked{% endif %}> {{ n }}</label>{% endfor %}</div>
+  <div class="row" style="margin-top:14px"><button class="btn primary">حفظ</button>{% if obj %}<a class="btn" href="{% url 'offers' %}">عرض جديد</a>{% endif %}</div>
+</form>
+{% endblock %}

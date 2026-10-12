@@ -10,6 +10,12 @@ from django.utils import timezone
 ALL = ['*']
 
 
+# Countries InnoForge is sold in and their currencies (the same list as editions.json).
+COUNTRIES = [('EG', 'مصر'), ('SA', 'السعودية'), ('AE', 'الإمارات')]
+CURRENCIES = {'EG': 'EGP', 'SA': 'SAR', 'AE': 'AED'}
+CURRENCY_SYMBOLS = {'EGP': 'ج.م', 'SAR': 'ر.س', 'AED': 'د.إ'}
+
+
 class Partner(models.Model):
     """A distributor, agent or individual seller. Distributors can have their own agents under
     them; what a partner may sell is always within what its parent may sell."""
@@ -27,6 +33,8 @@ class Partner(models.Model):
     email = models.EmailField('الإيميل', blank=True)
     city = models.CharField('المدينة / المحافظة', max_length=80, blank=True)
     address = models.CharField('العنوان', max_length=250, blank=True)
+    country = models.CharField('الدولة', max_length=2, choices=COUNTRIES, default='EG',
+                               help_text='بيبيع لعملاء الدولة دي بس، بعملتها، ورصيده بعملتها')
     active = models.BooleanField('نشط', default=True)
 
     # What it may sell.
@@ -57,6 +65,14 @@ class Partner(models.Model):
 
     def __str__(self):
         return f'{self.code} — {self.name}'
+
+    @property
+    def currency(self):
+        return CURRENCIES.get(self.country, 'EGP')
+
+    @property
+    def currency_symbol(self):
+        return CURRENCY_SYMBOLS.get(self.currency, self.currency)
 
     @property
     def balance(self):
@@ -109,6 +125,7 @@ class Customer(models.Model):
     city = models.CharField('المدينة', max_length=80, blank=True)
     activity = models.CharField('النشاط', max_length=80, blank=True, help_text='سوبر ماركت، مطعم، مكتبة…')
     tax_number = models.CharField('الرقم الضريبي', max_length=30, blank=True)
+    country = models.CharField('الدولة', max_length=2, choices=COUNTRIES, default='EG', help_text='المفتاح بيشتغل في الدولة دي بس، والسعر بعملتها')
     special_discount_percent = models.DecimalField('خصم خاص للعميل ده %', max_digits=5, decimal_places=2, default=Decimal('0'),
                                                    help_text='Inno Source بس: بيتخصم من سعر أي مفتاح للعميل ده (حتى لو عن طريق شريك)')
     referred_by = models.ForeignKey(Partner, verbose_name='جه عن طريق (مسوّق)', null=True, blank=True, on_delete=models.SET_NULL,
@@ -157,6 +174,8 @@ class License(models.Model):
     price = models.DecimalField('السعر على الشريك', max_digits=12, decimal_places=2, default=Decimal('0'))
     extra_discount_percent = models.DecimalField('خصم خاص %', max_digits=5, decimal_places=2, default=Decimal('0'))
     customer_price = models.DecimalField('السعر اللي العميل دفعه', max_digits=12, decimal_places=2, null=True, blank=True)
+    currency = models.CharField('العملة', max_length=3, default='EGP')
+    offer = models.ForeignKey('Offer', verbose_name='العرض', null=True, blank=True, on_delete=models.SET_NULL, related_name='licenses')
     referred_by = models.ForeignKey(Partner, verbose_name='عن طريق مسوّق', null=True, blank=True, on_delete=models.SET_NULL, related_name='referred_licenses')
     issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     notes = models.TextField('ملاحظات', blank=True)
@@ -168,6 +187,10 @@ class License(models.Model):
 
     def __str__(self):
         return f'{self.customer} — {self.machine}'
+
+    @property
+    def currency_symbol(self):
+        return CURRENCY_SYMBOLS.get(self.currency, self.currency)
 
     @property
     def expired(self):
@@ -199,6 +222,7 @@ class LicenseRequest(models.Model):
     replaces = models.ForeignKey(License, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     extra_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
     customer_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    offer_code = models.CharField(max_length=30, blank=True)
     notes = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUSES, default=STATUS_PENDING)
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
@@ -256,16 +280,49 @@ class Price(models.Model):
     item = models.CharField('النوع', max_length=10, choices=ITEMS)
     code = models.CharField('الكود', max_length=30, help_text='اسم الباقة أو الإضافة أو users / warehouses / devices')
     days = models.PositiveIntegerField('المدة (يوم)', default=365, help_text='0 = مدى الحياة')
+    currency = models.CharField('العملة', max_length=3, default='EGP', choices=[(c, c) for c in CURRENCY_SYMBOLS])
     amount = models.DecimalField('السعر', max_digits=12, decimal_places=2)
 
     class Meta:
         verbose_name = 'سعر'
         verbose_name_plural = 'قائمة الأسعار'
-        unique_together = [('item', 'code', 'days')]
-        ordering = ['item', 'code', 'days']
+        unique_together = [('item', 'code', 'days', 'currency')]
+        ordering = ['currency', 'item', 'code', 'days']
 
     def __str__(self):
-        return f'{self.get_item_display()} {self.code} / {self.days or "∞"}: {self.amount}'
+        return f'{self.get_item_display()} {self.code} / {self.days or "∞"}: {self.amount} {self.currency}'
+
+
+class Offer(models.Model):
+    """A price offer: a percent off the list price for a period. Without a code it applies by
+    itself to every matching key; with a code only when the code is given (a promo code).
+    Inno Source bears it (it comes off the list price, before the partner's discount)."""
+
+    name = models.CharField('اسم العرض', max_length=120, help_text='بيظهر على الموقع وفي الفاتورة، زي «خصم رمضان»')
+    code = models.CharField('كود الخصم', max_length=30, blank=True, help_text='فاضي = العرض بيتطبق لوحده على الكل')
+    percent = models.DecimalField('الخصم %', max_digits=5, decimal_places=2)
+    starts_at = models.DateField('من')
+    ends_at = models.DateField('لحد', null=True, blank=True, help_text='فاضي = مفتوح')
+    editions = models.JSONField('الباقات', default=list, blank=True, help_text='["*"] = كل الباقات')
+    countries = models.JSONField('الدول', default=list, blank=True, help_text='["*"] = كل الدول')
+    new_only = models.BooleanField('للمفاتيح الجديدة بس', default=True, help_text='لو لأ: التجديد كمان بياخد الخصم')
+    max_uses = models.PositiveIntegerField('أقصى عدد استخدام', default=0, help_text='0 = من غير حد')
+    used = models.PositiveIntegerField('اتستخدم', default=0)
+    public = models.BooleanField('يظهر على الموقع', default=True)
+    active = models.BooleanField('شغال', default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = 'عرض'
+        verbose_name_plural = 'العروض'
+        ordering = ['-starts_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.percent}%)'
+
+    def running(self, today=None):
+        today = today or timezone.localdate()
+        return self.active and self.starts_at <= today and (self.ends_at is None or today <= self.ends_at) and (not self.max_uses or self.used < self.max_uses)
 
 
 class AuditLog(models.Model):

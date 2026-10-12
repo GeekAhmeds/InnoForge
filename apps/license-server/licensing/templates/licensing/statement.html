@@ -14,7 +14,7 @@
   <div class="stat"><small>رصيد أول المدة</small><b>{{ st.opening|money }}</b></div>
   <div class="stat"><small>له (شحن، عمولات، مرتجعات)</small><b class="good">{{ st.credit|money }}</b></div>
   <div class="stat"><small>عليه (مفاتيح، صرف)</small><b class="bad">{{ st.debit|money }}</b></div>
-  <div class="stat strong"><small>رصيد آخر المدة {% if st.closing < 0 %}(عليه){% elif st.closing > 0 %}(ليه){% endif %}</small><b>{{ st.closing|money }} {{ currency }}</b></div>
+  <div class="stat strong"><small>رصيد آخر المدة {% if st.closing < 0 %}(عليه){% elif st.closing > 0 %}(ليه){% endif %}</small><b>{{ st.closing|money }} {{ p.currency_symbol }}</b></div>
 </div>
 {% if st.totals %}<div class="card"><h2>الإجمالي حسب النوع</h2><dl class="kv">{% for name, v in st.totals %}<dt>{{ name }}</dt><dd>{{ v|money }}</dd>{% endfor %}</dl>
   {% if st.customer_sales %}<p class="small">مبيعاته لعملائه في المدة (اللي سجّلها): {{ st.customer_sales|money }} — تكلفتها عليه: {{ st.customer_cost|money }} — ربحه: <b>{{ st.customer_sales|sub:st.customer_cost|money }}</b></p>{% endif %}

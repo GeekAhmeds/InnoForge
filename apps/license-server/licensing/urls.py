@@ -42,6 +42,10 @@ urlpatterns = [
     path('api-keys/', views.api_keys, name='api_keys'),
     path('signing/', views.signing_page, name='signing'),
     path('audit/', views.audit_log, name='audit'),
+    path('prices/', views.prices, name='prices'),
+    path('offers/', views.offers, name='offers'),
+    path('offers/<int:pk>/', views.offers, name='offer_edit'),
+    path('api/v1/prices', api.public_prices, name='api_prices'),
     # JSON API for partners' own systems.
     path('api/v1/lead', api.lead, name='api_lead'),
     path('api/v1/me', api.me, name='api_me'),

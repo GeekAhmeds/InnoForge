@@ -455,3 +455,71 @@ class LoginSecurityTests(Base):
         r = self.client.post(reverse('partner_user_reset', args=[self.agent.pk, u.pk]), {'what': 'password'}, follow=True)
         self.assertContains(r, 'كلمة السر المؤقتة')
         self.assertFalse(User.objects.get(pk=u.pk).check_password('y' * 12))
+
+
+class CountriesPricesOffersTests(Base):
+    def setUp(self):
+        super().setUp()
+        Price.objects.create(item='edition', code='market', days=365, currency='SAR', amount=Decimal('1500'))
+        Price.objects.create(item='edition', code='market', days=0, currency='SAR', amount=Decimal('3800'))
+
+    def test_saudi_customer_priced_in_riyal_and_key_locked_to_country(self):
+        c = Customer.objects.create(name='بقالة الرياض', country='SA')
+        lic = S.issue(self.staff, partner=None, customer=c, machine=MACHINE, edition='market', days=365)
+        self.assertEqual((lic.list_price, lic.price, lic.currency), (Decimal('1500'), Decimal('1500'), 'SAR'))
+        import base64
+        body = lic.key.split('.')[0]
+        payload = json.loads(base64.urlsafe_b64decode(body + '=' * (-len(body) % 4)))
+        self.assertEqual(payload['country'], 'SA')
+        if NODE:
+            self.assertTrue(node_verify(lic.key, self.vendor_pub_pem)['valid'])
+        # An Egyptian agent can't sell to a Saudi customer.
+        self.cust.country = 'SA'
+        self.cust.save()
+        self.topup(self.agent, 10000)
+        with self.assertRaises(S.LicenseError):
+            S.issue(self.staff, partner=self.agent, customer=self.cust, machine='1111-BBBB-CCCC-DDDD-1234', edition='market', days=365)
+
+    def test_offers_automatic_and_by_code(self):
+        from licensing.models import Offer
+        today = timezone.localdate()
+        Offer.objects.create(name='افتتاح', percent=Decimal('10'), starts_at=today, editions=['*'], countries=['*'])
+        Offer.objects.create(name='رمضان', code='RAMADAN', percent=Decimal('25'), starts_at=today, editions=['market'], countries=['SA'], max_uses=1)
+        Offer.objects.create(name='قديم', percent=Decimal('50'), starts_at=today - timedelta(days=30), ends_at=today - timedelta(days=1), editions=['*'], countries=['*'])
+        c = Customer.objects.create(name='a', country='SA')
+        lic = S.issue(self.staff, partner=None, customer=c, machine=MACHINE, edition='market', days=365)
+        self.assertEqual((lic.price, lic.offer.name), (Decimal('1350'), 'افتتاح'))  # the best running automatic one
+        lic2 = S.issue(self.staff, partner=None, customer=c, machine='1111-BBBB-CCCC-DDDD-1234', edition='market', days=365, offer_code='ramadan')
+        self.assertEqual(lic2.price, Decimal('1125'))
+        with self.assertRaises(S.LicenseError):  # used up
+            S.issue(self.staff, partner=None, customer=c, machine='2222-BBBB-CCCC-DDDD-1234', edition='market', days=365, offer_code='RAMADAN')
+        # Partner: the offer comes off the list price first, then its own discount.
+        self.topup(self.agent, 10000)
+        egy = S.issue(self.staff, partner=self.agent, customer=self.cust, machine='3333-BBBB-CCCC-DDDD-1234', edition='market', days=365)
+        self.assertEqual(egy.price, Decimal('2160.00'))  # 3000 −10% = 2700, −20% = 2160
+        # The website's price list shows the offer.
+        from django.core.cache import cache
+        cache.clear()
+        data = self.client.get('/api/v1/prices?country=SA').json()
+        self.assertEqual(data['currency'], 'SAR')
+        market = next(e for e in data['editions'] if e['code'] == 'market')
+        self.assertEqual((market['year'], market['year_offer'], market['offer']['name']), ('1500.00', '1350.00', 'افتتاح'))
+        self.assertEqual(sorted(o['name'] for o in data['offers']), ['افتتاح'])  # RAMADAN is used up
+
+    def test_prices_and_offers_pages(self):
+        self.client.force_login(self.staff)
+        r = self.client.get(reverse('prices') + '?currency=SAR')
+        self.assertContains(r, 'p__edition__market__365')
+        self.client.post(reverse('prices') + '?currency=AED', {'p__edition__basic__365': '899', 'p__edition__basic__0': ''})
+        self.assertEqual(Price.objects.get(item='edition', code='basic', days=365, currency='AED').amount, Decimal('899'))
+        r = self.client.post(reverse('offers'), {'name': 'جمعة بيضاء', 'code': 'bf26', 'percent': '30', 'starts_at': '2026-11-20', 'ends_at': '2026-11-30',
+                                                'max_uses': '0', 'public': 'on', 'active': 'on', 'new_only': 'on', 'editions': ['*'], 'countries': ['SA', 'AE']})
+        self.assertEqual(r.status_code, 302)
+        from licensing.models import Offer
+        o = Offer.objects.get(name='جمعة بيضاء')
+        self.assertEqual((o.code, o.countries, o.editions), ('BF26', ['SA', 'AE'], ['*']))
+        self.assertContains(self.client.get(reverse('offers')), 'BF26')
+        u = User.objects.create_user('ag', password='y' * 12)
+        PartnerUser.objects.create(user=u, partner=self.agent, role=PartnerUser.ROLE_OWNER)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get(reverse('prices')).status_code, 403)

@@ -15,6 +15,7 @@
         <label>التليفون<input name="new_phone" value="{{ post.new_phone }}"></label>
         <label>المدينة<input name="new_city" value="{{ post.new_city }}"></label>
         <label>النشاط<input name="new_activity" value="{{ post.new_activity }}" placeholder="سوبر ماركت، مطعم…"></label>
+        {% if not me %}<label>الدولة<select name="new_country" id="newCountry">{% for c, n in countries %}<option value="{{ c }}">{{ n }}</option>{% endfor %}</select></label>{% endif %}
         {% if partners %}<label>تبع شريك<select name="for_partner" id="forPartner"><option value="">Inno Source مباشرة</option>{% for p in partners %}<option value="{{ p.pk }}">{{ p }}</option>{% endfor %}</select></label>{% endif %}
       </div>
     </div>
@@ -27,6 +28,7 @@
       <label>{% if is_vendor %}خصم خاص على المفتاح ده %{% else %}طلب خصم خاص % (بموافقة Inno Source){% endif %}
         <input name="extra_discount" type="number" min="0" max="100" step="0.01" value="{{ post.extra_discount }}" placeholder="0">
         <span class="small">{% if is_vendor %}فوق خصم الشريك، وInno Source بتتحمله. فاضي = الخصم الخاص المسجل على العميل (لو فيه).{% else %}لو كتبت نسبة، المفتاح بيتبعت كطلب ويستنى موافقة Inno Source.{% endif %}</span></label>
+      <label>كود خصم / عرض (اختياري)<input name="offer_code" value="{{ post.offer_code }}" class="mono" placeholder="RAMADAN26"></label>
       <label>السعر اللي العميل هيدفعه (اختياري)<input name="customer_price" type="number" min="0" step="0.01" value="{{ post.customer_price }}">
         <span class="small">لحساباتك بس (ربحك = سعر العميل − سعرك). مش بيأثر على الرصيد.</span></label>
       <label class="full">ملاحظات<input name="notes" value="{{ post.notes }}"></label>
@@ -58,7 +60,8 @@
       const r = await fetch(`{% url 'quote' %}?${params}`).then((x) => x.json()).catch(() => null);
       if (!r) return;
       if (!r.ok) { box.innerHTML = `<span class="bad">${r.error}</span>`; return; }
-      box.innerHTML = `السعر: <b>${r.price} ${cur}</b>` + (r.list_price !== r.price ? ` <span class="muted small">(سعر القائمة ${r.list_price})</span>` : '') +
+      box.innerHTML = `السعر: <b>${r.price} ${r.currency || cur}</b>` + (r.list_price !== r.price ? ` <span class="muted small">(سعر القائمة ${r.list_price})</span>` : '') +
+        (r.offer ? ` <span class="badge good">🎁 ${r.offer}</span>` : '') +
         (Number(r.extra) ? ` <span class="badge">خصم خاص ${r.extra}%</span>` : '') +
         (r.needs_approval ? ` <span class="small bad">— محتاج موافقة Inno Source</span>` : '') +
         (r.available !== undefined ? ` <span class="muted small">— المتاح في رصيدك ${r.available}</span>` : '');

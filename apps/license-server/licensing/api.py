@@ -63,7 +63,9 @@ def quote(request):
     d = request.json
     addons, limits, days = S._clean(d.get('edition', ''), d.get('addons'), d.get('limits'), d.get('days', 365))
     S.check_allowed(request.partner, d['edition'], addons, limits, days)
-    lp, price = S.quote(d['edition'], addons, limits, days, request.partner, License.KIND_TRIAL if d.get('trial') else License.KIND_NEW)
+    kind = License.KIND_TRIAL if d.get('trial') else License.KIND_NEW
+    offer = S.find_offer(d.get('offer_code', ''), d['edition'], request.partner.country, kind)
+    lp, price = S.quote(d['edition'], addons, limits, days, request.partner, kind, currency=request.partner.currency, offer=offer)
     return JsonResponse({'ok': True, 'list_price': str(lp), 'price': str(price)})
 
 
@@ -80,8 +82,8 @@ def licenses(request):
         return JsonResponse({'ok': False, 'error': 'this account needs approval for every key — use the portal'}, status=403)
     d = request.json
     c = d.get('customer') or {}
-    customer = S.find_or_create_customer(p, c.get('name'), (c.get('phone') or '').strip(), city=c.get('city', ''))
-    lic = S.issue(None, partner=p, customer=customer, machine=d.get('machine', ''), edition=d.get('edition', ''), addons=d.get('addons'),
+    customer = S.find_or_create_customer(p, c.get('name'), (c.get('phone') or '').strip(), city=c.get('city', ''), country=p.country)
+    lic = S.issue(None, partner=p, customer=customer, machine=d.get('machine', ''), edition=d.get('edition', ''), addons=d.get('addons'), offer_code=d.get('offer_code', ''),
                   limits=d.get('limits'), days=d.get('days', 365), kind=License.KIND_TRIAL if d.get('trial') else License.KIND_NEW,
                   notes=d.get('notes', ''), ip=request.META.get('REMOTE_ADDR'))
     return JsonResponse({'ok': True, 'license': license_json(lic)}, status=201)
@@ -122,3 +124,39 @@ def lead(request):
                         kind=kind, message=str(d.get('message', '')).strip()[:1000], ip=ip)
     cache.set(key, cache.get(key, 0) + 1, 3600)
     return JsonResponse({'ok': True}, status=201)
+
+
+@require_GET
+def public_prices(request):
+    """Public price list for the website: yearly / monthly / lifetime per edition in the
+    country's currency, after any running automatic offer, and the public offers."""
+    from datetime import date
+    from .models import CURRENCIES, CURRENCY_SYMBOLS, Offer, Price
+    country = request.GET.get('country', 'EG').upper()
+    if country not in CURRENCIES:
+        country = 'EG'
+    currency = CURRENCIES[country]
+    key = f'public-prices:{country}'
+    cached = cache.get(key)
+    if cached:
+        return JsonResponse(cached)
+    rows = {(p.code, p.days): p.amount for p in Price.objects.filter(item=Price.ITEM_EDITION, currency=currency)}
+    out = {'country': country, 'currency': currency, 'symbol': CURRENCY_SYMBOLS[currency], 'editions': [], 'offers': []}
+    for code in E.editions():
+        offer = S.find_offer('', code, country)
+        item = {'code': code, 'ar': E.data()['editions'][code]['ar'], 'en': E.data()['editions'][code]['en']}
+        for label, days in (('year', 365), ('month', 30), ('lifetime', 0)):
+            if (code, days) in rows:
+                item[label] = str(rows[(code, days)])
+                if offer:
+                    item[f'{label}_offer'] = str(S._money(rows[(code, days)] * (100 - offer.percent) / 100))
+        if offer:
+            item['offer'] = {'name': offer.name, 'percent': str(offer.percent), 'ends': offer.ends_at.isoformat() if offer.ends_at else None}
+        out['editions'].append(item)
+    today = date.today()
+    for o in Offer.objects.filter(public=True, active=True):
+        if o.running(today) and ('*' in (o.countries or ['*']) or country in o.countries):
+            out['offers'].append({'name': o.name, 'percent': str(o.percent), 'code': o.code, 'ends': o.ends_at.isoformat() if o.ends_at else None,
+                                  'editions': o.editions or ['*'], 'new_only': o.new_only})
+    cache.set(key, out, 120)
+    return JsonResponse(out)

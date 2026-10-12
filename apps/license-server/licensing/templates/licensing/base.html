@@ -26,7 +26,8 @@
         <a href="{% url 'leads' %}" class="{% if u == 'leads' %}on{% endif %}">📥 طلبات الموقع {% if new_leads_nav %}<span class="count">{{ new_leads_nav }}</span>{% endif %}</a>
         <a href="{% url 'signing' %}" class="{% if u == 'signing' %}on{% endif %}">🛡 توقيع السيرفر</a>
         <a href="{% url 'audit' %}" class="{% if u == 'audit' %}on{% endif %}">📜 سجل النشاط</a>
-        <a href="/django-admin/licensing/price/">🏷 قائمة الأسعار</a>
+        <a href="{% url 'prices' %}" class="{% if u == 'prices' %}on{% endif %}">🏷 قائمة الأسعار</a>
+        <a href="{% url 'offers' %}" class="{% if u == 'offers' or u == 'offer_edit' %}on{% endif %}">🎁 العروض وأكواد الخصم</a>
         <a href="/django-admin/">⚙ الإدارة المتقدمة</a>
       {% endif %}
       <a href="/" target="_blank">🌐 الموقع</a>
