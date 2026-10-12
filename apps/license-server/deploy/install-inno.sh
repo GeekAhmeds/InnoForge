@@ -133,11 +133,13 @@ server {
 }
 NGINX
 ln -sf "$SITE" "$LINK"
-if ! nginx -t 2>/tmp/innoforge-nginx-test.txt; then
+NGINX_TEST=$(mktemp)   # a fresh file: /tmp may hold an old one root cannot overwrite
+if ! nginx -t 2>"$NGINX_TEST"; then
   rm -f "$LINK" "$SITE"
-  cat /tmp/innoforge-nginx-test.txt
+  cat "$NGINX_TEST"; rm -f "$NGINX_TEST"
   die "اختبار nginx فشل — شيلت الملف الجديد، ومفيش أي حاجة اتغيرت في nginx"
 fi
+rm -f "$NGINX_TEST"
 systemctl reload nginx
 ok "nginx اتعمله reload (من غير ما يقفل أي اتصال شغال)"
 
