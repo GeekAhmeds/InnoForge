@@ -4,6 +4,8 @@ export const VENDOR = {
   website: 'https://innovationsrc.com',
   websiteLabel: 'innovationsrc.com',
   phones: ['01011600023', '01117330111'],
+  // Customer service, printed at the bottom of every receipt and invoice.
+  support: '+201011600023',
   // Tutorial videos (uploaded next to the updates).
   videos: 'https://pos.0x01source.com:9990/updates/videos/',
 };

@@ -4,26 +4,35 @@ import { VENDOR } from './vendor.js';
 import { barcodeSvg } from './barcode.js';
 import { qrSvg } from './qr.js';
 import { zatcaQrForOrder } from './zatca-qr.js';
+import { receiptLayout } from './receipt-layout.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Numbers, phones and dates inside RTL text must stay left-to-right.
 const ltr = (s) => `<span dir="ltr">${esc(s)}</span>`;
+// Header / footer text may span several lines.
+const lines = (s) => esc(s).replace(/\r?\n/g, '<br>');
+
+/** The fixed last line of every printed document: who made the program and how to reach support. */
+export const vendorLine = (t) => `InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span><br>${t('receipt.support')}: <span dir="ltr">${VENDOR.support}</span>`;
 
 function page(settings, lang, body) {
   const width = Number(settings.paper_width) || 80;
+  const font = receiptLayout(settings).font;
   return `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8">
 <style>
   @page { size: ${width}mm auto; margin: 0; }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 3mm; width: ${width}mm; font: 12px/1.35 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
-  h1 { font-size: 16px; margin: 0 0 2px; text-align: center; }
-  .c { text-align: center; } .muted { font-size: 11px; }
+  body { margin: 0; padding: 3mm; width: ${width}mm; font: ${font}px/1.35 Tahoma, "Segoe UI", Arial, sans-serif; color: #000; }
+  h1 { font-size: ${font + 4}px; margin: 0 0 2px; text-align: center; }
+  .c { text-align: center; } .muted { font-size: ${font - 1}px; }
+  .logo { display: block; margin: 0 auto 4px; max-height: 30mm; object-fit: contain; filter: grayscale(1); }
+  .vendor { font-size: ${Math.max(9, font - 2)}px; }
   hr { border: 0; border-top: 1px dashed #000; margin: 6px 0; }
   table { width: 100%; border-collapse: collapse; }
   td, th { padding: 2px 0; vertical-align: top; text-align: start; }
   .n { text-align: end; white-space: nowrap; }
-  .big td { font-size: 15px; font-weight: bold; }
-  .note { font-size: 11px; padding-inline-start: 8px; }
+  .big td { font-size: ${font + 3}px; font-weight: bold; }
+  .note { font-size: ${font - 1}px; padding-inline-start: 8px; }
   .kitchen td { font-size: 16px; font-weight: bold; }
 </style></head><body>${body}</body></html>`;
 }
@@ -54,24 +63,36 @@ function lineVat(items, tax) {
 }
 
 function header(settings, t) {
-  return `<h1>${esc(settings.business_name)}</h1>
-  ${settings.address ? `<div class="c muted">${esc(settings.address)}</div>` : ''}
-  ${settings.phone ? `<div class="c muted">${ltr(settings.phone)}</div>` : ''}
+  const { show, logoWidth } = receiptLayout(settings);
+  return `${show.logo && settings.business_logo ? `<img class="logo" src="${esc(settings.business_logo)}" style="width:${logoWidth}%" alt="">` : ''}
+  <h1>${esc(settings.business_name)}</h1>
+  ${show.address && settings.address ? `<div class="c muted">${esc(settings.address)}</div>` : ''}
+  ${show.phone && settings.phone ? `<div class="c muted">${ltr(settings.phone)}</div>` : ''}
   ${settings.tax_number ? `<div class="c muted">${t('receipt.taxNumber')}: ${ltr(settings.tax_number)}</div>` : ''}
-  ${settings.receipt_header ? `<div class="c">${esc(settings.receipt_header)}</div>` : ''}`;
+  ${show.header && settings.receipt_header ? `<div class="c">${lines(settings.receipt_header)}</div>` : ''}`;
+}
+
+/** The bottom of a receipt: the owner's link QR, the footer text and the fixed vendor line. */
+function footer(settings, t) {
+  const { show, qrUrl, qrLabel } = receiptLayout(settings);
+  return `${show.qr && qrUrl ? `<div class="c" style="margin:6px 0">${qrSvg(qrUrl, { size: 110 })}${qrLabel ? `<div class="muted">${esc(qrLabel)}</div>` : ''}</div>` : ''}
+  ${show.footer && settings.receipt_footer ? `<div class="c">${lines(settings.receipt_footer)}</div>` : ''}
+  <div class="c vendor">${vendorLine(t)}</div>`;
 }
 
 export function receiptHtml(order, settings, t, lang) {
+  const { show } = receiptLayout(settings);
   const m = (v) => formatMoney(v, settings);
   const rows = order.items.map((i) => `
     <tr><td>${esc(i.name)}</td><td class="n">${formatQty(i.qty)}</td><td class="n">${m(i.line_total)}</td></tr>
-    ${i.qty !== 1 ? `<tr><td class="note" colspan="3">${formatQty(i.qty)} × ${m(i.unit_price)}${i.discount ? ` − ${m(i.discount)}` : ''}</td></tr>` : ''}
-    ${i.modifiers?.length ? `<tr><td class="note" colspan="3">+ ${i.modifiers.map((x) => esc(x.name)).join('، ')}</td></tr>` : ''}
-    ${i.note ? `<tr><td class="note" colspan="3">${esc(i.note)}</td></tr>` : ''}
-    ${i.promo_name ? `<tr><td class="note" colspan="3">🏷 ${esc(i.promo_name)} −${m(i.promo_discount)}</td></tr>` : ''}`).join('');
+    ${show.itemDetails && i.qty !== 1 ? `<tr><td class="note" colspan="3">${formatQty(i.qty)} × ${m(i.unit_price)}${i.discount ? ` − ${m(i.discount)}` : ''}</td></tr>` : ''}
+    ${show.modifiers && i.modifiers?.length ? `<tr><td class="note" colspan="3">+ ${i.modifiers.map((x) => esc(x.name)).join('، ')}</td></tr>` : ''}
+    ${show.itemNotes && i.note ? `<tr><td class="note" colspan="3">${esc(i.note)}</td></tr>` : ''}
+    ${show.promos && i.promo_name ? `<tr><td class="note" colspan="3">🏷 ${esc(i.promo_name)} −${m(i.promo_discount)}</td></tr>` : ''}`).join('');
   const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
-  const changeRow = order.change_due ? line(t('pay.change'), m(order.change_due)) : '';
-  const pays = order.payments.map((p) => line(t(`pay.${p.method}`), m(p.amount + (p.method === 'cash' ? order.change_due : 0)))).join('');
+  const changeRow = show.change && order.change_due ? line(t('pay.change'), m(order.change_due)) : '';
+  // Hiding the change folds it back out of the cash line (the receipt shows what was paid).
+  const pays = show.payments ? order.payments.map((p) => line(t(`pay.${p.method}`), m(p.amount + (p.method === 'cash' && show.change ? order.change_due || 0 : 0)))).join('') : '';
   const customer = [order.customer_name, order.customer_phone, order.customer_address].filter(Boolean).map(esc).join(' — ');
 
   const title = vatTitle(settings, t, !!order.customer?.tax_number);
@@ -81,11 +102,11 @@ export function receiptHtml(order, settings, t, lang) {
   <table>
     ${line(t('receipt.invoice'), `<b>${order.invoice_no ?? '—'}</b>`)}
     ${line(t('receipt.date'), ltr(order.completed_at || order.created_at))}
-    ${line(t('receipt.cashier'), esc(order.user_name))}
-    ${order.order_type !== 'sale' ? line(t('orders.type'), t(`order.${order.order_type}`) + (order.table_name ? ` — ${t('pos.table')} ${esc(order.table_name)}` : '')) : ''}
+    ${show.cashier ? line(t('receipt.cashier'), esc(order.user_name)) : ''}
+    ${show.orderType && order.order_type !== 'sale' ? line(t('orders.type'), t(`order.${order.order_type}`) + (order.table_name ? ` — ${t('pos.table')} ${esc(order.table_name)}` : '')) : ''}
   </table>
-  ${customer ? `<div class="muted">${t('pos.customer')}: ${customer}</div>` : ''}
-  ${order.order_type === 'delivery' && (order.zone_name || order.driver_name) ? `<div class="muted">🛵 ${esc([order.zone_name, order.driver_name].filter(Boolean).join(' — '))}</div>` : ''}
+  ${show.customer && customer ? `<div class="muted">${t('pos.customer')}: ${customer}</div>` : ''}
+  ${show.delivery && order.order_type === 'delivery' && (order.zone_name || order.driver_name) ? `<div class="muted">🛵 ${esc([order.zone_name, order.driver_name].filter(Boolean).join(' — '))}</div>` : ''}
   <hr>
   <table>
     <tr><th>${t('receipt.item')}</th><th class="n">${t('receipt.qty')}</th><th class="n">${t('receipt.amount')}</th></tr>
@@ -103,15 +124,15 @@ export function receiptHtml(order, settings, t, lang) {
     ${changeRow}
     ${order.credit ? line(t('pay.onAccount'), m(order.credit), 'big') : ''}
     ${order.refunded ? line(t('receipt.refunded'), m(order.refunded)) : ''}
-    ${order.customer_balance != null && (order.credit || order.customer_balance) ? line(t('customers.currentBalance'), m(order.customer_balance)) : ''}
-    ${order.points_earned ? line(`⭐ ${t('loyalty.earned')}`, `+${formatQty(order.points_earned)}`) : ''}
-    ${order.customer?.points != null && (order.points_earned || order.points_redeemed) ? line(`⭐ ${t('loyalty.balance')}`, formatQty(order.customer.points)) : ''}
+    ${show.balance && order.customer_balance != null && (order.credit || order.customer_balance) ? line(t('customers.currentBalance'), m(order.customer_balance)) : ''}
+    ${show.loyalty && order.points_earned ? line(`⭐ ${t('loyalty.earned')}`, `+${formatQty(order.points_earned)}`) : ''}
+    ${show.loyalty && order.customer?.points != null && (order.points_earned || order.points_redeemed) ? line(`⭐ ${t('loyalty.balance')}`, formatQty(order.customer.points)) : ''}
   </table>
-  ${order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
+  ${show.orderNote && order.note ? `<hr><div>${esc(order.note)}</div>` : ''}
   <hr>
   ${zatcaQr(order, settings, 130)}
-  ${settings.receipt_footer ? `<div class="c">${esc(settings.receipt_footer)}</div>` : ''}
-  <div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
+  ${show.invoiceBarcode && order.invoice_no ? `<div class="c">${barcodeSvg(String(order.invoice_no), { height: 32 })}</div>` : ''}
+  ${footer(settings, t)}`);
 }
 
 /** The bill brought to the table before paying (not an invoice: no number, no payments). */
@@ -203,7 +224,7 @@ export function collectionHtml(r, customer, settings, t, lang) {
   </table>
   ${r.notes ? `<hr><div>${esc(r.notes)}</div>` : ''}
   <br><div>${t('collect.signature')}: ..................</div>
-  <hr><div class="c muted">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></div>`);
+  <hr><div class="c vendor">${vendorLine(t)}</div>`);
 }
 
 export function statementHtml(data, settings, t, lang) {
@@ -234,7 +255,7 @@ export function statementHtml(data, settings, t, lang) {
   ${data.open?.length ? `<h3 style="margin-top:18px">${t('collect.openInvoices')}</h3><table><thead><tr><th>${t('customers.invoice')}</th><th>${t('orders.date')}</th><th>${t('collect.due')}</th><th class="n">${t('collect.remaining')}</th></tr></thead><tbody>
     ${data.open.map((x) => `<tr><td>${x.invoice_no ? `#${x.invoice_no}` : t('customers.opening')}</td><td>${ltr(String(x.date).slice(0, 10))}</td><td>${ltr(x.due_date)}</td><td class="n">${m(x.open)}</td></tr>`).join('')}
   </tbody></table>` : ''}
-  <p class="muted" style="margin-top:24px">InnoForge POS — <span dir="ltr">${VENDOR.websiteLabel}</span></p>
+  <p class="muted" style="margin-top:24px">${vendorLine(t)}</p>
   </body></html>`;
 }
 
@@ -330,7 +351,7 @@ export function a4Html(doc, kind, settings, t, lang) {
     </table>
   </div>
   <div class="sign"><div>${t('a4.receivedBy')}</div><div>${t('a4.signature')}</div></div>
-  <div class="foot">${settings.receipt_footer ? esc(settings.receipt_footer) + ' — ' : ''}InnoForge POS · <span dir="ltr">${VENDOR.websiteLabel}</span></div>
+  <div class="foot">${settings.receipt_footer ? lines(settings.receipt_footer) + '<br>' : ''}${vendorLine(t)}</div>
   </body></html>`;
 }
 

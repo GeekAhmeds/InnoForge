@@ -13,6 +13,7 @@ Where each feature lives and how far it has got. ✅ done and tested · 🟡 don
 | Payments cash / card / wallet / bank, split, change, credit sale | ✅ | `orders.checkout`, `PayModal` |
 | Returns (partial/full, credit-first for credit sales, points back) | ✅ | `orders.refund`, `Orders.jsx` |
 | Thermal receipt, A4 invoice with logo, PDF, WhatsApp | ✅ | `lib/receipt.js`, `lib/share.js`, `pos:savePdf` |
+| Receipt designer: switch receipt parts on/off, logo on thermal, multi-line header/footer, font size, link QR, invoice-number barcode, live preview (legal parts and the vendor line with the support number always print) | ✅ | `lib/receipt-layout.js` (`receipt_layout` setting), `components/ReceiptDesigner.jsx`, `lib/receipt.js` |
 | Shifts and Z-report | ✅ | `shifts.*`, `Shift.jsx` |
 
 ## The 19 extra features requested

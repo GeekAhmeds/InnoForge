@@ -556,6 +556,41 @@ export const TOPICS = [
     },
   },
   {
+    id: 'receiptDesign', icon: '🧾', group: 'more',
+    ar: {
+      title: 'تصميم الإيصال',
+      intro: 'تختار إيه اللي يظهر في إيصال العميل، وتشوف شكله قبل ما تطبع.',
+      steps: [
+        'افتح «الإعدادات ← الإيصال والطباعة» وانزل لـ«تصميم الإيصال».',
+        'شغّل أو اقفل أي جزء: الشعار، العنوان، التليفون، اسم الكاشير، بيانات العميل، تفاصيل الكمية × السعر، الإضافات، الباقي، رصيد العميل، نقاط الولاء…',
+        'اكتب نص أعلى الإيصال وأسفله (ينفع أكتر من سطر)، وغيّر حجم الخط.',
+        'ممكن تضيف QR لأي رابط (المنيو، صفحة إنستجرام، تقييم جوجل) وباركود لرقم الفاتورة يتقري في بحث الفواتير وقت المرتجع.',
+        'المعاينة بتتغير مع كل اختيار. اضغط «تجربة طباعة» وبعدين «حفظ».',
+      ],
+      tips: [
+        'اسم النشاط والرقم الضريبي ورقم الفاتورة والتاريخ والأصناف والإجماليات والضريبة بيظهروا دايماً، وفي السعودية كمان عنوان «فاتورة ضريبية» وQR فاتورة.',
+        'الشعار على الإيصال الحراري بيتطبع أبيض وأسود؛ اختار شعار واضح من غير تفاصيل كتير.',
+        'زرار «رجوع للتصميم الافتراضي» بيرجّع الأجزاء بس، ومش بيمسح النصوص ولا الشعار.',
+      ],
+    },
+    en: {
+      title: 'Receipt design',
+      intro: 'Choose what the customer\'s receipt shows and see it before printing.',
+      steps: [
+        'Open Settings → Receipt & printing and scroll to "Receipt design".',
+        'Switch any part on or off: logo, address, phone, cashier name, customer details, quantity × price details, add-ons, change, customer balance, loyalty points…',
+        'Write the header and footer text (several lines are fine) and pick the font size.',
+        'Add a QR for any link (menu, Instagram page, Google review) and a barcode of the invoice number that the invoice search reads when doing a return.',
+        'The preview follows every change. Press "Test print", then "Save".',
+      ],
+      tips: [
+        'The business name, tax number, invoice number, date, items, totals and VAT are always printed; in Saudi Arabia also the "Tax invoice" title and the FATOORA QR.',
+        'Thermal printers print the logo in black and white; pick a clear logo without fine detail.',
+        '"Back to the default design" only resets the parts; texts and logo are kept.',
+      ],
+    },
+  },
+  {
     id: 'country', icon: '🌍', group: 'money',
     ar: {
       title: 'الدولة: مصر أو السعودية أو الإمارات',

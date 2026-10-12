@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { SCREENS, sellScreens } from '../lib/screens.js';
 import { api, backup, dataPath, printers as listPrinters, restore } from '../lib/api.js';
 import { receiptHtml } from '../lib/receipt.js';
+import ReceiptDesigner, { sampleOrder } from '../components/ReceiptDesigner.jsx';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
 import { formatMoney } from '../lib/money.js';
 import Support from '../components/Support.jsx';
@@ -73,14 +74,8 @@ function SettingsForm({ tab }) {
     try { await api.settings.save(f); await reloadSettings(); notify(t('common.saved')); } catch (err) { notify(tErr(err), 'error'); }
   }
 
-  function testPrint() {
-    const sample = {
-      invoice_no: 0, completed_at: new Date().toLocaleString('en-GB'), user_name: 'Test', order_type: 'sale',
-      items: [{ name: 'Test item', qty: 2, unit_price: 1000, discount: 0, line_total: 2000, note: '' }],
-      payments: [{ method: 'cash', amount: 2000 }], subtotal: 2000, discount: 0, service: 0, tax: 0, total: 2000, change_due: 0, refunded: 0,
-    };
-    printDoc(receiptHtml(sample, f, t, lang), f.printer_name);
-  }
+  // Prints the designer's sample sale with the settings as they are on screen (saved or not).
+  const testPrint = () => printDoc(receiptHtml(sampleOrder(f, t), f, t, lang), f.printer_name);
 
   const printerSelect = (key) => (
     <select value={f[key]} onChange={set(key)}>
@@ -90,7 +85,7 @@ function SettingsForm({ tab }) {
   );
 
   return (
-    <form className="card settings-form" onSubmit={save}>
+    <form className={`card settings-form ${tab === 'receipt' ? 'wide' : ''}`} onSubmit={save}>
       {tab === 'general' && (
         <div className="grid2">
           <Field label={t('setup.businessName')}><input value={f.business_name} onChange={set('business_name')} /></Field>
@@ -155,10 +150,7 @@ function SettingsForm({ tab }) {
             <select value={f.paper_width} onChange={set('paper_width')}>{[58, 80].map((x) => <option key={x} value={x}>{x}</option>)}</select>
           </Field>
           <div className="row"><Toggle checked={f.silent_print} onChange={set('silent_print')} label={t('settings.silentPrint')} /></div>
-          <div className="span2"><Field label={t('settings.receiptHeader')}><input value={f.receipt_header} onChange={set('receipt_header')} /></Field></div>
-          <div className="span2"><Field label={t('settings.receiptFooter')}><input value={f.receipt_footer} onChange={set('receipt_footer')} /></Field></div>
-          <div><button type="button" onClick={testPrint}>🖨 {t('settings.testPrint')}</button></div>
-          <span />
+          <ReceiptDesigner f={f} setF={setF} onTestPrint={testPrint} />
           <h4 className="span2">{t('a4.settingsTitle')}</h4>
           <Field label={t('a4.format')}>
             <select value={f.invoice_format} onChange={set('invoice_format')}>

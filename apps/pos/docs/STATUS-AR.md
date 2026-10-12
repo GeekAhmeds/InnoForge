@@ -21,6 +21,7 @@
 | الحاجة | فين في البرنامج | فين في الكود |
 |---|---|---|
 | البيع (كاشير، صالة مطعم، فاتورة تجارية) | البيع / الصالة / فاتورة البيع | `src/pages/Pos.jsx`, `Floor.jsx`, `SalesInvoice.jsx` — `orders.*` |
+| تصميم الإيصال (إظهار وإخفاء الأجزاء، الشعار، QR لرابط، باركود الفاتورة، معاينة) — وآخر سطر ثابت فيه رقم خدمة العملاء | الإعدادات ← الإيصال والطباعة | `src/lib/receipt-layout.js`, `components/ReceiptDesigner.jsx`, `lib/receipt.js` |
 | العملاء، التحصيل، الشيكات، أعمار الديون، التقسيط | العملاء | `src/pages/Customers.jsx`, `components/Collect.jsx`, `Installments.jsx` |
 | الأصناف، الوحدات، الصلاحية، السيريال، الملصقات، الميزان | الأصناف / الإعدادات ← الأجهزة | `src/pages/Products.jsx`, `components/Labels.jsx`, `lib/scale*.js` |
 | المشتريات، الموردين، أوامر الشراء، البونص | المشتريات | `src/pages/Purchases.jsx` |

@@ -1018,3 +1018,15 @@ test('country: VAT number format, e-invoice per country, license lock', () => {
   assert.equal(s2.settings.get().country, 'SA');
   assert.equal(tryCode(() => s2.settings.save({ country: 'EG' })), 'LICENSE_COUNTRY');
 });
+
+test('receipt design: stored as JSON, anything else is refused', () => {
+  const { s } = setup({});
+  assert.equal(s.settings.get().receipt_layout, '');
+  const layout = JSON.stringify({ show: { cashier: false }, font: 13 });
+  s.settings.save({ receipt_layout: layout });
+  assert.equal(s.settings.get().receipt_layout, layout);
+  assert.equal(tryCode(() => s.settings.save({ receipt_layout: '{broken' })), 'INVALID_SETTING');
+  assert.equal(tryCode(() => s.settings.save({ receipt_layout: '[1]' })), 'INVALID_SETTING');
+  s.settings.save({ receipt_layout: '' }); // back to the default design
+  assert.equal(s.settings.get().receipt_layout, '');
+});

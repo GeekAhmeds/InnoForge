@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   language: 'ar',
   receipt_header: '',
   receipt_footer: 'شكراً لزيارتكم',
+  receipt_layout: '', // receipt designer: which parts the thermal receipt shows (JSON; '' = defaults)
   printer_name: '',
   kitchen_printer_name: '',
   silent_print: false,
@@ -334,6 +335,11 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.uae_enabled) requireFeature('uae_einvoice');
       if (patch && 'uae_mode' in patch && !['export', 'asp'].includes(patch.uae_mode)) throw new PosError('INVALID_SETTING', 'uae_mode');
       if (patch && 'uae_emirate' in patch && patch.uae_emirate && !uaeDoc.EMIRATES.includes(patch.uae_emirate)) throw new PosError('INVALID_SETTING', 'uae_emirate');
+      if (patch && 'receipt_layout' in patch && str(patch.receipt_layout)) {
+        let layout = null;
+        try { layout = JSON.parse(patch.receipt_layout); } catch { /* checked below */ }
+        if (!layout || typeof layout !== 'object' || Array.isArray(layout) || String(patch.receipt_layout).length > 4000) throw new PosError('INVALID_SETTING', 'receipt_layout');
+      }
       if (patch && 'zatca_env' in patch && !['sandbox', 'simulation', 'production'].includes(patch.zatca_env)) throw new PosError('INVALID_SETTING', 'zatca_env');
       // The kitchen screen key only changes through newKdsKey (forms send stale copies of it);
       // the e-invoice keys only through the onboarding.
