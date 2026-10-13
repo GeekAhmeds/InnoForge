@@ -1,8 +1,8 @@
 {
-  "name": "azim-command-server",
+  "name": "inno-server",
   "version": "0.1.0",
   "private": true,
-  "description": "Azim Command server: sync replica, file store and auto-update feed. Developed by Inno Source For Software Solutions.",
+  "description": "Inno Server: shared backend (sync, files, accounts, push, auto-update feeds) for Inno Source For Software Solutions products, starting with Azim Command.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

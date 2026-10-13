@@ -107,6 +107,14 @@ export interface ProviderSettings {
   hasKey: boolean // keys never leave the main process
 }
 
+export type Role = 'owner' | 'admin' | 'accountant' | 'viewer'
+
+export interface Account {
+  name: string
+  role: Role
+  companies: string[] | null // null = all
+}
+
 export interface Settings {
   language: Lang
   theme: Theme
@@ -119,6 +127,101 @@ export interface Settings {
   syncToken: string
   lastSyncAt: string | null
   anomalyThreshold: number // percent change that raises an alert
+  account: Account | null // from the Inno server; null = local owner
+  smtp: { host: string; port: number; secure: boolean; user: string; from: string; hasPassword: boolean }
+  whatsapp: { phoneNumberId: string; apiVersion: string; templateName: string; templateLanguage: string; hasToken: boolean }
+  reminderRecipients: { emails: string[]; whatsapp: string[] }
+  lock: { enabled: boolean; idleMinutes: number; hasPin: boolean }
+  backup: { enabled: boolean; folder: string; intervalHours: number; keepLast: number; lastAt: string | null; hasPassword: boolean }
+}
+
+export type ReminderType = 'tax' | 'installment' | 'contract' | 'salary' | 'insurance' | 'other'
+
+export interface Reminder {
+  id: string
+  companyId: string
+  title: string
+  type: ReminderType
+  dueDate: string // YYYY-MM-DD
+  amount: number | null
+  currency: string
+  recurrence: 'none' | 'monthly' | 'quarterly' | 'yearly'
+  remindDays: number
+  status: 'open' | 'done'
+  notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Budget {
+  id: string
+  companyId: string
+  metric: string
+  period: string
+  amount: number
+  note: string
+}
+
+export interface BudgetLine {
+  metric: string
+  period: string
+  budget: number
+  actual: number | null
+  variance: number | null
+  variancePct: number | null
+  favorable: boolean | null
+}
+
+export interface ReportSchedule {
+  companyId: string
+  enabled: boolean
+  dayOfMonth: number
+  emails: string[]
+  whatsapp: string[]
+  language: Lang
+  format: 'pdf' | 'xlsx' | 'docx'
+  aiSummary: boolean
+  lastPeriodSent: string | null
+  lastError: string | null
+}
+
+export type ConnectorType = 'postgres' | 'mysql' | 'mssql' | 'sqlite' | 'odoo' | 'rest'
+
+export interface Connector {
+  id: string
+  companyId: string
+  name: string
+  type: ConnectorType
+  // host, port, database, user, file, url, headerName ... (never the password)
+  config: Record<string, string | number | boolean>
+  hasSecret: boolean
+  allowAi: boolean
+  refreshMinutes: number
+  lastRunAt: string | null
+  lastError: string | null
+  datasets: Dataset[]
+}
+
+export interface Dataset {
+  id: string
+  connectorId: string
+  name: string
+  query: string
+  mode: 'table' | 'metrics'
+  documentId: string | null
+  lastRows: number | null
+  updatedAt: string
+}
+
+export interface ServerUser {
+  id: string
+  name: string
+  role: Exclude<Role, 'owner'>
+  companies: string[] | null
+  disabled: boolean
+  createdAt: string
+  lastSeen: string | null
+  token?: string
 }
 
 export interface ChatConversation {
@@ -214,4 +317,6 @@ export interface SyncStatus {
 }
 
 export const APP_DEVELOPER = 'Inno Source For Software Solutions'
+// Inno Server hosts several Inno products; this app lives under its own namespace.
 export const DEFAULT_SERVER_URL = 'http://196.221.144.94:9991'
+export const SERVER_APP_ID = 'azim-command'

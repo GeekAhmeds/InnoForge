@@ -16,9 +16,9 @@
 
 ## 🧭 Azim Command (first product)
 
-**Azim Command** is a desktop financial command center (Windows / Linux, macOS-ready) for managing many companies' messy data — Excel, PDF, Word, scanned images and databases — with live dashboards and an AI assistant (Claude, OpenAI, Gemini or a local model) that organizes files, analyzes them and generates PDF / Excel / Word reports. Developed by **Inno Source For Software Solutions**.
+**Azim Command** is a financial command center for a CFO who runs many companies: a desktop app (Windows / Linux, macOS-ready) and a mobile app (iOS / Android). It organizes messy company data (Excel, PDF, Word, scans, live databases and Odoo), shows live dashboards, forecasts cash with what-if scenarios, tracks budgets and deadlines, emails/WhatsApps monthly reports, and has an AI assistant (Claude, OpenAI, Gemini or a local model) that generates PDF / Excel / Word reports. It syncs through **Inno Server**, the shared backend of Inno Source products. Developed by **Inno Source For Software Solutions**.
 
-➡️ See [`apps/README.md`](./apps/README.md).
+➡️ See [`apps/README.md`](./apps/README.md) · interactive presentation & demo in [`docs/presentation`](./docs/presentation).
 
 ---
 

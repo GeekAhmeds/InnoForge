@@ -1,8 +1,8 @@
 # Build installers and publish them. Push a tag like v0.2.0 to release:
 #   git tag v0.2.0 && git push origin v0.2.0
-# Installers are attached to a GitHub Release and uploaded to the Azim update
-# server (set repository secrets AZIM_SERVER_URL and AZIM_ADMIN_TOKEN), where
-# every running copy of the app picks them up automatically.
+# Installers are attached to a GitHub Release and uploaded to the Inno server
+# (set repository secrets INNO_SERVER_URL and INNO_PUBLISH_TOKEN), where every
+# running copy of the app picks them up automatically.
 name: Release desktop app
 
 on:
@@ -52,11 +52,11 @@ jobs:
             apps/desktop/dist/*.deb
             apps/desktop/dist/latest*.yml
           if-no-files-found: error
-      - name: Publish to Azim update server
+      - name: Publish to the Inno server
         shell: bash
         env:
-          AZIM_SERVER_URL: ${{ secrets.AZIM_SERVER_URL }}
-          AZIM_ADMIN_TOKEN: ${{ secrets.AZIM_ADMIN_TOKEN }}
+          INNO_SERVER_URL: ${{ secrets.INNO_SERVER_URL }}
+          INNO_PUBLISH_TOKEN: ${{ secrets.INNO_PUBLISH_TOKEN }}
         run: node ../../scripts/publish-release.mjs ${{ matrix.target }} dist
       - name: Attach to GitHub release
         if: startsWith(github.ref, 'refs/tags/v')

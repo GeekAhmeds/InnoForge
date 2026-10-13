@@ -5,7 +5,7 @@ import { logActivity } from '../db'
 import { activeProvider, runAgent } from './providers'
 import { executeTool, TOOLS } from './tools'
 
-const ORGANIZE_TOOLS = ['read_document', 'query_table', 'organize_document', 'record_metrics', 'create_alert']
+const ORGANIZE_TOOLS = ['read_document', 'query_table', 'organize_document', 'record_metrics', 'add_reminder', 'set_budget', 'create_alert']
 
 export async function organizeDocument(documentId: string): Promise<void> {
   const doc = repo.getDocument(documentId)
@@ -21,7 +21,8 @@ Your job, using the tools:
 1. Read the document (read_document; for spreadsheets use query_table).
 2. Call organize_document once with: category (one of invoice, bank_statement, payroll, contract, budget, balance_sheet, income_statement, cash_flow, tax, inventory, purchase, sales, expenses, report, correspondence, other), 2-6 short tags, the period it covers (YYYY-MM, YYYY-Qn or YYYY), and a 1-2 sentence summary in the same language as the document.
 3. If the document clearly states period totals (revenue, expenses, net_profit, cash, receivables, payables, payroll, gross_margin ...), record them with record_metrics (period YYYY-MM, use the last month of the covered period). Never estimate or invent numbers.
-4. If you notice a real problem (inconsistent totals, overdue amounts, unusual items), raise one create_alert.
+4. If the document contains a dated obligation (contract end/renewal, loan installment schedule, tax filing or payment due), add it with add_reminder (contracts: remind 30 days before; recurring installments: set recurrence). If it is a budget, save it with set_budget.
+5. If you notice a real problem (inconsistent totals, overdue amounts, unusual items), raise one create_alert.
 Be efficient: do not read more than you need. Reply with one short line when done.`,
     history: [],
     user: `Document id: ${doc.id}\nFile name: ${doc.name}\nKind: ${doc.kind}\nCurrent guess: category=${doc.category}, period=${doc.period ?? 'unknown'}\nSheets: ${JSON.stringify(sheets)}\nPreview: ${doc.summary}`,

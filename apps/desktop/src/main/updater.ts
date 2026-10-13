@@ -1,11 +1,11 @@
-// Auto-update from the Azim server. The server publishes electron-builder
-// artifacts under /updates/<os>/ and announces new releases on /api/events,
+// Auto-update from the Inno server. It publishes electron-builder artifacts
+// under /updates/azim-command/<os>/ and announces releases on /api/azim-command/events,
 // so the app learns about an update within seconds of it being uploaded.
 import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 import { broadcast } from './events'
 import { getSettings } from './settings'
-import type { UpdateStatus } from '@shared/types'
+import { SERVER_APP_ID, type UpdateStatus } from '@shared/types'
 
 const { autoUpdater } = electronUpdater
 
@@ -23,7 +23,7 @@ const osDir = (): string => (process.platform === 'win32' ? 'win' : process.plat
 
 function configureFeed(): void {
   const base = getSettings().serverUrl.replace(/\/+$/, '')
-  autoUpdater.setFeedURL({ provider: 'generic', url: `${base}/updates/${osDir()}` })
+  autoUpdater.setFeedURL({ provider: 'generic', url: `${base}/updates/${SERVER_APP_ID}/${osDir()}` })
 }
 
 export async function checkForUpdates(): Promise<UpdateStatus> {
@@ -50,7 +50,7 @@ async function listenForReleases(): Promise<void> {
   for (;;) {
     try {
       const base = getSettings().serverUrl.replace(/\/+$/, '')
-      const res = await fetch(`${base}/api/events`, { headers: { Accept: 'text/event-stream' } })
+      const res = await fetch(`${base}/api/${SERVER_APP_ID}/events`, { headers: { Accept: 'text/event-stream' } })
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
       delay = 5_000
       const reader = res.body.getReader()

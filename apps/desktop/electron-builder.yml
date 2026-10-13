@@ -28,9 +28,10 @@ linux:
 mac:
   target: [dmg, zip]
   category: public.app-category.finance
-# Auto-update feed: the Azim update server. The app can override this URL at
-# runtime from Settings (see src/main/updater.ts).
+# Auto-update feed on the Inno server (Inno Source For Software Solutions),
+# under this app's namespace. The app can override the server URL at runtime
+# from Settings (see src/main/updater.ts).
 publish:
   provider: generic
-  url: http://196.221.144.94:9991/updates/${os}
+  url: http://196.221.144.94:9991/updates/azim-command/${os}
   channel: latest

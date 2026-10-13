@@ -16,9 +16,9 @@ export function getDb(): Database.Database {
 export const uid = (): string => randomUUID()
 export const now = (): string => new Date().toISOString()
 
-// Tables that are replicated to the Azim server. Every row carries updated_at
+// Tables that are replicated to the Inno server. Every row carries updated_at
 // and a soft-delete flag so last-write-wins sync can propagate deletions.
-export const SYNC_TABLES = ['companies', 'documents', 'metrics', 'alerts', 'decisions', 'reports'] as const
+export const SYNC_TABLES = ['companies', 'documents', 'metrics', 'alerts', 'decisions', 'reports', 'reminders', 'budgets'] as const
 
 function migrate(d: Database.Database): void {
   d.exec(`
@@ -158,6 +158,80 @@ function migrate(d: Database.Database): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+
+    -- Deadlines: taxes, loan installments, contract renewals, ...
+    CREATE TABLE IF NOT EXISTS reminders (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'other',
+      due_date TEXT NOT NULL,
+      amount REAL,
+      currency TEXT NOT NULL DEFAULT '',
+      recurrence TEXT NOT NULL DEFAULT 'none',
+      remind_days INTEGER NOT NULL DEFAULT 7,
+      status TEXT NOT NULL DEFAULT 'open',
+      notes TEXT NOT NULL DEFAULT '',
+      last_notified TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_date);
+
+    CREATE TABLE IF NOT EXISTS budgets (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      period TEXT NOT NULL,
+      amount REAL NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_unique ON budgets(company_id, metric, period) WHERE deleted = 0;
+
+    -- Local only (never synced): contain recipients and credentials.
+    CREATE TABLE IF NOT EXISTS report_schedules (
+      company_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      day_of_month INTEGER NOT NULL DEFAULT 1,
+      emails TEXT NOT NULL DEFAULT '[]',
+      whatsapp TEXT NOT NULL DEFAULT '[]',
+      language TEXT NOT NULL DEFAULT 'ar',
+      format TEXT NOT NULL DEFAULT 'pdf',
+      ai_summary INTEGER NOT NULL DEFAULT 1,
+      last_period_sent TEXT,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS connectors (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      secret TEXT,
+      allow_ai INTEGER NOT NULL DEFAULT 0,
+      refresh_minutes INTEGER NOT NULL DEFAULT 60,
+      last_run_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS datasets (
+      id TEXT PRIMARY KEY,
+      connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      query TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'table',
+      document_id TEXT,
+      last_rows INTEGER,
+      updated_at TEXT NOT NULL
+    );
   `)
 }
 

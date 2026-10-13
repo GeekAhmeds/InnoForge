@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Building2, FileText, LayoutDashboard, MessageSquare, Plus, Search, Settings as SettingsIcon, RefreshCw, Download } from 'lucide-react'
+import { Building2, CalendarClock, FileText, LayoutDashboard, Lock, MessageSquare, Plus, Search, Settings as SettingsIcon, RefreshCw, Download } from 'lucide-react'
 import { dictionaries, LangContext } from './i18n'
 import { useLive } from './hooks'
 import { Overview } from './pages/Overview'
@@ -10,22 +10,34 @@ import { SettingsPage } from './pages/SettingsPage'
 import { CompanyForm } from './components/CompanyForm'
 import { Palette } from './components/Palette'
 import { ToastHost } from './components/Toast'
-import { APP_DEVELOPER, type Company, type Settings, type SyncStatus, type UpdateStatus } from '@shared/types'
+import { LockScreen } from './components/LockScreen'
+import { RemindersPage } from './pages/RemindersPage'
+import { APP_DEVELOPER, type Company, type Role, type Settings, type SyncStatus, type UpdateStatus } from '@shared/types'
 
 export type Route =
   | { page: 'overview' }
   | { page: 'company'; companyId: string; tab?: string }
   | { page: 'chat'; companyId?: string | null; prompt?: string }
   | { page: 'reports' }
+  | { page: 'reminders' }
   | { page: 'settings' }
+
+// Deep links like #company/<id>/<tab>, #chat, #reminders (used by the docs demo).
+function routeFromHash(): Route {
+  const [page, id, tab] = location.hash.replace(/^#/, '').split('/')
+  if (page === 'company' && id) return { page: 'company', companyId: id, tab }
+  if (page === 'chat' || page === 'reports' || page === 'reminders' || page === 'settings') return { page }
+  return { page: 'overview' }
+}
 
 export default function App(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
-  const [route, setRoute] = useState<Route>({ page: 'overview' })
+  const [route, setRoute] = useState<Route>(routeFromHash)
   const [editing, setEditing] = useState<Partial<Company> | null>(null)
   const [palette, setPalette] = useState(false)
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  const [locked, setLocked] = useState(false)
   const [companies] = useLive(() => window.azim.companies.list(), [], ['companies'])
   const [alerts] = useLive(() => window.azim.alerts.list(), [], ['alerts'])
 
@@ -33,7 +45,13 @@ export default function App(): React.JSX.Element {
     window.azim.settings.get().then(setSettings)
     window.azim.sync.status().then(setSync)
     window.azim.updates.status().then(setUpdate)
-    const offs = [window.azim.sync.onStatus(setSync), window.azim.updates.onStatus(setUpdate)]
+    window.azim.lock.status().then(setLocked)
+    const offs = [
+      window.azim.sync.onStatus(setSync),
+      window.azim.updates.onStatus(setUpdate),
+      window.azim.lock.onChange(setLocked),
+      window.azim.app.onAccountChanged(() => window.azim.settings.get().then(setSettings))
+    ]
     const onKey = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
@@ -58,6 +76,17 @@ export default function App(): React.JSX.Element {
   }, [lang, settings?.theme])
 
   if (!settings) return <div className="empty">…</div>
+  if (locked) {
+    return (
+      <LangContext.Provider value={{ lang, t }}>
+        <LockScreen />
+      </LangContext.Provider>
+    )
+  }
+
+  // Accountant / viewer accounts come from the Inno server; offline = owner.
+  const role: Role = settings.syncEnabled && settings.account ? settings.account.role : 'owner'
+  const admin = role === 'owner' || role === 'admin'
 
   const alertCount = (companyId: string): number => (alerts ?? []).filter((a) => a.companyId === companyId).length
   const nav = (r: Route): void => setRoute(r)
@@ -78,17 +107,24 @@ export default function App(): React.JSX.Element {
           <button className={`nav-item ${isActive('overview') ? 'active' : ''}`} onClick={() => nav({ page: 'overview' })}>
             <LayoutDashboard size={17} /> {t.overview}
           </button>
-          <button className={`nav-item ${isActive('chat') ? 'active' : ''}`} onClick={() => nav({ page: 'chat' })}>
-            <MessageSquare size={17} /> {t.chat}
+          {admin && (
+            <button className={`nav-item ${isActive('chat') ? 'active' : ''}`} onClick={() => nav({ page: 'chat' })}>
+              <MessageSquare size={17} /> {t.chat}
+            </button>
+          )}
+          <button className={`nav-item ${isActive('reminders') ? 'active' : ''}`} onClick={() => nav({ page: 'reminders' })}>
+            <CalendarClock size={17} /> {t.calendar}
           </button>
           <button className={`nav-item ${isActive('reports') ? 'active' : ''}`} onClick={() => nav({ page: 'reports' })}>
             <FileText size={17} /> {t.reports}
           </button>
           <div className="nav-section">
             {t.companies}
-            <button className="btn ghost sm" style={{ color: 'inherit' }} title={t.addCompany} onClick={() => setEditing({})}>
-              <Plus size={14} />
-            </button>
+            {admin && (
+              <button className="btn ghost sm" style={{ color: 'inherit' }} title={t.addCompany} onClick={() => setEditing({})}>
+                <Plus size={14} />
+              </button>
+            )}
           </div>
           {(companies ?? []).map((c) => (
             <button
@@ -101,7 +137,7 @@ export default function App(): React.JSX.Element {
               {alertCount(c.id) > 0 && <span className="nav-badge">{alertCount(c.id)}</span>}
             </button>
           ))}
-          {!companies?.length && (
+          {!companies?.length && admin && (
             <button className="nav-item" onClick={() => setEditing({})}>
               <Building2 size={17} /> {t.addCompany}
             </button>
@@ -114,6 +150,11 @@ export default function App(): React.JSX.Element {
             <SettingsIcon size={17} /> {t.settings}
           </button>
           <div className="sidebar-footer">
+            {!admin && settings.account && (
+              <span style={{ color: '#c9d1dc' }}>
+                {t.signedInAs}: {settings.account.name} · {t[`r_${role}` as keyof typeof t]}
+              </span>
+            )}
             <span>
               {t.developedBy} {APP_DEVELOPER}
             </span>
@@ -127,6 +168,11 @@ export default function App(): React.JSX.Element {
               <span className="kbd">Ctrl K</span>
             </button>
             <div className="topbar-right">
+              {settings.lock.enabled && settings.lock.hasPin && (
+                <button className="btn sm ghost" title={t.lockNow} onClick={() => window.azim.lock.lockNow()}>
+                  <Lock size={14} />
+                </button>
+              )}
               {update?.state === 'ready' && (
                 <span className="pill accent" onClick={() => window.azim.updates.install()}>
                   <Download size={13} /> {t.installRestart} {update.version}
@@ -156,12 +202,15 @@ export default function App(): React.JSX.Element {
             </div>
           </div>
           <div className="content">
-            {route.page === 'overview' && <Overview onOpen={(id) => nav({ page: 'company', companyId: id })} onAdd={() => setEditing({})} />}
+            {route.page === 'overview' && (
+              <Overview onOpen={(id) => nav({ page: 'company', companyId: id })} onAdd={admin ? () => setEditing({}) : undefined} onReminders={() => nav({ page: 'reminders' })} />
+            )}
             {route.page === 'company' && (
               <CompanyPage
                 key={route.companyId + (route.tab ?? '')}
                 companyId={route.companyId}
                 initialTab={route.tab}
+                role={role}
                 onEdit={(c) => setEditing(c)}
                 onAsk={(prompt) => nav({ page: 'chat', companyId: route.companyId, prompt })}
                 onDeleted={() => nav({ page: 'overview' })}
@@ -169,7 +218,8 @@ export default function App(): React.JSX.Element {
             )}
             {route.page === 'chat' && <ChatPage companies={companies ?? []} initialCompanyId={route.companyId ?? null} initialPrompt={route.prompt} />}
             {route.page === 'reports' && <ReportsPage companies={companies ?? []} />}
-            {route.page === 'settings' && <SettingsPage settings={settings} onChange={setSettings} />}
+            {route.page === 'reminders' && <RemindersPage companies={companies ?? []} canEdit={role !== 'viewer'} />}
+            {route.page === 'settings' && <SettingsPage settings={settings} onChange={setSettings} companies={companies ?? []} admin={admin} />}
           </div>
         </main>
       </div>

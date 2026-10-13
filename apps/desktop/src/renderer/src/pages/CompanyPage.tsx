@@ -6,17 +6,34 @@ import { HBarChart, TrendChart } from '../components/Charts'
 import { ActivityList, AlertList, KpiCard } from '../components/Widgets'
 import { toast } from '../components/Toast'
 import type { ImportSummary } from '@shared/api'
-import type { Company, Decision, DocumentRecord } from '@shared/types'
+import { ForecastTab } from './company/ForecastTab'
+import { BudgetTab } from './company/BudgetTab'
+import { SourcesTab } from './company/SourcesTab'
+import { AutomationTab } from './company/AutomationTab'
+import { NewReminderButton, ReminderForm, ReminderList } from '../components/Reminders'
+import type { Company, Decision, DocumentRecord, Reminder, Role } from '@shared/types'
+
+type Tab = 'dashboard' | 'files' | 'metrics' | 'budget' | 'forecast' | 'reminders' | 'decisions' | 'sources' | 'automation'
+
+const TABS_BY_ROLE: Record<Role, Tab[]> = {
+  owner: ['dashboard', 'files', 'metrics', 'budget', 'forecast', 'reminders', 'decisions', 'sources', 'automation'],
+  admin: ['dashboard', 'files', 'metrics', 'budget', 'forecast', 'reminders', 'decisions', 'sources', 'automation'],
+  accountant: ['dashboard', 'files', 'reminders'],
+  viewer: ['dashboard', 'files', 'metrics', 'budget', 'forecast', 'reminders', 'decisions']
+}
 
 export function CompanyPage(props: {
   companyId: string
   initialTab?: string
+  role: Role
   onEdit: (c: Company) => void
   onAsk: (prompt?: string) => void
   onDeleted: () => void
 }): React.JSX.Element {
   const { t } = useT()
-  const [tab, setTab] = useState(props.initialTab ?? 'dashboard')
+  const tabs = TABS_BY_ROLE[props.role]
+  const admin = props.role === 'owner' || props.role === 'admin'
+  const [tab, setTab] = useState<Tab>(tabs.includes(props.initialTab as Tab) ? (props.initialTab as Tab) : 'dashboard')
   const [dash] = useLive(() => window.azim.dashboard.company(props.companyId), [props.companyId])
   if (!dash) return <div className="empty">…</div>
   const c = dash.company
@@ -33,26 +50,30 @@ export function CompanyPage(props: {
           </div>
         </div>
         <div className="spacer" />
-        <button className="btn primary" onClick={() => props.onAsk()}>
-          <MessageSquare size={15} /> {t.askAi}
-        </button>
-        <button className="btn" onClick={() => props.onEdit(c)}>
-          <Edit3 size={15} />
-        </button>
-        <button
-          className="btn danger"
-          onClick={async () => {
-            if (confirm(`${t.confirmDelete}\n${c.name}`)) {
-              await window.azim.companies.remove(c.id)
-              props.onDeleted()
-            }
-          }}
-        >
-          <Trash2 size={15} />
-        </button>
+        {admin && (
+          <>
+            <button className="btn primary" onClick={() => props.onAsk()}>
+              <MessageSquare size={15} /> {t.askAi}
+            </button>
+            <button className="btn" onClick={() => props.onEdit(c)}>
+              <Edit3 size={15} />
+            </button>
+            <button
+              className="btn danger"
+              onClick={async () => {
+                if (confirm(`${t.confirmDelete}\n${c.name}`)) {
+                  await window.azim.companies.remove(c.id)
+                  props.onDeleted()
+                }
+              }}
+            >
+              <Trash2 size={15} />
+            </button>
+          </>
+        )}
       </div>
       <div className="tabs">
-        {(['dashboard', 'files', 'metrics', 'decisions'] as const).map((k) => (
+        {tabs.map((k) => (
           <button key={k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
             {t[k]}
             {k === 'files' ? ` (${dash.documentCount})` : ''}
@@ -60,9 +81,14 @@ export function CompanyPage(props: {
         ))}
       </div>
       {tab === 'dashboard' && <DashboardTab dash={dash} onAsk={props.onAsk} />}
-      {tab === 'files' && <FilesTab companyId={c.id} />}
-      {tab === 'metrics' && <MetricsTab company={c} />}
-      {tab === 'decisions' && <DecisionsTab companyId={c.id} />}
+      {tab === 'files' && <FilesTab companyId={c.id} canImport={props.role !== 'viewer'} canDelete={admin} />}
+      {tab === 'metrics' && <MetricsTab company={c} canEdit={admin} />}
+      {tab === 'budget' && <BudgetTab company={c} canEdit={admin} />}
+      {tab === 'forecast' && <ForecastTab company={c} />}
+      {tab === 'reminders' && <RemindersTab company={c} canEdit={props.role !== 'viewer'} />}
+      {tab === 'decisions' && <DecisionsTab companyId={c.id} canEdit={admin} />}
+      {tab === 'sources' && <SourcesTab company={c} />}
+      {tab === 'automation' && <AutomationTab company={c} />}
     </>
   )
 }
@@ -121,7 +147,7 @@ function report(r: ImportSummary, t: ReturnType<typeof useT>['t']): void {
   toast(parts.join(' · '))
 }
 
-function FilesTab({ companyId }: { companyId: string }): React.JSX.Element {
+function FilesTab({ companyId, canImport, canDelete }: { companyId: string; canImport: boolean; canDelete: boolean }): React.JSX.Element {
   const { lang, t } = useT()
   const [category, setCategory] = useState('')
   const [query, setQuery] = useState('')
@@ -131,6 +157,7 @@ function FilesTab({ companyId }: { companyId: string }): React.JSX.Element {
 
   return (
     <>
+      {canImport && (
       <div
         className={`dropzone ${over ? 'over' : ''}`}
         onDragOver={(e) => {
@@ -152,6 +179,7 @@ function FilesTab({ companyId }: { companyId: string }): React.JSX.Element {
           </button>
         </div>
       </div>
+      )}
       <div className="row" style={{ marginBottom: 12 }}>
         <input className="input" style={{ maxWidth: 320 }} placeholder={t.search} value={query} onChange={(e) => setQuery(e.target.value)} />
         <select className="input" style={{ maxWidth: 220 }} value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -213,13 +241,15 @@ function FilesTab({ companyId }: { companyId: string }): React.JSX.Element {
                     <button className="btn ghost sm" title={t.reprocess} onClick={() => window.azim.documents.reprocess(d.id)}>
                       <RefreshCw size={14} />
                     </button>
-                    <button
-                      className="btn ghost sm danger"
-                      title={t.delete}
-                      onClick={() => confirm(`${t.confirmDelete}\n${d.name}`) && window.azim.documents.remove(d.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {canDelete && (
+                      <button
+                        className="btn ghost sm danger"
+                        title={t.delete}
+                        onClick={() => confirm(`${t.confirmDelete}\n${d.name}`) && window.azim.documents.remove(d.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -295,12 +325,13 @@ function PreviewModal({ doc, onClose }: { doc: DocumentRecord; onClose: () => vo
   )
 }
 
-function MetricsTab({ company }: { company: Company }): React.JSX.Element {
+function MetricsTab({ company, canEdit }: { company: Company; canEdit: boolean }): React.JSX.Element {
   const { lang, t } = useT()
   const [metrics] = useLive(() => window.azim.metrics.list(company.id), [company.id], ['metrics'])
   const [form, setForm] = useState({ metric: 'revenue', period: new Date().toISOString().slice(0, 7), value: '' })
   return (
     <div className="card">
+      {canEdit && (
       <form
         className="row"
         style={{ marginBottom: 14, alignItems: 'flex-end' }}
@@ -335,6 +366,7 @@ function MetricsTab({ company }: { company: Company }): React.JSX.Element {
           {t.addMetric}
         </button>
       </form>
+      )}
       <div className="table-wrap" style={{ maxHeight: 'none' }}>
         <table className="data">
           <thead>
@@ -356,9 +388,11 @@ function MetricsTab({ company }: { company: Company }): React.JSX.Element {
                 </td>
                 <td style={{ color: 'var(--ink-2)', fontSize: 12 }}>{m.note}</td>
                 <td>
-                  <button className="btn ghost sm danger" onClick={() => window.azim.metrics.remove(m.id)}>
-                    <Trash2 size={14} />
-                  </button>
+                  {canEdit && (
+                    <button className="btn ghost sm danger" onClick={() => window.azim.metrics.remove(m.id)}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -370,22 +404,24 @@ function MetricsTab({ company }: { company: Company }): React.JSX.Element {
   )
 }
 
-function DecisionsTab({ companyId }: { companyId: string }): React.JSX.Element {
+function DecisionsTab({ companyId, canEdit }: { companyId: string; canEdit: boolean }): React.JSX.Element {
   const { lang, t } = useT()
   const [decisions] = useLive(() => window.azim.decisions.list(companyId), [companyId], ['decisions'])
   const [editing, setEditing] = useState<Partial<Decision> | null>(null)
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <button className="btn primary" onClick={() => setEditing({ status: 'open' })}>
-          {t.newDecision}
-        </button>
-      </div>
+      {canEdit && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          <button className="btn primary" onClick={() => setEditing({ status: 'open' })}>
+            {t.newDecision}
+          </button>
+        </div>
+      )}
       <div className="card">
         {!decisions?.length && <div className="empty">{t.noData}</div>}
         <div className="list">
           {(decisions ?? []).map((d) => (
-            <div className="list-item" key={d.id} style={{ cursor: 'pointer' }} onClick={() => setEditing(d)}>
+            <div className="list-item" key={d.id} style={{ cursor: canEdit ? 'pointer' : undefined }} onClick={() => canEdit && setEditing(d)}>
               <div style={{ flex: 1 }}>
                 <strong>{d.title}</strong>
                 {d.rationale && <div style={{ color: 'var(--ink-2)', fontSize: 13 }}>{d.rationale}</div>}
@@ -467,6 +503,24 @@ function DecisionsTab({ companyId }: { companyId: string }): React.JSX.Element {
           </form>
         </div>
       )}
+    </>
+  )
+}
+
+function RemindersTab({ company, canEdit }: { company: Company; canEdit: boolean }): React.JSX.Element {
+  const [reminders] = useLive(() => window.azim.reminders.list({ companyId: company.id, status: 'open' }), [company.id], ['reminders'])
+  const [editing, setEditing] = useState<Partial<Reminder> | null>(null)
+  return (
+    <>
+      {canEdit && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          <NewReminderButton onClick={() => setEditing({ companyId: company.id, currency: company.currency })} />
+        </div>
+      )}
+      <div className="card">
+        <ReminderList reminders={reminders ?? []} companies={[company]} canEdit={canEdit} onEdit={setEditing} />
+      </div>
+      {editing && <ReminderForm initial={editing} companies={[company]} onClose={() => setEditing(null)} />}
     </>
   )
 }

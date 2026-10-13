@@ -5,7 +5,12 @@ import { search } from '../insights'
 import { runChecks } from '../insights'
 import { generateReport, type ReportSpec } from '../reports'
 import { logActivity } from '../db'
-import type { ChatAttachment, Severity } from '@shared/types'
+import { budgetVsActual, companyForecast, setBudget } from '../planning'
+import { listReminders, saveReminder } from '../reminders'
+import { getConnector, listConnectors, runQuery } from '../connectors'
+import { getSchedule, sendMonthlyReport } from '../monthly'
+import { BASE_SCENARIO, type Scenario } from '@shared/forecast'
+import type { ChatAttachment, Reminder, Severity } from '@shared/types'
 import type { ToolDef, ToolOutcome } from './providers'
 
 export interface ToolContext {
@@ -171,6 +176,83 @@ export const TOOLS: ToolDef[] = [
       },
       required: ['severity', 'title']
     }
+  },
+  {
+    name: 'forecast_cash',
+    description:
+      'Cash-flow forecast for a company from its recorded revenue, expenses and cash, with optional what-if scenario: revenue_change_pct, expense_change_pct, collection_delay_months, growth_override_pct, and one_offs (period YYYY-MM, amount +inflow/-outflow, label). Returns monthly projected cash, the lowest point and runway.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        company_id: companyIdProp,
+        months: { type: 'number', description: 'Horizon, default 12, max 36.' },
+        revenue_change_pct: { type: 'number' },
+        expense_change_pct: { type: 'number' },
+        collection_delay_months: { type: 'number' },
+        growth_override_pct: { type: 'number' },
+        one_offs: {
+          type: 'array',
+          items: { type: 'object', properties: { period: str, amount: { type: 'number' }, label: str }, required: ['period', 'amount'] }
+        }
+      },
+      required: ['company_id']
+    }
+  },
+  {
+    name: 'budget_vs_actual',
+    description: 'Compare budgets with actual metrics for a company over a period range (YYYY-MM). Returns variance and whether it is favorable.',
+    input_schema: { type: 'object', properties: { company_id: companyIdProp, from: str, to: str }, required: ['company_id'] }
+  },
+  {
+    name: 'set_budget',
+    description: 'Save budget amounts (e.g. from a budget spreadsheet the user imported). Metric names like record_metrics; period YYYY-MM.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        company_id: companyIdProp,
+        entries: {
+          type: 'array',
+          items: { type: 'object', properties: { metric: str, period: str, amount: { type: 'number' }, note: str }, required: ['metric', 'period', 'amount'] }
+        }
+      },
+      required: ['company_id', 'entries']
+    }
+  },
+  {
+    name: 'list_reminders',
+    description: 'List open deadlines (tax, installments, contract renewals, salaries, insurance...) for a company or all companies, optionally up to a date.',
+    input_schema: { type: 'object', properties: { company_id: companyIdProp, until: { type: 'string', description: 'YYYY-MM-DD' } } }
+  },
+  {
+    name: 'add_reminder',
+    description:
+      'Add a deadline reminder, e.g. a VAT filing, a loan installment or a contract renewal found in a document. Recurring reminders roll forward when marked done.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        company_id: companyIdProp,
+        title: str,
+        type: { type: 'string', enum: ['tax', 'installment', 'contract', 'salary', 'insurance', 'other'] },
+        due_date: { type: 'string', description: 'YYYY-MM-DD' },
+        amount: { type: 'number' },
+        recurrence: { type: 'string', enum: ['none', 'monthly', 'quarterly', 'yearly'] },
+        remind_days: { type: 'number', description: 'Days before the due date to start reminding (default 7).' },
+        notes: str
+      },
+      required: ['company_id', 'title', 'due_date']
+    }
+  },
+  {
+    name: 'query_connector',
+    description:
+      'Run a read-only query on a live company data source (database or accounting system) that the user allowed for AI. SQL connectors take a single SELECT; Odoo takes JSON {"model","domain","fields","limit"}; REST takes a path. Call with no query to list the available connectors.',
+    input_schema: { type: 'object', properties: { connector_id: str, query: str, company_id: companyIdProp } }
+  },
+  {
+    name: 'send_monthly_report',
+    description:
+      "Build the company's monthly report for a period and send it to the recipients configured in its report schedule (email/WhatsApp). Only use when the user explicitly asks to send it.",
+    input_schema: { type: 'object', properties: { company_id: companyIdProp, period: { type: 'string', description: 'YYYY-MM, default last month' } }, required: ['company_id'] }
   },
   {
     name: 'generate_report',
@@ -395,6 +477,96 @@ export async function executeTool(name: string, input: Record<string, unknown>, 
       const severity = (['info', 'warning', 'critical'].includes(String(input.severity)) ? input.severity : 'info') as Severity
       const a = repo.createAlert({ companyId: companyArg(input, ctx) ?? null, severity, title, detail: s(input.detail), source: 'ai' })
       return ok({ id: a.id }, `alert: ${title}`)
+    }
+    case 'forecast_cash': {
+      const companyId = companyArg(input, ctx)
+      if (!companyId) return fail('company_id is required')
+      const scenario: Scenario = {
+        ...BASE_SCENARIO,
+        revenueChangePct: n(input.revenue_change_pct, 0),
+        expenseChangePct: n(input.expense_change_pct, 0),
+        collectionDelayMonths: n(input.collection_delay_months, 0),
+        growthOverridePct: typeof input.growth_override_pct === 'number' ? input.growth_override_pct : null,
+        oneOffs: Array.isArray(input.one_offs)
+          ? (input.one_offs as Record<string, unknown>[]).map((o) => ({ period: String(o.period), amount: toNumber(o.amount) ?? 0, label: String(o.label ?? '') }))
+          : []
+      }
+      const f = companyForecast(companyId, scenario, Math.min(n(input.months, 12), 36))
+      const round = (v: number): number => Math.round(v)
+      return ok(
+        {
+          ...f,
+          points: f.points.map((p) => ({ period: p.period, inflow: round(p.inflow), expenses: round(p.expenses), net: round(p.net), cash: round(p.cash) }))
+        },
+        `forecast: ${f.firstNegativePeriod ? `cash negative in ${f.firstNegativePeriod}` : 'no shortfall'}`
+      )
+    }
+    case 'budget_vs_actual': {
+      const companyId = companyArg(input, ctx)
+      if (!companyId) return fail('company_id is required')
+      const lines = budgetVsActual(companyId, s(input.from), s(input.to))
+      return ok(lines, `${lines.length} budget lines`)
+    }
+    case 'set_budget': {
+      const companyId = companyArg(input, ctx)
+      if (!companyId || !repo.getCompany(companyId)) return fail('valid company_id is required')
+      const entries = Array.isArray(input.entries) ? (input.entries as Record<string, unknown>[]) : []
+      let saved = 0
+      for (const e of entries) {
+        const amount = toNumber(e.amount)
+        const period = s(e.period)
+        const metric = s(e.metric)
+        if (amount === null || !metric || !period || !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) continue
+        setBudget({ companyId, metric, period, amount, note: s(e.note) })
+        saved++
+      }
+      if (saved) runChecks(companyId)
+      return ok(`Saved ${saved} of ${entries.length} budget entries.`, `${saved} budget lines saved`)
+    }
+    case 'list_reminders': {
+      const list = listReminders({ companyId: companyArg(input, ctx), status: 'open', until: s(input.until) })
+      return ok(list, `${list.length} reminders`)
+    }
+    case 'add_reminder': {
+      const companyId = companyArg(input, ctx)
+      const title = s(input.title)
+      const dueDate = s(input.due_date)
+      if (!companyId || !title || !dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return fail('company_id, title and due_date (YYYY-MM-DD) are required')
+      const r = saveReminder({
+        companyId,
+        title,
+        dueDate,
+        type: (s(input.type) ?? 'other') as Reminder['type'],
+        amount: toNumber(input.amount),
+        currency: repo.getCompany(companyId)?.currency ?? '',
+        recurrence: (s(input.recurrence) ?? 'none') as Reminder['recurrence'],
+        remindDays: n(input.remind_days, 7),
+        notes: s(input.notes) ?? ''
+      })
+      return ok({ id: r.id }, `reminder: ${title} (${dueDate})`)
+    }
+    case 'query_connector': {
+      const allowed = listConnectors(companyArg(input, ctx)).filter((c) => c.allowAi)
+      const id = s(input.connector_id)
+      if (!id || !s(input.query)) {
+        return ok(
+          allowed.map((c) => ({ id: c.id, company_id: c.companyId, name: c.name, type: c.type, datasets: c.datasets.map((d) => ({ name: d.name, query: d.query })) })),
+          `${allowed.length} connectors`
+        )
+      }
+      const c = getConnector(id)
+      if (!c || !c.allowAi) return fail('connector not found or not allowed for AI')
+      const res = await runQuery(c, s(input.query)!)
+      return ok({ columns: res.columns, total_rows: res.rows.length, rows: res.rows.slice(0, 300) }, `${res.rows.length} rows from ${c.name}`)
+    }
+    case 'send_monthly_report': {
+      const companyId = companyArg(input, ctx)
+      if (!companyId) return fail('company_id is required')
+      const sched = getSchedule(companyId)
+      if (!sched.emails.length && !sched.whatsapp.length) return fail('no recipients configured for this company (Company → Automation)')
+      const { report, errors } = await sendMonthlyReport(companyId, s(input.period))
+      ctx.attachments.push({ type: 'report', id: report.id, name: report.title, path: report.path })
+      return errors.length ? fail(errors.join('; ')) : ok(`Sent to ${[...sched.emails, ...sched.whatsapp].join(', ')}`, 'monthly report sent')
     }
     case 'generate_report': {
       const spec = input as unknown as ReportSpec

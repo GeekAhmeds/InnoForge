@@ -6,6 +6,8 @@ import { refreshWatchers, stopWatchers } from './watcher'
 import { startUpdater } from './updater'
 import { startSync } from './sync'
 import { getSettings } from './settings'
+import { startScheduler } from './scheduler'
+import { startLockWatcher } from './lock'
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -57,10 +59,12 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null)
     getDb()
     registerIpc()
+    startLockWatcher()
     createWindow()
     refreshWatchers()
     startUpdater()
     if (getSettings().syncEnabled) startSync()
+    startScheduler()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

@@ -1,7 +1,10 @@
 import { safeStorage } from 'electron'
 import { getDb } from './db'
 import { DEFAULT_SERVER_URL, type ProviderId, type Settings } from '@shared/types'
+import type { SettingsPatch } from '@shared/api'
 
+// Settings that live in the JSON blob. Flags such as hasKey / hasPin are
+// derived from the secret store and never persisted.
 const DEFAULTS: Settings = {
   language: 'ar',
   theme: 'system',
@@ -18,8 +21,16 @@ const DEFAULTS: Settings = {
   syncEnabled: false,
   syncToken: '',
   lastSyncAt: null,
-  anomalyThreshold: 25
+  anomalyThreshold: 25,
+  account: null,
+  smtp: { host: '', port: 587, secure: false, user: '', from: '', hasPassword: false },
+  whatsapp: { phoneNumberId: '', apiVersion: 'v21.0', templateName: '', templateLanguage: 'ar', hasToken: false },
+  reminderRecipients: { emails: [], whatsapp: [] },
+  lock: { enabled: false, idleMinutes: 10, hasPin: false },
+  backup: { enabled: false, folder: '', intervalHours: 24, keepLast: 14, lastAt: null, hasPassword: false }
 }
+
+export type SecretName = `key:${ProviderId}` | 'smtp' | 'whatsapp' | 'backup' | 'pin'
 
 function readRaw(key: string): string | undefined {
   const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
@@ -33,43 +44,66 @@ function writeRaw(key: string, value: string): void {
 }
 
 export function getSettings(): Settings {
-  const stored = readRaw('app') ? (JSON.parse(readRaw('app')!) as Partial<Settings>) : {}
-  const merged: Settings = { ...DEFAULTS, ...stored, providers: { ...DEFAULTS.providers } }
+  const raw = readRaw('app')
+  const stored = raw ? (JSON.parse(raw) as Partial<Settings>) : {}
+  const merged: Settings = {
+    ...DEFAULTS,
+    ...stored,
+    providers: { ...DEFAULTS.providers },
+    smtp: { ...DEFAULTS.smtp, ...stored.smtp, hasPassword: !!getSecret('smtp') },
+    whatsapp: { ...DEFAULTS.whatsapp, ...stored.whatsapp, hasToken: !!getSecret('whatsapp') },
+    reminderRecipients: { ...DEFAULTS.reminderRecipients, ...stored.reminderRecipients },
+    lock: { ...DEFAULTS.lock, ...stored.lock, hasPin: !!getSecret('pin') },
+    backup: { ...DEFAULTS.backup, ...stored.backup, hasPassword: !!getSecret('backup') }
+  }
   for (const id of Object.keys(DEFAULTS.providers) as ProviderId[]) {
-    merged.providers[id] = { ...DEFAULTS.providers[id], ...(stored.providers?.[id] ?? {}), hasKey: !!getApiKey(id) }
+    merged.providers[id] = { ...DEFAULTS.providers[id], ...(stored.providers?.[id] ?? {}), hasKey: !!getSecret(`key:${id}`) }
   }
   return merged
 }
 
-export function updateSettings(patch: Partial<Settings>): Settings {
+export type { SettingsPatch }
+
+export function updateSettings(patch: SettingsPatch): Settings {
   const current = getSettings()
-  const next: Settings = { ...current, ...patch, providers: { ...current.providers } }
-  if (patch.providers) {
-    for (const id of Object.keys(patch.providers) as ProviderId[]) {
-      next.providers[id] = { ...current.providers[id], ...patch.providers[id] }
-    }
+  const next: Settings = {
+    ...current,
+    ...(patch as Partial<Settings>),
+    providers: { ...current.providers },
+    smtp: { ...current.smtp, ...patch.smtp },
+    whatsapp: { ...current.whatsapp, ...patch.whatsapp },
+    lock: { ...current.lock, ...patch.lock },
+    backup: { ...current.backup, ...patch.backup },
+    reminderRecipients: { ...current.reminderRecipients, ...patch.reminderRecipients }
+  }
+  for (const id of Object.keys(patch.providers ?? {}) as ProviderId[]) {
+    next.providers[id] = { ...current.providers[id], ...patch.providers![id] }
   }
   writeRaw('app', JSON.stringify(next))
   return getSettings()
 }
 
-// API keys are encrypted with the OS keychain (DPAPI on Windows, libsecret on
+// Secrets are encrypted with the OS keychain (DPAPI on Windows, libsecret on
 // Linux) and never sent to the renderer.
-export function setApiKey(provider: ProviderId, key: string): void {
-  const name = `key:${provider}`
-  if (!key) {
-    getDb().prepare('DELETE FROM settings WHERE key = ?').run(name)
+export function setSecret(name: SecretName, value: string): void {
+  const key = `secret:${name}`
+  if (!value) {
+    getDb().prepare('DELETE FROM settings WHERE key = ?').run(key)
     return
   }
-  const value = safeStorage.isEncryptionAvailable()
-    ? 'enc:' + safeStorage.encryptString(key).toString('base64')
-    : 'raw:' + key
-  writeRaw(name, value)
+  writeRaw(key, encrypt(value))
 }
 
-export function getApiKey(provider: ProviderId): string {
-  const value = readRaw(`key:${provider}`)
-  if (!value) return ''
+export function getSecret(name: SecretName): string {
+  const value = readRaw(`secret:${name}`) ?? (name.startsWith('key:') ? readRaw(name) : undefined) // v0.1 stored keys as "key:<provider>"
+  return value ? decrypt(value) : ''
+}
+
+export function encrypt(value: string): string {
+  return safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(value).toString('base64') : 'raw:' + value
+}
+
+export function decrypt(value: string): string {
   if (value.startsWith('enc:')) {
     try {
       return safeStorage.decryptString(Buffer.from(value.slice(4), 'base64'))
@@ -79,3 +113,6 @@ export function getApiKey(provider: ProviderId): string {
   }
   return value.slice(4)
 }
+
+export const setApiKey = (provider: ProviderId, key: string): void => setSecret(`key:${provider}`, key)
+export const getApiKey = (provider: ProviderId): string => getSecret(`key:${provider}`)

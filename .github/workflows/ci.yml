@@ -22,17 +22,32 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
-  server:
+  inno-server:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/server
+        working-directory: apps/inno-server
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/server/package-lock.json
+          cache-dependency-path: apps/inno-server/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit

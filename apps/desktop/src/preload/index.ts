@@ -67,7 +67,60 @@ const api: AzimApi = {
     get: () => invoke('settings:get'),
     update: (patch) => invoke('settings:update', patch),
     setApiKey: (provider, key) => invoke('settings:setApiKey', provider, key),
-    testProvider: () => invoke('settings:testProvider')
+    setSecret: (name, value) => invoke('settings:setSecret', name, value),
+    testProvider: () => invoke('settings:testProvider'),
+    testMessaging: (channel, to) => invoke('messaging:test', channel, to)
+  },
+  reminders: {
+    list: (filter) => invoke('reminders:list', filter),
+    save: (input) => invoke('reminders:save', input),
+    complete: (id) => invoke('reminders:complete', id),
+    remove: (id) => invoke('reminders:remove', id)
+  },
+  planning: {
+    budgets: (companyId) => invoke('budgets:list', companyId),
+    saveBudget: (b) => invoke('budgets:save', b),
+    removeBudget: (id) => invoke('budgets:remove', id),
+    budgetVsActual: (companyId, from, to) => invoke('budgets:vsActual', companyId, from, to),
+    forecastHistory: (companyId) => invoke('forecast:history', companyId)
+  },
+  schedule: {
+    get: (companyId) => invoke('schedule:get', companyId),
+    save: (s) => invoke('schedule:save', s),
+    send: (companyId, period) => invoke('schedule:send', companyId, period),
+    preview: (companyId, period) => invoke('schedule:preview', companyId, period)
+  },
+  connectors: {
+    list: (companyId) => invoke('connectors:list', companyId),
+    save: (input) => invoke('connectors:save', input),
+    remove: (id) => invoke('connectors:remove', id),
+    test: (id) => invoke('connectors:test', id),
+    refresh: (id) => invoke('connectors:refresh', id),
+    saveDataset: (input) => invoke('connectors:saveDataset', input),
+    removeDataset: (id) => invoke('connectors:removeDataset', id),
+    preview: (id, query) => invoke('connectors:preview', id, query),
+    pickFile: () => invoke('connectors:pickFile')
+  },
+  accounts: {
+    list: () => invoke('accounts:list'),
+    create: (u) => invoke('accounts:create', u),
+    update: (id, patch) => invoke('accounts:update', id, patch),
+    rotate: (id) => invoke('accounts:rotate', id),
+    remove: (id) => invoke('accounts:remove', id)
+  },
+  lock: {
+    status: () => invoke('lock:status'),
+    unlock: (pin) => invoke('lock:unlock', pin),
+    lockNow: () => invoke('lock:lockNow'),
+    setPin: (pin, current) => invoke('lock:setPin', pin, current),
+    clearPin: (current) => invoke('lock:clearPin', current),
+    onChange: (cb) => subscribe('lock:changed', cb)
+  },
+  backup: {
+    pickFolder: () => invoke('backup:pickFolder'),
+    create: (password) => invoke('backup:create', password),
+    runNow: () => invoke('backup:runNow'),
+    restore: (password) => invoke('backup:restore', password)
   },
   sync: {
     status: () => invoke('sync:status'),
@@ -83,6 +136,7 @@ const api: AzimApi = {
   app: {
     version: () => invoke('app:version'),
     onDataChanged: (cb) => subscribe('data:changed', cb),
+    onAccountChanged: (cb) => subscribe('account:changed', () => cb()),
     openExternal: (url) => invoke('app:openExternal', url)
   }
 }

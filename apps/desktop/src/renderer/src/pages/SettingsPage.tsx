@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useT, formatDate } from '../i18n'
 import { toast } from '../components/Toast'
-import { APP_DEVELOPER, type ProviderId, type Settings, type SyncStatus, type UpdateStatus } from '@shared/types'
+import { AccountsSection, MessagingSection, SecuritySection } from './settings/Sections'
+import type { SettingsPatch } from '@shared/api'
+import { APP_DEVELOPER, type Company, type ProviderId, type Settings, type SyncStatus, type UpdateStatus } from '@shared/types'
 
 const PROVIDERS: { id: ProviderId; name: string; models: string[]; needsKey: boolean; hasBaseUrl: boolean }[] = [
   { id: 'anthropic', name: 'Claude (Anthropic)', models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], needsKey: true, hasBaseUrl: false },
@@ -10,7 +12,7 @@ const PROVIDERS: { id: ProviderId; name: string; models: string[]; needsKey: boo
   { id: 'ollama', name: 'Local model (Ollama / LM Studio)', models: ['qwen3:14b', 'llama3.1:8b', 'gpt-oss:20b'], needsKey: false, hasBaseUrl: true }
 ]
 
-export function SettingsPage(props: { settings: Settings; onChange: (s: Settings) => void }): React.JSX.Element {
+export function SettingsPage(props: { settings: Settings; onChange: (s: Settings) => void; companies: Company[]; admin: boolean }): React.JSX.Element {
   const { lang, t } = useT()
   const s = props.settings
   const [keys, setKeys] = useState<Record<string, string>>({})
@@ -27,9 +29,9 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
     return () => offs.forEach((o) => o())
   }, [])
 
-  const patch = async (p: Partial<Settings>): Promise<void> => props.onChange(await window.azim.settings.update(p))
+  const patch = async (p: SettingsPatch): Promise<void> => props.onChange(await window.azim.settings.update(p))
   const patchProvider = (id: ProviderId, p: Partial<Settings['providers'][ProviderId]>): Promise<void> =>
-    patch({ providers: { [id]: p } as Settings['providers'] })
+    patch({ providers: { [id]: p } })
 
   const updateText = (): string => {
     switch (update?.state) {
@@ -75,6 +77,8 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
             </select>
           </div>
         </div>
+        {props.admin && (
+        <>
         <label className="check">
           <input type="checkbox" checked={s.autoOrganize} onChange={(e) => patch({ autoOrganize: e.target.checked })} />
           {t.autoOrganize}
@@ -95,7 +99,12 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
             />
           </div>
         </div>
+        </>
+        )}
       </div>
+
+      {props.admin && (
+      <>
 
       <div className="card settings-section">
         <h3>{t.aiProviders}</h3>
@@ -109,7 +118,7 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
                     type="radio"
                     name="active"
                     checked={s.activeProvider === p.id}
-                    onChange={() => patch({ activeProvider: p.id, providers: { [p.id]: { enabled: true } } as Settings['providers'] })}
+                    onChange={() => patch({ activeProvider: p.id, providers: { [p.id]: { enabled: true } } })}
                   />
                   <strong>{p.name}</strong>
                 </label>
@@ -209,6 +218,12 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
           </span>
         </div>
       </div>
+
+      </>
+      )}
+      {props.admin && <MessagingSection settings={s} onChange={props.onChange} />}
+      {props.admin && <AccountsSection settings={s} companies={props.companies} />}
+      <SecuritySection settings={s} onChange={props.onChange} showBackup={props.admin} />
 
       <div className="card settings-section">
         <h3>{t.updates}</h3>

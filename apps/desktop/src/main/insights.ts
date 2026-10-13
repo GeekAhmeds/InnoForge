@@ -2,6 +2,7 @@
 import { getDb } from './db'
 import * as repo from './repo'
 import { getSettings } from './settings'
+import { budgetVsActual } from './planning'
 import type { CompanyDashboard, DashboardKpi, OverviewDashboard, SearchHit } from '@shared/types'
 
 export const KPI_ORDER = ['revenue', 'expenses', 'net_profit', 'cash', 'receivables', 'payables', 'gross_margin', 'payroll']
@@ -124,6 +125,19 @@ export function runChecks(companyId: string): void {
       title: `${company.name}: net loss in ${np[np.length - 1].period}`,
       detail: `Net profit = ${np[np.length - 1].value.toLocaleString()}`
     })
+  }
+  // Budget overruns for the latest budgeted period that has actuals.
+  const lines = budgetVsActual(companyId).filter((l) => l.actual !== null)
+  const latest = lines.map((l) => l.period).sort().pop()
+  for (const l of lines.filter((x) => x.period === latest)) {
+    if (l.favorable === false && l.variancePct !== null && Math.abs(l.variancePct) >= threshold / 2) {
+      repo.createAlert({
+        companyId,
+        severity: Math.abs(l.variancePct) >= threshold ? 'critical' : 'warning',
+        title: `${company.name}: ${l.metric} ${l.variancePct > 0 ? '+' : ''}${l.variancePct.toFixed(1)}% vs budget (${l.period})`,
+        detail: `Budget ${l.budget.toLocaleString()} · Actual ${l.actual!.toLocaleString()}`
+      })
+    }
   }
   const failed = repo.listDocuments({ companyId }).filter((d) => d.status === 'error')
   if (failed.length) {

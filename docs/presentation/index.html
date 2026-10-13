@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Azim Command</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a vertical deck of full-height "slides" (scroll-snap) with a fixed
+     navigator; each slide pairs a short explanation with a real screenshot. */
+  :root {
+    --ink: #0f1722;          /* app sidebar navy */
+    --paper: #f5f6f8;
+    --surface: #ffffff;
+    --fg: #121821;
+    --muted: #5b6573;
+    --line: #dfe3e9;
+    --accent: #2a78d6;       /* Azim blue */
+    --accent-2: #6250d6;     /* logo violet */
+    --good: #0b7a2a;
+    --bad: #c33232;
+    --warn: #a86c00;
+    --display: 'Reem Kufi', 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
+    --body: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
+    --mono: 'IBM Plex Mono', Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0b0f15; --surface: #141a23; --fg: #e9edf2; --muted: #9aa6b5; --line: #263040;
+      --accent: #4d95ea; --accent-2: #8b7ff0; --good: #2fbf5a; --bad: #ef6b6b; --warn: #e6a92c; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0b0f15; --surface: #141a23; --fg: #e9edf2; --muted: #9aa6b5; --line: #263040;
+    --accent: #4d95ea; --accent-2: #8b7ff0; --good: #2fbf5a; --bad: #ef6b6b; --warn: #e6a92c; color-scheme: dark;
+  }
+  html { scroll-snap-type: y proximity; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { background: var(--paper); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.75; margin: 0; }
+  .deck { direction: rtl; }
+  .slide {
+    min-height: 100vh; box-sizing: border-box; scroll-snap-align: start;
+    display: grid; align-content: center; gap: 28px;
+    padding-block: 72px; padding-inline: max(16px, 5vw);
+    border-bottom: 1px solid var(--line);
+  }
+  .split { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: center; }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } .slide { min-height: auto; padding-block: 56px; } }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); direction: ltr; text-align: right; }
+  h1, h2 { font-family: var(--display); font-weight: 700; text-wrap: balance; line-height: 1.25; margin: 0; }
+  h1 { font-size: clamp(40px, 6vw, 76px); }
+  h2 { font-size: clamp(28px, 3.4vw, 44px); }
+  h3 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 0; max-width: 62ch; }
+  .lead { font-size: 19px; color: var(--muted); }
+  ul.points { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  ul.points li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; }
+  ul.points li::before { content: ''; width: 9px; height: 9px; margin-top: 10px; border-radius: 2px; background: var(--accent); transform: rotate(45deg); }
+  ul.points b { font-weight: 600; }
+  code, .mono { font-family: var(--mono); font-size: .88em; direction: ltr; unicode-bidi: isolate; }
+  .text { display: grid; gap: 18px; min-width: 0; }
+
+  .shot { margin: 0; min-width: 0; }
+  .shot button { all: unset; cursor: zoom-in; display: block; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(15, 23, 34, .06), 0 18px 40px -18px rgba(15, 23, 34, .35); background: var(--surface); }
+  .shot button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
+
+  /* Cover */
+  .cover { background: var(--ink); color: #e9edf2; border-bottom: 0; }
+  .cover .lead { color: #a9b4c3; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark { width: 58px; height: 58px; border-radius: 15px; display: grid; place-items: center; font-family: var(--display); font-size: 30px; color: #fff;
+    background: linear-gradient(135deg, #2a78d6, #6250d6); }
+  .cover .eyebrow { color: #7fb1ee; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { font-size: 13px; padding: 4px 12px; border-radius: 99px; border: 1px solid rgba(255,255,255,.18); color: #cfd8e3; }
+  .cover .shot button { border-color: rgba(255,255,255,.12); }
+
+  /* Problem → solution */
+  .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 800px) { .flow { grid-template-columns: 1fr; } }
+  .flow > div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 8px; align-content: start; }
+  .files { display: flex; flex-wrap: wrap; gap: 6px; }
+  .files span { font-family: var(--mono); font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--paper); border: 1px solid var(--line); direction: ltr; }
+  .arrow { color: var(--accent); font-weight: 700; }
+
+  /* Architecture */
+  .arch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+  @media (max-width: 800px) { .arch { grid-template-columns: 1fr; } }
+  .node { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 8px; align-content: start; }
+  .node.server { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .node small { color: var(--muted); }
+  .wire { font-family: var(--mono); font-size: 12px; color: var(--muted); direction: ltr; text-align: center; }
+
+  /* Phone */
+  .phone { width: min(300px, 100%); aspect-ratio: 9 / 18.5; border-radius: 38px; background: var(--ink); padding: 12px; box-sizing: border-box; margin-inline: auto; max-width: 100%; }
+  .screen { height: 100%; border-radius: 28px; background: var(--paper); overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; font-size: 13px; }
+  .screen header { background: var(--surface); padding: 14px 16px 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .screen .rows { padding: 10px; display: grid; gap: 8px; align-content: start; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; }
+  .card .v { font-family: var(--mono); font-size: 16px; direction: ltr; text-align: right; font-variant-numeric: tabular-nums; }
+  .sev { font-size: 12px; font-weight: 600; }
+  .sev.bad { color: var(--bad); } .sev.warn { color: var(--warn); } .sev.good { color: var(--good); }
+  .screen nav { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--surface); border-top: 1px solid var(--line); text-align: center; font-size: 11px; padding: 8px 0 12px; color: var(--muted); }
+  .screen nav span:first-child { color: var(--accent); font-weight: 600; }
+
+  /* Try it */
+  .try { grid-template-columns: 1fr; }
+  .frame-wrap { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 40px -20px rgba(15, 23, 34, .4); }
+  .frame-bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .frame-bar .dots { display: flex; gap: 5px; direction: ltr; }
+  .frame-bar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
+  .frame-bar a { margin-inline-start: auto; color: var(--accent); }
+  .frame-bar button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--fg); border-radius: 7px; padding: 3px 10px; cursor: pointer; }
+  .frame-bar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  iframe { display: block; width: 100%; height: min(78vh, 820px); border: 0; background: var(--paper); }
+  .tips { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .tip { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .tip b { color: var(--accent); }
+
+  /* Ideas */
+  .ideas { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .idea { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
+  .idea .tag { font-family: var(--mono); font-size: 11px; color: var(--accent-2); letter-spacing: .06em; direction: ltr; text-align: right; }
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; max-width: 760px; }
+  .steps li { counter-increment: step; display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
+  .steps li::before { content: counter(step); font-family: var(--mono); width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 14px; }
+
+  /* Navigator */
+  .nav { position: fixed; inset-inline-start: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; gap: 6px; align-items: center;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 6px 8px; box-shadow: 0 8px 24px -10px rgba(15, 23, 34, .4); direction: rtl; }
+  .nav button { font: inherit; width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--paper); color: var(--fg); cursor: pointer; font-size: 16px; }
+  .nav button:focus-visible { outline: 2px solid var(--accent); }
+  .nav .count { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 52px; text-align: center; direction: ltr; }
+  .progress { position: fixed; top: env(safe-area-inset-top, 0px); inset-inline: 0; height: 3px; z-index: 21; }
+  .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; margin-inline-start: auto; }
+
+  /* Lightbox */
+  .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(8, 12, 18, .86); display: grid; place-items: center; padding: 24px; box-sizing: border-box; cursor: zoom-out; }
+  .lightbox[hidden] { display: none; }
+  .lightbox img { max-width: 100%; max-height: 92vh; border-radius: 10px; box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+  .lightbox p { color: #dfe6ee; text-align: center; margin-top: 10px; max-width: none; }
+  footer.end { text-align: center; color: var(--muted); font-size: 14px; padding-block: 40px; padding-inline: 16px; direction: rtl; }
+</style>
+
+<div class="progress" aria-hidden="true"><i id="bar"></i></div>
+
+<main class="deck" lang="ar">
+
+  <section class="slide split cover" id="s1">
+    <div class="text">
+      <div class="brand"><div class="mark">A</div><div class="eyebrow">Azim Command · v0.2</div></div>
+      <h1>مركز القيادة المالية لكل شركاتك</h1>
+      <p class="lead">برنامج ديسكتوب وموبايل لأحمد عبدالعظيم: بيجمّع كل الشركات اللي بيديرها، ويرتّب داتاهم العشوائية، ويحللها بالذكاء الاصطناعي، ويطلّع تقارير وتوقعات وتنبيهات لحظة بلحظة.</p>
+      <div class="meta-row">
+        <span class="chip">Windows · Linux · Mac</span><span class="chip">iOS · Android</span><span class="chip">عربي / English</span><span class="chip">Claude · OpenAI · Gemini · محلي</span>
+      </div>
+      <p style="color:#8f9bab;font-size:14px">من تطوير شركة <b style="color:#e9edf2">Inno Source For Software Solutions</b></p>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/overview-dark.png" alt="النظرة العامة لكل الشركات في الوضع الداكن" loading="eager"></button></figure>
+  </section>
+
+  <section class="slide" id="s2">
+    <div class="eyebrow">01 · The problem</div>
+    <h2>من ملفات متلخبطة… لقرار واضح</h2>
+    <div class="flow">
+      <div>
+        <h3>الواقع النهارده</h3>
+        <p>كل شركة ليها ملفاتها بأشكال مختلفة، ومحدش يقدر يراجعها بسرعة.</p>
+        <div class="files"><span>مبيعات_سبتمبر.xlsx</span><span>كشف_البنك.pdf</span><span>عقد_توريد.docx</span><span>فاتورة.jpg</span><span>ERP.db</span><span>رواتب.xlsx</span></div>
+      </div>
+      <div>
+        <h3><span class="arrow">←</span> Azim Command</h3>
+        <p>بيسحب الملفات من كل مكان (حتى من مجلد المحاسب ومن قواعد البيانات مباشرة)، يقراها، يصنّفها، ويطلّع الأرقام منها.</p>
+      </div>
+      <div>
+        <h3><span class="arrow">←</span> النتيجة</h3>
+        <p>داشبورد لحظي لكل شركة، توقعات نقدية، موازنة مقابل الفعلي، مواعيد مايفوتهاش، وتقرير شهري بيوصل لوحده على الإيميل والواتساب.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide split" id="s3">
+    <div class="text">
+      <div class="eyebrow">02 · Overview</div>
+      <h2>كل الشركات في شاشة واحدة</h2>
+      <ul class="points">
+        <li><span><b>إجمالي مجمّع</b> لآخر فترة: الإيرادات والمصروفات وصافي الربح والنقدية.</span></li>
+        <li><span><b>جدول مقارنة</b> بين الشركات، ودور عظيم في كل شركة، وعدد الملفات والتنبيهات المفتوحة.</span></li>
+        <li><span><b>المواعيد الجاية</b> خلال 30 يوم والتنبيهات، مرتّبة حسب الخطورة.</span></li>
+        <li><span>بيتحدث <b>لحظياً</b>: أي ملف يتسحب أو رقم يتسجّل، الشاشة بتتغير على طول.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/overview.png" alt="شاشة النظرة العامة" loading="lazy"></button><figcaption>النظرة العامة (الوضع الفاتح)</figcaption></figure>
+  </section>
+
+  <section class="slide split" id="s4">
+    <div class="text">
+      <div class="eyebrow">03 · Company dashboard</div>
+      <h2>داشبورد لكل شركة</h2>
+      <ul class="points">
+        <li><span>مؤشرات زي <b>الإيرادات والمصروفات وصافي الربح والنقدية والمستحقات والالتزامات</b>، مع نسبة التغير عن الشهر اللي فات.</span></li>
+        <li><span>اللون بيفهم المعنى: زيادة المصروفات <b style="color:var(--bad)">سلبية</b>، وزيادة الإيرادات <b style="color:var(--good)">إيجابية</b>.</span></li>
+        <li><span>رسم الاتجاه لـ 12 شهر، وتوزيع الملفات حسب التصنيف.</span></li>
+        <li><span>تبويبات للملفات، والمؤشرات، والموازنة، والتوقعات، والمواعيد، والقرارات، ومصادر البيانات، والأتمتة.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/company-dashboard.png" alt="داشبورد مصنع الدلتا" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s5">
+    <div class="text">
+      <div class="eyebrow">04 · Files &amp; search</div>
+      <h2>أي ملف، بأي شكل</h2>
+      <ul class="points">
+        <li><span><b>Excel وCSV وPDF وWord وصور وقواعد SQLite</b>: بالسحب والإفلات، أو من <b>مجلد مراقبة</b> لكل شركة بيتسحب منه تلقائياً.</span></li>
+        <li><span>الصور بتتقرا بـ <b>OCR عربي وإنجليزي</b>، والجداول بتتطلّع من الشيتات والـ PDF.</span></li>
+        <li><span>الملفات المكررة بتتعرف بالمحتوى (SHA-256) مش بالاسم.</span></li>
+        <li><span><code>Ctrl + K</code> بيبحث جوه محتوى كل ملفات كل الشركات.</span></li>
+      </ul>
+    </div>
+    <div class="pair">
+      <figure class="shot"><button type="button" data-zoom><img src="shots/files.png" alt="ملفات الشركة" loading="lazy"></button><figcaption>الملفات وتصنيفها التلقائي</figcaption></figure>
+      <figure class="shot"><button type="button" data-zoom><img src="shots/palette.png" alt="البحث الشامل" loading="lazy"></button><figcaption>البحث الشامل Ctrl+K</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="slide split" id="s6">
+    <div class="text">
+      <div class="eyebrow">05 · AI assistant</div>
+      <h2>بتكلّمه زي ما بتكلّم Claude</h2>
+      <ul class="points">
+        <li><span>بيشتغل بـ <b>Claude</b> (الافتراضي)، أو OpenAI أو Gemini، أو <b>موديل محلي</b> للشركات الحساسة اللي داتاها ماينفعش تخرج برا الجهاز.</span></li>
+        <li><span>معاه <b>أدوات حقيقية</b>: بيدوّر في الملفات ويقراها، بيجمع ويحسب من الجداول، بيسجّل المؤشرات، بيعمل توقعات وسيناريوهات، بيضيف مواعيد وقرارات، وبيستعلم من قواعد بيانات الشركات.</span></li>
+        <li><span>بيقولك كل رقم جه منين، ومابيألّفش أرقام.</span></li>
+        <li><span>كل ملف جديد بيتقرا ويتصنّف لوحده، ومواعيد العقود والأقساط بتتضاف تلقائياً.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/chat.png" alt="المساعد الذكي يحدد أكبر المخاطر" loading="lazy"></button><figcaption>«إيه أكبر المخاطر في شركاتي دلوقتي؟»</figcaption></figure>
+  </section>
+
+  <section class="slide split" id="s7">
+    <div class="text">
+      <div class="eyebrow">06 · Reports</div>
+      <h2>تقارير PDF وExcel وWord</h2>
+      <ul class="points">
+        <li><span>اطلب أي تقرير بالكلام، والمساعد بيبنيه من الداتا: ملخص تنفيذي، وجداول، وتوصيات.</span></li>
+        <li><span><b>PDF</b> بخط عربي سليم ومن اليمين للشمال، و<b>Excel</b> بشيت لكل جدول وفلترة، و<b>Word</b> قابل للتعديل.</span></li>
+        <li><span>زرار يفتح الملف على طول، وكل التقارير محفوظة في صفحة «التقارير».</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/chat-report.png" alt="إنشاء تقرير PDF من المحادثة" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s8">
+    <div class="text">
+      <div class="eyebrow">07 · Cash forecast · What-if</div>
+      <h2>توقعات النقدية و«ماذا لو»</h2>
+      <ul class="points">
+        <li><span>توقع من 3 لـ 36 شهر، محسوب من <b>اتجاه الإيرادات والمصروفات ورصيد النقدية</b>.</span></li>
+        <li><span>Sliders والنتيجة بتتحسب فوراً: <b>تغيير الإيرادات والمصروفات، تأخير التحصيل، نمو يدوي</b>، وبنود استثنائية زي شراء ماكينة أو قرض.</span></li>
+        <li><span>بيقولك <b>أقل رصيد</b> هتوصله وإمتى، والنقدية <b>تكفي لمدة قد إيه</b>.</span></li>
+      </ul>
+      <p class="lead" style="font-size:15px">في الصورة: لو التحصيل في «النيل للمقاولات» اتأخر شهرين والإيرادات نزلت 10%، النقدية هتخلص بعد 9 شهور.</p>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/forecast.png" alt="توقعات النقدية مع سيناريو" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s9">
+    <div class="text">
+      <div class="eyebrow">08 · Budget vs actual</div>
+      <h2>الموازنة مقابل الفعلي</h2>
+      <ul class="points">
+        <li><span>الانحراف ونسبته لكل بند ولكل شهر، وإجمالي <b>من أول السنة (YTD)</b>.</span></li>
+        <li><span>بيفهم إن المصروفات الأقل من الموازنة <b style="color:var(--good)">إيجابية</b>.</span></li>
+        <li><span>تنبيه تلقائي لما بند يتجاوز الموازنة.</span></li>
+        <li><span>استورد شيت الموازنة وقول للمساعد «احفظه كموازنة».</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/budget.png" alt="الموازنة مقابل الفعلي" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s10">
+    <div class="text">
+      <div class="eyebrow">09 · Deadlines</div>
+      <h2>مواعيد مابتتنسيش</h2>
+      <ul class="points">
+        <li><span>ضرائب، أقساط، تجديد عقود، رواتب، تأمينات: متقسمين <b>متأخر / الأسبوع ده / الشهر ده / بعدين</b>.</span></li>
+        <li><span><b>التكرار</b>: لما تعلّم على القسط الشهري «تم»، بيتنقل للشهر الجاي لوحده.</span></li>
+        <li><span>التذكير بيوصل على <b>الديسكتوب والإيميل والواتساب وإشعار الموبايل</b>.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/reminders.png" alt="المواعيد" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s11">
+    <div class="text">
+      <div class="eyebrow">10 · Monthly report</div>
+      <h2>تقرير شهري بيوصل لوحده</h2>
+      <ul class="points">
+        <li><span>لكل شركة: <b>يوم الإرسال</b>، والمستلمين (إيميلات وأرقام واتساب)، واللغة، والصيغة.</span></li>
+        <li><span>فيه: ملخص تنفيذي بالذكاء الاصطناعي، والمؤشرات، والموازنة مقابل الفعلي، واتجاه 6 شهور، وتوقع النقدية، والمواعيد، والتنبيهات، والقرارات اللي محتاجة مراجعة.</span></li>
+        <li><span>الإيميل بـ SMTP، والواتساب بـ <b>WhatsApp Cloud API</b> الرسمي من Meta.</span></li>
+        <li><span>«معاينة» و«إرسال الآن» عشان تجرّب قبل ما تفعّله.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/automation.png" alt="إعداد التقرير الشهري" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s12">
+    <div class="text">
+      <div class="eyebrow">11 · Live connections</div>
+      <h2>ربط مباشر بأنظمة الشركات</h2>
+      <ul class="points">
+        <li><span><b>SQL Server وPostgreSQL وMySQL وSQLite وOdoo</b> وأي REST API.</span></li>
+        <li><span>«مجموعات بيانات» بتتحدث كل X دقيقة: <b>جدول</b> يدخل في البحث والتحليل، أو <b>مؤشرات</b> تغذّي الداشبورد على طول.</span></li>
+        <li><span><b>قراءة فقط</b>: مسموح باستعلام <code>SELECT</code> واحد جوه transaction للقراءة فقط. الـ AI مايقدرش يستعلم غير من الاتصالات اللي إنت سمحتله بيها.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/sources.png" alt="مصادر البيانات" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="s13">
+    <div class="text">
+      <div class="eyebrow">12 · Accounts &amp; security</div>
+      <h2>صلاحيات للمحاسبين وأمان كامل</h2>
+      <ul class="points">
+        <li><span><b>مدير</b> له كل الصلاحيات. <b>محاسب</b> بيرفع ملفات ويضيف مواعيد للشركات المسموح له بيها بس. <b>مشاهد</b> قراءة فقط. السيرفر بيطبّق ده بنفسه.</span></li>
+        <li><span><b>قفل برقم سري</b> عند الفتح، وبعد مدة عدم استخدام، وعند قفل الويندوز، وفيه حماية من التخمين.</span></li>
+        <li><span><b>نسخ احتياطي مشفّر AES-256</b> لكل حاجة، يدوي أو تلقائي. لو كلمة السر غلط، الاسترجاع بيترفض.</span></li>
+      </ul>
+    </div>
+    <div class="pair">
+      <figure class="shot"><button type="button" data-zoom><img src="shots/accounts.png" alt="الحسابات والصلاحيات" loading="lazy"></button><figcaption>الحسابات والأمان</figcaption></figure>
+      <figure class="shot"><button type="button" data-zoom><img src="shots/lock.png" alt="شاشة القفل" loading="lazy"></button><figcaption>شاشة القفل</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="slide split" id="s14">
+    <div class="text">
+      <div class="eyebrow">13 · Settings</div>
+      <h2>الإعدادات</h2>
+      <ul class="points">
+        <li><span>اختيار مزوّد الذكاء الاصطناعي والموديل. المفاتيح <b>متشفّرة</b> بخزنة نظام التشغيل.</span></li>
+        <li><span>عربي أو إنجليزي، ووضع فاتح أو داكن أو حسب النظام.</span></li>
+        <li><span>الإيميل والواتساب، والمزامنة مع سيرفر Inno، والتحديثات.</span></li>
+        <li><span>مكتوب فيها «من تطوير شركة <b>Inno Source For Software Solutions</b>».</span></li>
+      </ul>
+    </div>
+    <div class="pair">
+      <figure class="shot"><button type="button" data-zoom><img src="shots/settings.png" alt="إعدادات الذكاء الاصطناعي" loading="lazy"></button><figcaption>مزوّدو الذكاء الاصطناعي</figcaption></figure>
+      <figure class="shot"><button type="button" data-zoom><img src="shots/about.png" alt="عن البرنامج" loading="lazy"></button><figcaption>عن البرنامج</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="slide split" id="s15">
+    <div class="text">
+      <div class="eyebrow">14 · Mobile</div>
+      <h2>تطبيق الموبايل</h2>
+      <ul class="points">
+        <li><span>iOS وAndroid (Expo / React Native)، عربي وإنجليزي.</span></li>
+        <li><span>الشركات والمؤشرات، والموازنة مقابل الفعلي، والتنبيهات، والمواعيد، والقرارات، والملفات.</span></li>
+        <li><span><b>إشعارات فورية</b> للتنبيهات الحرجة والمواعيد اللي قربت.</span></li>
+        <li><span>بيشتغل بنفس حساب سيرفر Inno وبنفس الصلاحيات.</span></li>
+      </ul>
+    </div>
+    <div class="phone" role="img" aria-label="رسم توضيحي لشاشة تطبيق الموبايل">
+      <div class="screen">
+        <header>Azim Command</header>
+        <div class="rows">
+          <div class="card"><small>الإيرادات — كل الشركات</small><div class="v">11.6M EGP</div><span class="sev good">▲ 3.1%</span></div>
+          <div class="card"><small>النيل للمقاولات</small><span class="sev bad">● قسط قرض المعدات متأخر يومين</span></div>
+          <div class="card"><small>مصنع الدلتا</small><span class="sev warn">● إقرار القيمة المضافة بعد 3 أيام</span></div>
+          <div class="card"><small>Horizon Trading</small><div class="v">600K USD</div></div>
+        </div>
+        <nav><span>نظرة عامة</span><span>التنبيهات</span><span>المواعيد</span><span>الإعدادات</span></nav>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" id="s16">
+    <div class="eyebrow">15 · Inno Server</div>
+    <h2>سيرفر Inno: سيرفر الشركة لكل منتجاتها</h2>
+    <p class="lead">السيرفر بتاع Inno Source، وكل منتج ليه مساحة مستقلة. Azim Command اسم مساحته <code>azim-command</code>، فالداتا والحسابات والتحديثات مابتختلطش بأي منتج تاني.</p>
+    <div class="arch">
+      <div class="node"><h3>الديسكتوب</h3><small>الداتا محلية على جهاز أحمد (Local-first)</small><p>بيرفع التغييرات والملفات، وبيستلم أي تحديث.</p></div>
+      <div class="node server"><h3>Inno Server</h3><small class="mono">196.221.144.94:9991</small><p>المزامنة، والملفات، والحسابات والصلاحيات، وإشعارات الموبايل، وملفات التحديث.</p></div>
+      <div class="node"><h3>الموبايل والمحاسبين</h3><small>كل واحد بحسابه وصلاحياته</small><p>بيقروا الداتا المسموح بيها، والمحاسب بيرفع ملفاته.</p></div>
+    </div>
+    <div class="flow">
+      <div><h3>التحديث التلقائي</h3><p>تعمل <code>git tag v0.3.0</code> ← GitHub بيبني المثبّتات ← بيرفعها على سيرفر Inno ← كل نسخة شغالة بتعرف في ثواني، وتنزّلها، ويظهر زرار «إعادة التشغيل والتثبيت».</p></div>
+      <div><h3>المزامنة</h3><p>كل سجل عليه وقت آخر تعديل، والأحدث هو اللي بيكسب. الحذف بيتنقل لباقي الأجهزة.</p></div>
+      <div><h3>تنبيه</h3><p>السيرفر حالياً على HTTP. قبل الداتا الحقيقية لازم HTTPS بدومين (Caddy أو nginx).</p></div>
+    </div>
+  </section>
+
+  <section class="slide try" id="try">
+    <div class="eyebrow">16 · Try it</div>
+    <h2>جرّب البرنامج بنفسك</h2>
+    <p class="lead">ده البرنامج الحقيقي شغال في المتصفح على بيانات تجريبية لـ 3 شركات. اضغط واستكشف براحتك.</p>
+    <div class="frame-wrap">
+      <div class="frame-bar">
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <button type="button" data-go="" aria-pressed="true">نظرة عامة</button>
+        <button type="button" data-go="company/nile/forecast">توقعات «ماذا لو»</button>
+        <button type="button" data-go="chat">المساعد الذكي</button>
+        <button type="button" data-go="reminders">المواعيد</button>
+        <button type="button" data-go="company/delta/sources">مصادر البيانات</button>
+        <a href="demo/index.html" target="_blank" rel="noopener">فتح في صفحة كاملة ↗</a>
+      </div>
+      <iframe id="demo" src="demo/index.html" title="Azim Command — نسخة تجريبية"></iframe>
+    </div>
+    <div class="tips">
+      <div class="tip"><b>ماذا لو:</b> افتح «النيل للمقاولات» ← «توقعات النقدية»، وحرّك «تأخير التحصيل» لـ 2، وشوف النقدية بتخلص إمتى.</div>
+      <div class="tip"><b>المساعد:</b> اسأل «إيه أكبر المخاطر؟» أو «اعمل تقرير PDF». الردود في الديمو جاهزة مسبقاً، والبرنامج الحقيقي بيشتغل بـ Claude.</div>
+      <div class="tip"><b>English:</b> اضغط زرار «English» فوق، والواجهة كلها هتقلب لليسار.</div>
+      <div class="tip"><b>القفل:</b> من الإعدادات اضغط «اقفل الآن»، والرقم السري التجريبي <code>1234</code>.</div>
+    </div>
+  </section>
+
+  <section class="slide" id="ideas">
+    <div class="eyebrow">17 · Next</div>
+    <h2>اقتراحات للمرحلة الجاية</h2>
+    <div class="ideas">
+      <div class="idea"><div class="tag">COST</div><h3>محلل المصروفات</h3><p>يكتشف الاشتراكات المكررة والموردين اللي أسعارهم زادت عن المتوسط، ويقترح توفير بالأرقام.</p></div>
+      <div class="idea"><div class="tag">AGING</div><h3>أعمار الديون</h3><p>المدينين والدائنين حسب مدة التأخير، من نظام المحاسبة مباشرة، ومعاه رسالة تحصيل جاهزة للعميل.</p></div>
+      <div class="idea"><div class="tag">BENCHMARK</div><h3>مقارنة الشركات ببعض</h3><p>هامش الربح، ودورة التحصيل، وتكلفة الموظف، والمصروف لكل جنيه إيراد. مين الأحسن ومين محتاج تدخل.</p></div>
+      <div class="idea"><div class="tag">BOARD</div><h3>عرض مجلس الإدارة</h3><p>عرض تقديمي شهري جاهز يتعمل لوحده من التقرير، بالرسوم والتوصيات.</p></div>
+      <div class="idea"><div class="tag">VOICE</div><h3>مساعد صوتي على الموبايل</h3><p>«إيه وضع النقدية في مصنع الدلتا؟» والرد بالصوت والأرقام.</p></div>
+      <div class="idea"><div class="tag">RECEIPTS</div><h3>تصوير الإيصالات</h3><p>المحاسب يصوّر الفاتورة من الموبايل، فتتقرا وتتصنّف وتدخل الشركة الصح على طول.</p></div>
+      <div class="idea"><div class="tag">INTEGRATIONS</div><h3>QuickBooks وXero وZoho</h3><p>ربط مباشر ببرامج المحاسبة السحابية (محتاج تسجيل OAuth apps).</p></div>
+      <div class="idea"><div class="tag">TRUST</div><h3>توقيع المثبّتات</h3><p>شهادة Code Signing عشان Windows مايظهرش تحذير SmartScreen.</p></div>
+    </div>
+  </section>
+
+  <section class="slide" id="start">
+    <div class="eyebrow">18 · Getting started</div>
+    <h2>إزاي نشغّله</h2>
+    <ol class="steps">
+      <li><span>على سيرفر Inno: <code>cd apps/inno-server &amp;&amp; cp .env.example .env</code>، وحط التوكنات، وبعدين <code>docker compose up -d</code>.</span></li>
+      <li><span>في GitHub Secrets: ضيف <code>INNO_SERVER_URL</code> و<code>INNO_PUBLISH_TOKEN</code>، واعمل <code>git tag v0.2.0</code>، فالمثبّتات بتتبني وتترفع لوحدها.</span></li>
+      <li><span>ثبّت البرنامج على جهاز أحمد، وحط مفتاح Claude، واربط السيرفر من الإعدادات.</span></li>
+      <li><span>ضيف الشركات واسحب الملفات، أو حدد مجلد المراقبة واربط قواعد البيانات.</span></li>
+      <li><span>اعمل حسابات للمحاسبين، وفعّل التقرير الشهري، والقفل، والنسخ الاحتياطي.</span></li>
+      <li><span>تطبيق الموبايل: <code>eas build</code> لـ Android وiOS.</span></li>
+    </ol>
+  </section>
+
+  <footer class="end">Azim Command · من تطوير شركة Inno Source For Software Solutions</footer>
+</main>
+
+<nav class="nav" aria-label="التنقل بين الشرائح">
+  <button type="button" id="next" aria-label="الشريحة التالية">↓</button>
+  <span class="count" id="count">1 / 19</span>
+  <button type="button" id="prev" aria-label="الشريحة السابقة">↑</button>
+</nav>
+
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="صورة مكبّرة">
+  <div><img id="lightbox-img" alt=""><p id="lightbox-cap"></p></div>
+</div>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'))
+    var count = document.getElementById('count')
+    var bar = document.getElementById('bar')
+    var current = 0
+
+    function update() {
+      var mid = window.innerHeight * 0.4
+      for (var i = 0; i < slides.length; i++) {
+        var r = slides[i].getBoundingClientRect()
+        if (r.top <= mid && r.bottom > mid) { current = i; break }
+      }
+      count.textContent = (current + 1) + ' / ' + slides.length
+      var max = document.documentElement.scrollHeight - window.innerHeight
+      bar.style.width = (max > 0 ? (window.scrollY / max) * 100 : 0) + '%'
+    }
+    function go(delta) {
+      var i = Math.max(0, Math.min(slides.length - 1, current + delta))
+      slides[i].scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    }
+    document.getElementById('next').addEventListener('click', function () { go(1) })
+    document.getElementById('prev').addEventListener('click', function () { go(-1) })
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    document.addEventListener('keydown', function (e) {
+      if (e.target && /INPUT|TEXTAREA|SELECT|IFRAME/.test(e.target.tagName)) return
+      if (!lightbox.hidden) { if (e.key === 'Escape') close(); return }
+      if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowLeft' || e.key === ' ') { e.preventDefault(); go(1) }
+      if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowRight') { e.preventDefault(); go(-1) }
+    })
+    update()
+
+    // Click a screenshot to see it full size.
+    var lightbox = document.getElementById('lightbox')
+    var lbImg = document.getElementById('lightbox-img')
+    var lbCap = document.getElementById('lightbox-cap')
+    var opener = null
+    function close() { lightbox.hidden = true; if (opener) opener.focus() }
+    document.querySelectorAll('[data-zoom]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var img = btn.querySelector('img')
+        lbImg.src = img.src
+        lbImg.alt = img.alt
+        lbCap.textContent = img.alt
+        opener = btn
+        lightbox.hidden = false
+      })
+    })
+    lightbox.addEventListener('click', close)
+
+    // Jump the live demo to a screen.
+    var frame = document.getElementById('demo')
+    document.querySelectorAll('[data-go]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('[data-go]').forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)) })
+        // A fresh query string forces a reload, so the app re-reads the #route.
+        frame.src = 'demo/index.html?v=' + Date.now() + (btn.dataset.go ? '#' + btn.dataset.go : '')
+      })
+    })
+  })()
+</script>
+
+</body>
+</html>

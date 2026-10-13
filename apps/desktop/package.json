@@ -17,7 +17,8 @@
     "postinstall": "electron-builder install-app-deps",
     "dist:win": "electron-vite build && electron-builder --win --publish never",
     "dist:linux": "electron-vite build && electron-builder --linux --publish never",
-    "dist:mac": "electron-vite build && electron-builder --mac --publish never"
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "build:demo": "vite build -c vite.demo.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -28,14 +29,21 @@
     "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
     "mammoth": "^1.13.0",
+    "mssql": "^12.7.4",
+    "mysql2": "^3.24.5",
+    "nodemailer": "^10.1.0",
     "openai": "^7.32.0",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.23.1",
     "tesseract.js": "^7.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^22.20.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",

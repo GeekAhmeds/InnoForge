@@ -1,4 +1,4 @@
-// Local-first sync with the Azim server. The desktop database is the source
+// Local-first sync with the Inno server. The desktop database is the source
 // of truth on this machine; the server keeps a replica (and the original
 // files) so other devices — and the mobile app — can read the same data.
 // Conflicts resolve last-write-wins on updated_at.
@@ -11,7 +11,7 @@ import { broadcast, dataChanged } from './events'
 import { getSettings, updateSettings } from './settings'
 import { vaultDir } from './paths'
 import { reprocess } from './ingest'
-import type { SyncStatus } from '@shared/types'
+import { SERVER_APP_ID, type Account, type SyncStatus } from '@shared/types'
 
 type Row = Record<string, unknown>
 
@@ -47,9 +47,10 @@ function setCursor(name: string, value: string): void {
     .run(`cursor:${name}`, value)
 }
 
-async function api(path: string, init: RequestInit = {}): Promise<Response> {
+/** Request against this app's namespace on the Inno server. */
+export async function api(path: string, init: RequestInit = {}): Promise<Response> {
   const s = getSettings()
-  const res = await fetch(`${s.serverUrl.replace(/\/+$/, '')}${path}`, {
+  const res = await fetch(`${s.serverUrl.replace(/\/+$/, '')}/api/${SERVER_APP_ID}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${s.syncToken}`, 'X-Device-Id': deviceId(), ...(init.headers ?? {}) }
   })
@@ -72,7 +73,7 @@ async function push(): Promise<void> {
     if (rows.length) changes[table] = rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !LOCAL_ONLY_COLUMNS.has(k))))
   }
   if (Object.keys(changes).length) {
-    await api('/api/sync/push', {
+    await api('/sync/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes })
@@ -87,7 +88,7 @@ async function push(): Promise<void> {
   }[]
   for (const doc of pending) {
     if (!existsSync(doc.stored_path)) continue
-    await api(`/api/files/${doc.id}`, {
+    await api(`/files/${doc.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: await readFile(doc.stored_path)
@@ -98,7 +99,7 @@ async function push(): Promise<void> {
 
 async function pull(): Promise<void> {
   const d = getDb()
-  const res = await api(`/api/sync/pull?since=${encodeURIComponent(cursor('pull'))}`)
+  const res = await api(`/sync/pull?since=${encodeURIComponent(cursor('pull'))}`)
   const body = (await res.json()) as { serverTime: string; changes: Record<string, Row[]>; more?: boolean }
   const toFetch: { id: string; company_id: string; name: string }[] = []
   d.transaction(() => {
@@ -126,7 +127,7 @@ async function pull(): Promise<void> {
   for (const doc of toFetch) {
     const file = join(vaultDir(doc.company_id), `${doc.id}${extname(doc.name).toLowerCase()}`)
     try {
-      const r = await api(`/api/files/${doc.id}`)
+      const r = await api(`/files/${doc.id}`)
       await writeFile(file, Buffer.from(await r.arrayBuffer()))
       reprocess(doc.id) // build local search index for the downloaded file
     } catch {
@@ -140,6 +141,17 @@ async function pull(): Promise<void> {
   }
 }
 
+/** Who this device signs in as; decides what the UI allows. */
+export async function refreshAccount(): Promise<Account> {
+  const me = (await (await api('/me')).json()) as Account
+  const account: Account = { name: me.name, role: me.role, companies: me.companies ?? null }
+  if (JSON.stringify(account) !== JSON.stringify(getSettings().account)) {
+    updateSettings({ account })
+    broadcast('account:changed', account)
+  }
+  return account
+}
+
 export async function syncNow(): Promise<SyncStatus> {
   const s = getSettings()
   if (!s.syncEnabled || !s.serverUrl) {
@@ -150,6 +162,7 @@ export async function syncNow(): Promise<SyncStatus> {
   syncing = true
   set({ state: 'syncing', lastSyncAt: s.lastSyncAt })
   try {
+    await refreshAccount()
     await push()
     await pull()
     const at = now()

@@ -1,0 +1,17 @@
+# systemd unit for running Inno Server without Docker.
+# sudo cp deploy/inno-server.service /etc/systemd/system/ && sudo systemctl enable --now inno-server
+[Unit]
+Description=Inno Server (Inno Source For Software Solutions)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/inno/apps/inno-server
+EnvironmentFile=/opt/inno/apps/inno-server/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=3
+User=inno
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 services:
-  azim-server:
+  inno-server:
     build: .
-    container_name: azim-command-server
+    container_name: inno-server
     restart: unless-stopped
     ports:
       - "9991:9991"

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { existsSync } from 'fs'
 import { copyFile, readFile, stat } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { logActivity, uid } from '../db'
@@ -126,7 +127,7 @@ function pump(): void {
 
 export async function processDocument(id: string): Promise<void> {
   const doc = repo.getDocument(id)
-  if (!doc) return
+  if (!doc || !doc.storedPath || !existsSync(doc.storedPath)) return // connector datasets have no file
   repo.updateDocument(id, { status: 'processing', error: null })
   try {
     const { text, tables } = await extract(doc.storedPath, doc.kind, getSettings().ocrLanguages)
