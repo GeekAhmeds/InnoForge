@@ -389,7 +389,7 @@
       <div class="node"><h3>الموبايل والمحاسبين</h3><small>كل واحد بحسابه وصلاحياته</small><p>بيقروا الداتا المسموح بيها، والمحاسب بيرفع ملفاته.</p></div>
     </div>
     <div class="flow">
-      <div><h3>التحديث التلقائي</h3><p>تعمل <code>git tag v0.3.0</code> ← GitHub بيبني المثبّتات ← بيرفعها على سيرفر Inno ← كل نسخة شغالة بتعرف في ثواني، وتنزّلها، ويظهر زرار «إعادة التشغيل والتثبيت».</p></div>
+      <div><h3>التحديث التلقائي</h3><p>تعمل <code>git tag azim-v0.3.0</code> ← GitHub بيبني المثبّتات ← بيرفعها على سيرفر Inno ← كل نسخة شغالة بتعرف في ثواني، وتنزّلها، ويظهر زرار «إعادة التشغيل والتثبيت».</p></div>
       <div><h3>المزامنة</h3><p>كل سجل عليه وقت آخر تعديل، والأحدث هو اللي بيكسب. الحذف بيتنقل لباقي الأجهزة.</p></div>
       <div><h3>تنبيه</h3><p>السيرفر حالياً على HTTP. قبل الداتا الحقيقية لازم HTTPS بدومين (Caddy أو nginx).</p></div>
     </div>
@@ -439,7 +439,7 @@
     <h2>إزاي نشغّله</h2>
     <ol class="steps">
       <li><span>على سيرفر Inno: <code>cd apps/inno-server &amp;&amp; cp .env.example .env</code>، وحط التوكنات، وبعدين <code>docker compose up -d</code>.</span></li>
-      <li><span>في GitHub Secrets: ضيف <code>INNO_SERVER_URL</code> و<code>INNO_PUBLISH_TOKEN</code>، واعمل <code>git tag v0.2.0</code>، فالمثبّتات بتتبني وتترفع لوحدها.</span></li>
+      <li><span>في GitHub Secrets: ضيف <code>INNO_SERVER_URL</code> و<code>INNO_PUBLISH_TOKEN</code>، واعمل <code>git tag azim-v0.2.0</code>، فالمثبّتات بتتبني وتترفع لوحدها.</span></li>
       <li><span>ثبّت البرنامج على جهاز أحمد، وحط مفتاح Claude، واربط السيرفر من الإعدادات.</span></li>
       <li><span>ضيف الشركات واسحب الملفات، أو حدد مجلد المراقبة واربط قواعد البيانات.</span></li>
       <li><span>اعمل حسابات للمحاسبين، وفعّل التقرير الشهري، والقفل، والنسخ الاحتياطي.</span></li>

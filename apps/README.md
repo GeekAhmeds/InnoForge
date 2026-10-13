@@ -101,7 +101,7 @@ docker compose up -d --build
 
 ## إصدار نسخة جديدة
 1. في GitHub Secrets ضيف `INNO_SERVER_URL` و`INNO_PUBLISH_TOKEN`.
-2. `git tag v0.2.0 && git push origin v0.2.0`. الـ Actions بيبني Windows وLinux ويرفعهم على السيرفر وعلى GitHub Releases.
+2. `git tag azim-v0.2.0 && git push origin azim-v0.2.0`. الـ Actions بيبني Windows وLinux ويرفعهم على السيرفر وعلى GitHub Releases (البادئة `azim-v` عشان ماتتلخبطش مع إصدارات منتجات Inno التانية).
 
 ---
 

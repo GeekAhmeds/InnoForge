@@ -1,5 +1,6 @@
-# Build installers and publish them. Push a tag like v0.2.0 to release:
-#   git tag v0.2.0 && git push origin v0.2.0
+# Build installers and publish them. Azim Command tags are prefixed so they
+# never clash with other Inno products in this repo (e.g. pos-v*):
+#   git tag azim-v0.2.0 && git push origin azim-v0.2.0
 # Installers are attached to a GitHub Release and uploaded to the Inno server
 # (set repository secrets INNO_SERVER_URL and INNO_PUBLISH_TOKEN), where every
 # running copy of the app picks them up automatically.
@@ -7,7 +8,7 @@ name: Release desktop app
 
 on:
   push:
-    tags: ['v*']
+    tags: ['azim-v*']
   workflow_dispatch:
 
 permissions:
@@ -36,9 +37,9 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
       - run: npm ci
       - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/azim-v')
         shell: bash
-        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+        run: npm version "${GITHUB_REF_NAME#azim-v}" --no-git-tag-version --allow-same-version
       - run: npm run dist:${{ matrix.target }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,9 +60,10 @@ jobs:
           INNO_PUBLISH_TOKEN: ${{ secrets.INNO_PUBLISH_TOKEN }}
         run: node ../../scripts/publish-release.mjs ${{ matrix.target }} dist
       - name: Attach to GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/azim-v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Azim Command ${{ github.ref_name }}
           files: |
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.AppImage
