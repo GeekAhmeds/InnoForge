@@ -1,0 +1,237 @@
+// Report generation. PDF is rendered by Chromium from HTML so Arabic shaping
+// and RTL are exact; Excel and Word use native libraries with RTL enabled.
+import { BrowserWindow } from 'electron'
+import { writeFile } from 'fs/promises'
+import { join } from 'path'
+import ExcelJS from 'exceljs'
+import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  Footer,
+  HeadingLevel,
+  Packer,
+  PageNumber,
+  Paragraph,
+  Table,
+  TableCell,
+  TableRow,
+  TextRun,
+  WidthType
+} from 'docx'
+import * as repo from '../repo'
+import { reportsDir } from '../paths'
+import { APP_DEVELOPER, type Report } from '@shared/types'
+
+export interface ReportSection {
+  heading: string
+  paragraphs?: string[]
+  bullets?: string[]
+  table?: { columns: string[]; rows: (string | number | null)[][] }
+}
+
+export interface ReportSpec {
+  companyId: string | null
+  title: string
+  subtitle?: string
+  format: 'pdf' | 'xlsx' | 'docx'
+  language: 'ar' | 'en'
+  sections: ReportSection[]
+}
+
+const fmt = (v: string | number | null | undefined, lang: 'ar' | 'en'): string =>
+  v === null || v === undefined ? '' : typeof v === 'number' ? v.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', { maximumFractionDigits: 2 }) : String(v)
+
+const safeName = (s: string): string => s.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'report'
+
+export async function generateReport(spec: ReportSpec): Promise<Report> {
+  const company = spec.companyId ? repo.getCompany(spec.companyId) : null
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
+  const file = join(reportsDir(), `${safeName((company ? company.name + ' - ' : '') + spec.title)} ${stamp}.${spec.format}`)
+  const meta = {
+    company: company?.name ?? (spec.language === 'ar' ? 'تقرير مجمّع لكل الشركات' : 'Consolidated – all companies'),
+    date: new Date().toLocaleDateString(spec.language === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'long' })
+  }
+  if (spec.format === 'pdf') await writePdf(spec, meta, file)
+  else if (spec.format === 'xlsx') await writeXlsx(spec, meta, file)
+  else await writeDocx(spec, meta, file)
+  return repo.insertReport({ companyId: spec.companyId, title: spec.title, format: spec.format, path: file })
+}
+
+type Meta = { company: string; date: string }
+
+const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+
+export function reportHtml(spec: ReportSpec, meta: Meta): string {
+  const rtl = spec.language === 'ar'
+  const body = spec.sections
+    .map((s) => {
+      const parts = [`<h2>${esc(s.heading)}</h2>`]
+      for (const p of s.paragraphs ?? []) parts.push(`<p>${esc(p)}</p>`)
+      if (s.bullets?.length) parts.push(`<ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`)
+      if (s.table?.columns?.length) {
+        const head = s.table.columns.map((c) => `<th>${esc(String(c))}</th>`).join('')
+        const rows = (s.table.rows ?? [])
+          .map((r) => `<tr>${r.map((c) => `<td class="${typeof c === 'number' ? 'num' : ''}">${esc(fmt(c, spec.language))}</td>`).join('')}</tr>`)
+          .join('')
+        parts.push(`<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`)
+      }
+      return `<section>${parts.join('')}</section>`
+    })
+    .join('')
+  return `<!doctype html><html lang="${spec.language}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm; }
+  body { font-family: 'Segoe UI', 'Noto Sans Arabic', 'Noto Sans', Tahoma, Arial, sans-serif; color: #0b0b0b; font-size: 11pt; line-height: 1.6; }
+  header { border-bottom: 3px solid #2a78d6; padding-bottom: 10px; margin-bottom: 18px; }
+  header .brand { color: #2a78d6; font-weight: 700; letter-spacing: .5px; font-size: 10pt; }
+  h1 { margin: 6px 0 2px; font-size: 22pt; }
+  .sub { color: #52514e; }
+  .meta { color: #52514e; font-size: 9.5pt; margin-top: 6px; }
+  h2 { font-size: 14pt; color: #1d4f8f; margin: 22px 0 8px; border-${rtl ? 'right' : 'left'}: 4px solid #2a78d6; padding-${rtl ? 'right' : 'left'}: 8px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 10pt; page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  th { background: #eef4fc; color: #1d4f8f; text-align: start; padding: 6px 8px; border-bottom: 2px solid #c3c2b7; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e1e0d9; }
+  td.num { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+  tbody tr:nth-child(even) td { background: #fafaf8; }
+  footer { margin-top: 28px; color: #898781; font-size: 8.5pt; border-top: 1px solid #e1e0d9; padding-top: 6px; }
+</style></head><body>
+<header><div class="brand">AZIM COMMAND</div><h1>${esc(spec.title)}</h1>${spec.subtitle ? `<div class="sub">${esc(spec.subtitle)}</div>` : ''}
+<div class="meta">${esc(meta.company)} · ${esc(meta.date)}</div></header>
+${body}
+<footer>${rtl ? 'تم إنشاؤه بواسطة Azim Command — تطوير' : 'Generated by Azim Command — developed by'} ${APP_DEVELOPER}</footer>
+</body></html>`
+}
+
+async function writePdf(spec: ReportSpec, meta: Meta, file: string): Promise<void> {
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true, javascript: false } })
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(reportHtml(spec, meta)))
+    const pdf = await win.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate:
+        '<div style="font-size:8px;color:#898781;width:100%;text-align:center"><span class="pageNumber"></span> / <span class="totalPages"></span></div>'
+    })
+    await writeFile(file, pdf)
+  } finally {
+    win.destroy()
+  }
+}
+
+async function writeXlsx(spec: ReportSpec, meta: Meta, file: string): Promise<void> {
+  const rtl = spec.language === 'ar'
+  const wb = new ExcelJS.Workbook()
+  wb.creator = `Azim Command — ${APP_DEVELOPER}`
+  wb.created = new Date()
+  const summary = wb.addWorksheet(rtl ? 'الملخص' : 'Summary', { views: [{ rightToLeft: rtl }] })
+  summary.columns = [{ width: 110 }]
+  summary.addRow([spec.title]).font = { bold: true, size: 16, color: { argb: 'FF1D4F8F' } }
+  if (spec.subtitle) summary.addRow([spec.subtitle]).font = { color: { argb: 'FF52514E' } }
+  summary.addRow([`${meta.company} · ${meta.date}`]).font = { color: { argb: 'FF52514E' }, size: 10 }
+  summary.addRow([])
+  const usedNames = new Set<string>([summary.name])
+  spec.sections.forEach((s, idx) => {
+    summary.addRow([s.heading]).font = { bold: true, size: 13, color: { argb: 'FF1D4F8F' } }
+    for (const p of s.paragraphs ?? []) summary.addRow([p]).alignment = { wrapText: true, vertical: 'top' }
+    for (const b of s.bullets ?? []) summary.addRow([`• ${b}`]).alignment = { wrapText: true }
+    summary.addRow([])
+    if (s.table?.columns?.length) {
+      let name = safeName(s.heading).replace(/[[\]]/g, '').slice(0, 28) || `Table ${idx + 1}`
+      while (usedNames.has(name)) name = `${name.slice(0, 25)} ${idx + 1}`
+      usedNames.add(name)
+      const ws = wb.addWorksheet(name, { views: [{ rightToLeft: rtl, state: 'frozen', ySplit: 1 }] })
+      const header = ws.addRow(s.table.columns)
+      header.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      header.eachCell((c) => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2A78D6' } }
+      })
+      for (const r of s.table.rows ?? []) ws.addRow(r)
+      ws.columns.forEach((col, i) => {
+        const values = [s.table!.columns[i], ...(s.table!.rows ?? []).map((r) => r[i])]
+        col.width = Math.min(50, Math.max(10, ...values.map((v) => String(v ?? '').length + 2)))
+        if ((s.table!.rows ?? []).every((r) => r[i] === null || typeof r[i] === 'number')) col.numFmt = '#,##0.##'
+      })
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: s.table.columns.length } }
+    }
+  })
+  await wb.xlsx.writeFile(file)
+}
+
+async function writeDocx(spec: ReportSpec, meta: Meta, file: string): Promise<void> {
+  const rtl = spec.language === 'ar'
+  const run = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}): TextRun =>
+    new TextRun({ text, rightToLeft: rtl, font: 'Segoe UI', ...opts })
+  const para = (children: TextRun[], extra: Record<string, unknown> = {}): Paragraph =>
+    new Paragraph({ bidirectional: rtl, alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT, children, ...extra })
+
+  const children: (Paragraph | Table)[] = [
+    para([run('AZIM COMMAND', { bold: true, color: '2A78D6', size: 18 })]),
+    para([run(spec.title, { bold: true, size: 40 })], { heading: HeadingLevel.TITLE }),
+    ...(spec.subtitle ? [para([run(spec.subtitle, { color: '52514E' })])] : []),
+    para([run(`${meta.company} · ${meta.date}`, { color: '52514E', size: 18 })], { spacing: { after: 300 } })
+  ]
+  const border = { style: BorderStyle.SINGLE, size: 4, color: 'E1E0D9' }
+  for (const s of spec.sections) {
+    children.push(para([run(s.heading, { bold: true, color: '1D4F8F', size: 28 })], { heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 120 } }))
+    for (const p of s.paragraphs ?? []) children.push(para([run(p)], { spacing: { after: 120 } }))
+    for (const b of s.bullets ?? []) children.push(para([run(b)], { bullet: { level: 0 } }))
+    if (s.table?.columns?.length) {
+      const rows = [
+        new TableRow({
+          tableHeader: true,
+          children: s.table.columns.map(
+            (c) =>
+              new TableCell({
+                shading: { fill: 'EEF4FC' },
+                children: [para([run(String(c), { bold: true, color: '1D4F8F' })])]
+              })
+          )
+        }),
+        ...(s.table.rows ?? []).map(
+          (r) =>
+            new TableRow({
+              children: s.table!.columns.map(
+                (_, i) => new TableCell({ children: [para([run(fmt(r[i], spec.language))])] })
+              )
+            })
+        )
+      ]
+      children.push(
+        new Table({
+          rows,
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          visuallyRightToLeft: rtl,
+          borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border }
+        })
+      )
+      children.push(para([run('')]))
+    }
+  }
+  const doc = new Document({
+    creator: `Azim Command — ${APP_DEVELOPER}`,
+    title: spec.title,
+    sections: [
+      {
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({ children: [PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES], size: 16, color: '898781' }),
+                  new TextRun({ text: `   ·   ${APP_DEVELOPER}`, size: 16, color: '898781' })
+                ]
+              })
+            ]
+          })
+        },
+        children
+      }
+    ]
+  })
+  await writeFile(file, await Packer.toBuffer(doc))
+}

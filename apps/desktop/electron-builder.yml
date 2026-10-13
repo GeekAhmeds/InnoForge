@@ -1,0 +1,36 @@
+appId: com.innosource.azimcommand
+productName: Azim Command
+copyright: Copyright © Inno Source For Software Solutions
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - '**/*.node'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  shortcutName: Azim Command
+linux:
+  target: [AppImage, deb]
+  category: Office
+  maintainer: Inno Source For Software Solutions
+  artifactName: ${productName}-${version}-${arch}.${ext}
+mac:
+  target: [dmg, zip]
+  category: public.app-category.finance
+# Auto-update feed: the Azim update server. The app can override this URL at
+# runtime from Settings (see src/main/updater.ts).
+publish:
+  provider: generic
+  url: http://196.221.144.94:9991/updates/${os}
+  channel: latest

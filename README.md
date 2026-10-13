@@ -14,6 +14,14 @@
 
 ---
 
+## 🧭 Azim Command (first product)
+
+**Azim Command** is a desktop financial command center (Windows / Linux, macOS-ready) for managing many companies' messy data — Excel, PDF, Word, scanned images and databases — with live dashboards and an AI assistant (Claude, OpenAI, Gemini or a local model) that organizes files, analyzes them and generates PDF / Excel / Word reports. Developed by **Inno Source For Software Solutions**.
+
+➡️ See [`apps/README.md`](./apps/README.md).
+
+---
+
 ## What is InnoForge?
 
 **InnoForge** is an open-source platform that lets anyone build their own management system — just by describing it in plain language.

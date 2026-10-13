@@ -1,0 +1,12 @@
+services:
+  azim-server:
+    build: .
+    container_name: azim-command-server
+    restart: unless-stopped
+    ports:
+      - "9991:9991"
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
