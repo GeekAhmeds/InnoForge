@@ -6,9 +6,13 @@
 # running copy of the app picks them up automatically.
 name: Release desktop app
 
+# Also runs for a push to an azim branch whose commit message contains
+# [release]; it then builds the version in package.json and creates the
+# azim-v<version> tag and GitHub Release itself.
 on:
   push:
     tags: ['azim-v*']
+    branches: ['claude/azim-*', 'main']
   workflow_dispatch:
 
 permissions:
@@ -16,6 +20,7 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[release]')
     strategy:
       fail-fast: false
       matrix:
@@ -59,11 +64,16 @@ jobs:
           INNO_SERVER_URL: ${{ secrets.INNO_SERVER_URL }}
           INNO_PUBLISH_TOKEN: ${{ secrets.INNO_PUBLISH_TOKEN }}
         run: node ../../scripts/publish-release.mjs ${{ matrix.target }} dist
+      - name: Release version
+        id: ver
+        shell: bash
+        run: echo "tag=azim-v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Attach to GitHub release
-        if: startsWith(github.ref, 'refs/tags/azim-v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Azim Command ${{ github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Azim Command ${{ steps.ver.outputs.tag }}
           files: |
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.AppImage
