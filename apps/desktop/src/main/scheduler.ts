@@ -6,12 +6,14 @@ import { runDueMonthlyReports } from './monthly'
 import { refreshDueConnectors } from './connectors'
 import { runAutoBackup } from './backup'
 import { logActivity } from './db'
+import { runDueTasks } from './ai/agent'
 
 const jobs: [string, () => Promise<unknown>][] = [
   ['reminders', checkReminders],
   ['monthly-reports', runDueMonthlyReports],
   ['connectors', refreshDueConnectors],
-  ['backup', () => runAutoBackup()]
+  ['backup', () => runAutoBackup()],
+  ['agent-tasks', runDueTasks]
 ]
 
 let running = false
@@ -34,5 +36,5 @@ async function tick(): Promise<void> {
 
 export function startScheduler(): void {
   setTimeout(() => void tick(), 20_000)
-  setInterval(() => void tick(), 15 * 60_000)
+  setInterval(() => void tick(), 5 * 60_000)
 }

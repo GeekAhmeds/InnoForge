@@ -11,6 +11,7 @@ import { dataChanged } from './events'
 import * as repo from './repo'
 import { decrypt, encrypt } from './settings'
 import { runChecks } from './insights'
+import { INNOPOS_DATASETS, innoPosQuery, newDeviceId } from './connectors-inno'
 import type { Connector, ConnectorType, Dataset } from '@shared/types'
 
 type Row = Record<string, any>
@@ -67,6 +68,12 @@ export function saveConnector(
   const ts = now()
   const existing = input.id ? (d.prepare('SELECT * FROM connectors WHERE id = ?').get(input.id) as Row | undefined) : undefined
   const id = existing?.id ?? uid()
+  if (input.type === 'innoerp') throw new Error('Inno Source ERP integration is not available yet')
+  if (input.type === 'innopos') {
+    // The POS identifies each connected computer by a stable id.
+    const previous = existing ? (JSON.parse(existing.config) as Record<string, unknown>) : {}
+    input = { ...input, config: { port: 7790, ...input.config, deviceId: String(previous.deviceId ?? input.config?.deviceId ?? newDeviceId()) } }
+  }
   const secret = input.secret !== undefined ? (input.secret ? encrypt(input.secret) : null) : (existing?.secret ?? null)
   const values = [input.companyId, input.name, input.type, JSON.stringify(input.config ?? {}), secret, input.allowAi ? 1 : 0, input.refreshMinutes ?? 60]
   if (existing) {
@@ -79,6 +86,9 @@ export function saveConnector(
     d.prepare(
       'INSERT INTO connectors (company_id, name, type, config, secret, allow_ai, refresh_minutes, id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(...values, id, ts, ts)
+  }
+  if (!existing && input.type === 'innopos') {
+    for (const ds of INNOPOS_DATASETS) saveDataset({ connectorId: id, ...ds })
   }
   dataChanged('connectors')
   return getConnector(id)!
@@ -169,6 +179,10 @@ async function odooCall(url: string, service: string, method: string, args: unkn
 export async function runQuery(c: Connector, query: string): Promise<QueryResult> {
   const password = secretOf(c.id)
   switch (c.type) {
+    case 'innoerp':
+      throw new Error('Inno Source ERP integration is not available yet')
+    case 'innopos':
+      return innoPosQuery(c, password, query)
     case 'postgres': {
       assertReadOnly(query)
       const client = new pg.Client({
@@ -273,6 +287,8 @@ export async function testConnector(id: string): Promise<{ ok: boolean; message:
   const c = getConnector(id)
   if (!c) return { ok: false, message: 'not found' }
   const probe: Record<ConnectorType, string> = {
+    innoerp: '',
+    innopos: '{"call":"reports.catalog"}',
     postgres: 'SELECT 1 AS ok',
     mysql: 'SELECT 1 AS ok',
     mssql: 'SELECT 1 AS ok',

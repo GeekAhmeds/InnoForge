@@ -11,6 +11,7 @@ import {
   Footer,
   HeadingLevel,
   Packer,
+  ImageRun,
   PageNumber,
   Paragraph,
   Table,
@@ -21,14 +22,20 @@ import {
 } from 'docx'
 import * as repo from '../repo'
 import { reportsDir } from '../paths'
-import { APP_DEVELOPER, type Report } from '@shared/types'
+import { renderChartSvg } from '@shared/chart-svg'
+import { svgToPng } from '../sandbox'
+import { APP_DEVELOPER, type ChartSpec, type Report } from '@shared/types'
 
 export interface ReportSection {
   heading: string
   paragraphs?: string[]
   bullets?: string[]
   table?: { columns: string[]; rows: (string | number | null)[][] }
+  chart?: ChartSpec
 }
+
+const CHART_W = 760
+const CHART_H = 360
 
 export interface ReportSpec {
   companyId: string | null
@@ -69,6 +76,7 @@ export function reportHtml(spec: ReportSpec, meta: Meta): string {
       const parts = [`<h2>${esc(s.heading)}</h2>`]
       for (const p of s.paragraphs ?? []) parts.push(`<p>${esc(p)}</p>`)
       if (s.bullets?.length) parts.push(`<ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`)
+      if (s.chart) parts.push(`<figure class="chart">${renderChartSvg(s.chart, { width: CHART_W, height: CHART_H, lang: spec.language })}</figure>`)
       if (s.table?.columns?.length) {
         const head = s.table.columns.map((c) => `<th>${esc(String(c))}</th>`).join('')
         const rows = (s.table.rows ?? [])
@@ -95,6 +103,8 @@ export function reportHtml(spec: ReportSpec, meta: Meta): string {
   td { padding: 5px 8px; border-bottom: 1px solid #e1e0d9; }
   td.num { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
   tbody tr:nth-child(even) td { background: #fafaf8; }
+  figure.chart { margin: 10px 0 16px; page-break-inside: avoid; border: 1px solid #e1e0d9; border-radius: 8px; overflow: hidden; }
+  figure.chart svg { width: 100%; height: auto; display: block; }
   footer { margin-top: 28px; color: #898781; font-size: 8.5pt; border-top: 1px solid #e1e0d9; padding-top: 6px; }
 </style></head><body>
 <header><div class="brand">AZIM COMMAND</div><h1>${esc(spec.title)}</h1>${spec.subtitle ? `<div class="sub">${esc(spec.subtitle)}</div>` : ''}
@@ -134,11 +144,13 @@ async function writeXlsx(spec: ReportSpec, meta: Meta, file: string): Promise<vo
   summary.addRow([`${meta.company} · ${meta.date}`]).font = { color: { argb: 'FF52514E' }, size: 10 }
   summary.addRow([])
   const usedNames = new Set<string>([summary.name])
+  const charts: ChartSpec[] = []
   spec.sections.forEach((s, idx) => {
     summary.addRow([s.heading]).font = { bold: true, size: 13, color: { argb: 'FF1D4F8F' } }
     for (const p of s.paragraphs ?? []) summary.addRow([p]).alignment = { wrapText: true, vertical: 'top' }
     for (const b of s.bullets ?? []) summary.addRow([`• ${b}`]).alignment = { wrapText: true }
     summary.addRow([])
+    if (s.chart) charts.push(s.chart)
     if (s.table?.columns?.length) {
       let name = safeName(s.heading).replace(/[[\]]/g, '').slice(0, 28) || `Table ${idx + 1}`
       while (usedNames.has(name)) name = `${name.slice(0, 25)} ${idx + 1}`
@@ -158,6 +170,23 @@ async function writeXlsx(spec: ReportSpec, meta: Meta, file: string): Promise<vo
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: s.table.columns.length } }
     }
   })
+  // Each chart: an image on its own sheet, with the numbers behind it underneath.
+  for (const [i, chart] of charts.entries()) {
+    let name = (safeName(chart.title).replace(/[[\]]/g, '').slice(0, 24) || 'Chart') + ` ${i + 1}`
+    while (usedNames.has(name)) name += '_'
+    usedNames.add(name)
+    const ws = wb.addWorksheet(name, { views: [{ rightToLeft: rtl }] })
+    const png = await svgToPng(renderChartSvg(chart, { width: CHART_W, height: CHART_H, lang: spec.language }), CHART_W, CHART_H)
+    const imageId = wb.addImage({ buffer: png as unknown as ExcelJS.Buffer, extension: 'png' })
+    ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: CHART_W, height: CHART_H } })
+    const startRow = 21
+    ws.getRow(startRow).values = ['', ...chart.series.map((x) => x.name)]
+    ws.getRow(startRow).font = { bold: true }
+    chart.labels.forEach((label, r) => {
+      ws.getRow(startRow + 1 + r).values = [label, ...chart.series.map((x) => x.values[r])]
+    })
+    ws.getColumn(1).width = 22
+  }
   await wb.xlsx.writeFile(file)
 }
 
@@ -179,6 +208,10 @@ async function writeDocx(spec: ReportSpec, meta: Meta, file: string): Promise<vo
     children.push(para([run(s.heading, { bold: true, color: '1D4F8F', size: 28 })], { heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 120 } }))
     for (const p of s.paragraphs ?? []) children.push(para([run(p)], { spacing: { after: 120 } }))
     for (const b of s.bullets ?? []) children.push(para([run(b)], { bullet: { level: 0 } }))
+    if (s.chart) {
+      const png = await svgToPng(renderChartSvg(s.chart, { width: CHART_W, height: CHART_H, lang: spec.language }), CHART_W, CHART_H)
+      children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: 'png', data: png, transformation: { width: 600, height: Math.round((600 * CHART_H) / CHART_W) } })] }))
+    }
     if (s.table?.columns?.length) {
       const rows = [
         new TableRow({

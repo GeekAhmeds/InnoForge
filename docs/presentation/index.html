@@ -157,7 +157,7 @@
 
   <section class="slide split cover" id="s1">
     <div class="text">
-      <div class="brand"><div class="mark">A</div><div class="eyebrow">Azim Command · v0.2</div></div>
+      <div class="brand"><div class="mark">A</div><div class="eyebrow">Azim Command · v0.3</div></div>
       <h1>مركز القيادة المالية لكل شركاتك</h1>
       <p class="lead">برنامج ديسكتوب وموبايل لأحمد عبدالعظيم: بيجمّع كل الشركات اللي بيديرها، ويرتّب داتاهم العشوائية، ويحللها بالذكاء الاصطناعي، ويطلّع تقارير وتوقعات وتنبيهات لحظة بلحظة.</p>
       <div class="meta-row">
@@ -247,12 +247,53 @@
     <figure class="shot"><button type="button" data-zoom><img src="shots/chat.png" alt="المساعد الذكي يحدد أكبر المخاطر" loading="lazy"></button><figcaption>«إيه أكبر المخاطر في شركاتي دلوقتي؟»</figcaption></figure>
   </section>
 
+  <section class="slide split" id="agent">
+    <div class="text">
+      <div class="eyebrow">06 · AI agent</div>
+      <h2>وكيل ذكي بيحلل ويرسم لوحده</h2>
+      <ul class="points">
+        <li><span><b>Agent حقيقي</b>: بيخطط ويستخدم أدوات لحد 40 خطوة في الطلب الواحد، من غير ما يستأذن في كل خطوة.</span></li>
+        <li><span><b>تحليل بيانات بكود</b>: بيكتب ويشغّل JavaScript في بيئة معزولة مقفولة عن الإنترنت والملفات. بيعمل مجاميع، ونمو، وpivot، وارتباط، وانحدار، وقيم شاذة على الجداول نفسها، مش بيحسب من دماغه.</span></li>
+        <li><span><b>رسوم بيانية في الشات</b> تفاعلية (خطي، أعمدة، متراكم، أفقي، دائري)، وكل رسم ينفع يتعرض كجدول. والجداول بتتنسخ لـ Excel بضغطة.</span></li>
+        <li><span>بيدوّر في الإنترنت (أسعار الصرف، قوانين الضرائب) ويذكر المصدر، وبيفتكر تفضيلاتك ومعلومات كل شركة من محادثة للتانية.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/chat-analysis.png" alt="الوكيل يحلل الإيرادات ويرسمها في الشات" loading="lazy"></button><figcaption>«حلل الإيرادات والمصروفات لآخر 12 شهر وارسمها»</figcaption></figure>
+  </section>
+
+  <section class="slide split" id="tasks">
+    <div class="text">
+      <div class="eyebrow">07 · Scheduled agent</div>
+      <h2>مهام الوكيل المجدولة</h2>
+      <ul class="points">
+        <li><span>قول في الشات: «كل يوم اتنين الساعة 8 راجع النقدية لكل الشركات وابعتلي ملخص»، والوكيل هيعمل المهمة لوحده.</span></li>
+        <li><span>يومي، أو أسبوعي، أو شهري. النتيجة بتنزل في محادثة فيها الرسوم والتقارير، وبتوصلك على <b>الإيميل والواتساب</b> وإشعار على الديسكتوب.</span></li>
+        <li><span>«تشغيل الآن» عشان تجرّب المهمة في أي وقت.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/tasks.png" alt="مهام الوكيل المجدولة" loading="lazy"></button></figure>
+  </section>
+
+  <section class="slide split" id="models">
+    <div class="text">
+      <div class="eyebrow">08 · Models</div>
+      <h2>طريقة الربط بالموديلات</h2>
+      <ul class="points">
+        <li><span><b>Claude</b> (الافتراضي <code>claude-opus-5-5</code>)، و<b>OpenAI</b>، و<b>Gemini</b>، وأي خدمة متوافقة مع OpenAI زي <b>OpenRouter وDeepSeek وGroq وvLLM</b>، و<b>موديل محلي</b> (Ollama أو LM Studio) للبيانات اللي ماينفعش تخرج من الجهاز.</span></li>
+        <li><span><b>موديل سريع</b> لكل مزوّد للمهام الخلفية (ترتيب الملفات والتقارير المجدولة)، يعني تكلفة أقل.</span></li>
+        <li><span><b>Fallback</b>: لو المزوّد الأساسي وقع، الوكيل بيكمّل بالمزوّد اللي بعده.</span></li>
+        <li><span>زرار «تحميل الموديلات» بيجيب قايمة الموديلات من المزوّد، ومنها بتختار عمق تفكير Claude، والمفاتيح متشفّرة.</span></li>
+      </ul>
+    </div>
+    <figure class="shot"><button type="button" data-zoom><img src="shots/settings-models.png" alt="إعدادات الموديلات" loading="lazy"></button></figure>
+  </section>
+
   <section class="slide split" id="s7">
     <div class="text">
-      <div class="eyebrow">06 · Reports</div>
+      <div class="eyebrow">09 · Reports</div>
       <h2>تقارير PDF وExcel وWord</h2>
       <ul class="points">
-        <li><span>اطلب أي تقرير بالكلام، والمساعد بيبنيه من الداتا: ملخص تنفيذي، وجداول، وتوصيات.</span></li>
+        <li><span>اطلب أي تقرير بالكلام، والوكيل بيبنيه من الداتا: ملخص تنفيذي، وجداول، و<b>رسوم بيانية جوه التقرير</b>، وتوصيات.</span></li>
         <li><span><b>PDF</b> بخط عربي سليم ومن اليمين للشمال، و<b>Excel</b> بشيت لكل جدول وفلترة، و<b>Word</b> قابل للتعديل.</span></li>
         <li><span>زرار يفتح الملف على طول، وكل التقارير محفوظة في صفحة «التقارير».</span></li>
       </ul>
@@ -262,7 +303,7 @@
 
   <section class="slide split" id="s8">
     <div class="text">
-      <div class="eyebrow">07 · Cash forecast · What-if</div>
+      <div class="eyebrow">10 · Cash forecast · What-if</div>
       <h2>توقعات النقدية و«ماذا لو»</h2>
       <ul class="points">
         <li><span>توقع من 3 لـ 36 شهر، محسوب من <b>اتجاه الإيرادات والمصروفات ورصيد النقدية</b>.</span></li>
@@ -276,7 +317,7 @@
 
   <section class="slide split" id="s9">
     <div class="text">
-      <div class="eyebrow">08 · Budget vs actual</div>
+      <div class="eyebrow">11 · Budget vs actual</div>
       <h2>الموازنة مقابل الفعلي</h2>
       <ul class="points">
         <li><span>الانحراف ونسبته لكل بند ولكل شهر، وإجمالي <b>من أول السنة (YTD)</b>.</span></li>
@@ -290,7 +331,7 @@
 
   <section class="slide split" id="s10">
     <div class="text">
-      <div class="eyebrow">09 · Deadlines</div>
+      <div class="eyebrow">12 · Deadlines</div>
       <h2>مواعيد مابتتنسيش</h2>
       <ul class="points">
         <li><span>ضرائب، أقساط، تجديد عقود، رواتب، تأمينات: متقسمين <b>متأخر / الأسبوع ده / الشهر ده / بعدين</b>.</span></li>
@@ -303,7 +344,7 @@
 
   <section class="slide split" id="s11">
     <div class="text">
-      <div class="eyebrow">10 · Monthly report</div>
+      <div class="eyebrow">13 · Monthly report</div>
       <h2>تقرير شهري بيوصل لوحده</h2>
       <ul class="points">
         <li><span>لكل شركة: <b>يوم الإرسال</b>، والمستلمين (إيميلات وأرقام واتساب)، واللغة، والصيغة.</span></li>
@@ -317,9 +358,11 @@
 
   <section class="slide split" id="s12">
     <div class="text">
-      <div class="eyebrow">11 · Live connections</div>
+      <div class="eyebrow">14 · Live connections</div>
       <h2>ربط مباشر بأنظمة الشركات</h2>
       <ul class="points">
+        <li><span><b>InnoForge POS</b> بتاع Inno Source: بيتربط بالشبكة الداخلية، وبيسحب المبيعات والأرباح والخسائر وأرصدة العملاء والموردين والمخزون والأقساط من تقارير الـ POS نفسها.</span></li>
+        <li><span><b>Inno Source ERP</b> (innovationsrc.com): موجود في الشاشة بعلامة «لسه — Not Yet» لحد ما الـ API بتاعه يتربط.</span></li>
         <li><span><b>SQL Server وPostgreSQL وMySQL وSQLite وOdoo</b> وأي REST API.</span></li>
         <li><span>«مجموعات بيانات» بتتحدث كل X دقيقة: <b>جدول</b> يدخل في البحث والتحليل، أو <b>مؤشرات</b> تغذّي الداشبورد على طول.</span></li>
         <li><span><b>قراءة فقط</b>: مسموح باستعلام <code>SELECT</code> واحد جوه transaction للقراءة فقط. الـ AI مايقدرش يستعلم غير من الاتصالات اللي إنت سمحتله بيها.</span></li>
@@ -330,7 +373,7 @@
 
   <section class="slide split" id="s13">
     <div class="text">
-      <div class="eyebrow">12 · Accounts &amp; security</div>
+      <div class="eyebrow">15 · Accounts &amp; security</div>
       <h2>صلاحيات للمحاسبين وأمان كامل</h2>
       <ul class="points">
         <li><span><b>مدير</b> له كل الصلاحيات. <b>محاسب</b> بيرفع ملفات ويضيف مواعيد للشركات المسموح له بيها بس. <b>مشاهد</b> قراءة فقط. السيرفر بيطبّق ده بنفسه.</span></li>
@@ -346,7 +389,7 @@
 
   <section class="slide split" id="s14">
     <div class="text">
-      <div class="eyebrow">13 · Settings</div>
+      <div class="eyebrow">16 · Settings</div>
       <h2>الإعدادات</h2>
       <ul class="points">
         <li><span>اختيار مزوّد الذكاء الاصطناعي والموديل. المفاتيح <b>متشفّرة</b> بخزنة نظام التشغيل.</span></li>
@@ -363,7 +406,7 @@
 
   <section class="slide split" id="s15">
     <div class="text">
-      <div class="eyebrow">14 · Mobile</div>
+      <div class="eyebrow">17 · Mobile</div>
       <h2>تطبيق الموبايل</h2>
       <ul class="points">
         <li><span>iOS وAndroid (Expo / React Native)، عربي وإنجليزي.</span></li>
@@ -387,7 +430,7 @@
   </section>
 
   <section class="slide" id="s16">
-    <div class="eyebrow">15 · Inno Server</div>
+    <div class="eyebrow">18 · Inno Server</div>
     <h2>سيرفر Inno: سيرفر الشركة لكل منتجاتها</h2>
     <p class="lead">السيرفر بتاع Inno Source، وكل منتج ليه مساحة مستقلة. Azim Command اسم مساحته <code>azim-command</code>، فالداتا والحسابات والتحديثات مابتختلطش بأي منتج تاني.</p>
     <div class="arch">
@@ -396,14 +439,14 @@
       <div class="node"><h3>الموبايل والمحاسبين</h3><small>كل واحد بحسابه وصلاحياته</small><p>بيقروا الداتا المسموح بيها، والمحاسب بيرفع ملفاته.</p></div>
     </div>
     <div class="flow">
-      <div><h3>التحديث التلقائي</h3><p>تعمل <code>git tag azim-v0.3.0</code> ← GitHub بيبني المثبّتات ← بيرفعها على سيرفر Inno ← كل نسخة شغالة بتعرف في ثواني، وتنزّلها، ويظهر زرار «إعادة التشغيل والتثبيت».</p></div>
+      <div><h3>التحديث التلقائي</h3><p>تعمل commit فيه <code>[release]</code> ← GitHub بيبني المثبّتات ← بيرفعها على سيرفر Inno ← كل نسخة شغالة بتعرف في ثواني، وتنزّلها، ويظهر زرار «إعادة التشغيل والتثبيت».</p></div>
       <div><h3>المزامنة</h3><p>كل سجل عليه وقت آخر تعديل، والأحدث هو اللي بيكسب. الحذف بيتنقل لباقي الأجهزة.</p></div>
       <div><h3>تنبيه</h3><p>السيرفر حالياً على HTTP. قبل الداتا الحقيقية لازم HTTPS بدومين (Caddy أو nginx).</p></div>
     </div>
   </section>
 
   <section class="slide try" id="try">
-    <div class="eyebrow">16 · Try it</div>
+    <div class="eyebrow">19 · Try it</div>
     <h2>جرّب البرنامج بنفسك</h2>
     <p class="lead">ده البرنامج الحقيقي شغال في المتصفح على بيانات تجريبية لـ 3 شركات. اضغط واستكشف براحتك.</p>
     <div class="frame-wrap">
@@ -412,6 +455,7 @@
         <button type="button" data-go="" aria-pressed="true">نظرة عامة</button>
         <button type="button" data-go="company/nile/forecast">توقعات «ماذا لو»</button>
         <button type="button" data-go="chat">المساعد الذكي</button>
+        <button type="button" data-go="tasks">مهام الوكيل</button>
         <button type="button" data-go="reminders">المواعيد</button>
         <button type="button" data-go="company/delta/sources">مصادر البيانات</button>
         <a href="demo/index.html" target="_blank" rel="noopener">فتح في صفحة كاملة ↗</a>
@@ -420,14 +464,14 @@
     </div>
     <div class="tips">
       <div class="tip"><b>ماذا لو:</b> افتح «النيل للمقاولات» ← «توقعات النقدية»، وحرّك «تأخير التحصيل» لـ 2، وشوف النقدية بتخلص إمتى.</div>
-      <div class="tip"><b>المساعد:</b> اسأل «إيه أكبر المخاطر؟» أو «اعمل تقرير PDF». الردود في الديمو جاهزة مسبقاً، والبرنامج الحقيقي بيشتغل بـ Claude.</div>
+      <div class="tip"><b>الوكيل:</b> اكتب «حلل الإيرادات والمصروفات وارسمها» أو «إيه أكبر المخاطر؟» أو «اعمل تقرير PDF». الردود في الديمو جاهزة مسبقاً، والبرنامج الحقيقي بيشتغل بـ Claude.</div>
       <div class="tip"><b>English:</b> اضغط زرار «English» فوق، والواجهة كلها هتقلب لليسار.</div>
       <div class="tip"><b>القفل:</b> من الإعدادات اضغط «اقفل الآن»، والرقم السري التجريبي <code>1234</code>.</div>
     </div>
   </section>
 
   <section class="slide" id="ideas">
-    <div class="eyebrow">17 · Next</div>
+    <div class="eyebrow">20 · Next</div>
     <h2>اقتراحات للمرحلة الجاية</h2>
     <div class="ideas">
       <div class="idea"><div class="tag">COST</div><h3>محلل المصروفات</h3><p>يكتشف الاشتراكات المكررة والموردين اللي أسعارهم زادت عن المتوسط، ويقترح توفير بالأرقام.</p></div>
@@ -442,11 +486,11 @@
   </section>
 
   <section class="slide" id="start">
-    <div class="eyebrow">18 · Getting started</div>
+    <div class="eyebrow">21 · Getting started</div>
     <h2>إزاي نشغّله</h2>
     <ol class="steps">
       <li><span>على سيرفر Inno: <code>cd apps/inno-server &amp;&amp; cp .env.example .env</code>، وحط التوكنات، وبعدين <code>docker compose up -d</code>.</span></li>
-      <li><span>في GitHub Secrets: ضيف <code>INNO_SERVER_URL</code> و<code>INNO_PUBLISH_TOKEN</code>، واعمل <code>git tag azim-v0.2.0</code>، فالمثبّتات بتتبني وتترفع لوحدها.</span></li>
+      <li><span>في GitHub Secrets: ضيف <code>INNO_SERVER_URL</code> و<code>INNO_PUBLISH_TOKEN</code>، واعمل commit فيه <code>[release]</code>، فالمثبّتات بتتبني وتترفع على GitHub Releases لوحدها.</span></li>
       <li><span>ثبّت البرنامج على جهاز أحمد، وحط مفتاح Claude، واربط السيرفر من الإعدادات.</span></li>
       <li><span>ضيف الشركات واسحب الملفات، أو حدد مجلد المراقبة واربط قواعد البيانات.</span></li>
       <li><span>اعمل حسابات للمحاسبين، وفعّل التقرير الشهري، والقفل، والنسخ الاحتياطي.</span></li>
@@ -459,7 +503,7 @@
 
 <nav class="nav" aria-label="التنقل بين الشرائح">
   <button type="button" id="next" aria-label="الشريحة التالية">↓</button>
-  <span class="count" id="count">1 / 19</span>
+  <span class="count" id="count">1 / 22</span>
   <button type="button" id="prev" aria-label="الشريحة السابقة">↑</button>
 </nav>
 

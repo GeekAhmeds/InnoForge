@@ -6,6 +6,9 @@ import { toast } from '../src/components/Toast'
 import { RISING_IS_BAD } from '@shared/forecast'
 import type {
   ActivityItem,
+  AgentTask,
+  ChartSpec,
+  Memory,
   Alert,
   Budget,
   ChatConversation,
@@ -178,6 +181,23 @@ const connectors: Connector[] = [
     ]
   },
   {
+    id: 'con-pos',
+    companyId: 'delta',
+    name: 'فروع البيع — InnoForge POS',
+    type: 'innopos',
+    config: { host: '192.168.1.20', port: 7790, username: 'azim', deviceId: 'azim-demo' },
+    hasSecret: true,
+    allowAi: true,
+    refreshMinutes: 30,
+    lastRunAt: ago(0.2),
+    lastError: null,
+    datasets: [
+      { id: 'ds-p1', connectorId: 'con-pos', name: 'المؤشرات الشهرية (أرباح وخسائر)', query: '{"preset":"monthly_pl","months":12}', mode: 'metrics', documentId: null, lastRows: 63, updatedAt: ago(0.2) },
+      { id: 'ds-p2', connectorId: 'con-pos', name: 'المبيعات اليومية', query: '{"report":"sales_by_day","range":"last_90_days"}', mode: 'table', documentId: null, lastRows: 90, updatedAt: ago(0.2) },
+      { id: 'ds-p3', connectorId: 'con-pos', name: 'أعمار الديون', query: '{"report":"aging"}', mode: 'table', documentId: null, lastRows: 41, updatedAt: ago(0.2) }
+    ]
+  },
+  {
     id: 'con-2',
     companyId: 'horizon',
     name: 'Odoo ERP',
@@ -198,6 +218,16 @@ const users: ServerUser[] = [
   { id: 'u3', name: 'مجلس الإدارة', role: 'viewer', companies: null, disabled: false, createdAt: ago(600), lastSeen: ago(100) }
 ]
 
+const memories: Memory[] = [
+  { id: 'mem-1', companyId: 'delta', content: 'السنة المالية لمصنع الدلتا بتبدأ في يوليو', createdAt: ago(300) },
+  { id: 'mem-2', companyId: null, content: 'أحمد عاوز التقارير بالعربي، والملخص التنفيذي في الأول، والأرقام بالمليون', createdAt: ago(200) }
+]
+
+const tasks: AgentTask[] = [
+  { id: 'task-1', name: 'مراجعة النقدية الأسبوعية', prompt: 'راجع النقدية والمستحقات لكل الشركات، وقارن بالأسبوع اللي فات، وطلّع أي خطر محتاج تدخل، وارسم رسم للنقدية.', companyId: null, schedule: 'weekly', time: '08:00', weekday: 0, dayOfMonth: 1, emails: ['ahmed@delta-foods.com'], whatsapp: ['+201001234567'], enabled: true, conversationId: null, lastRunAt: ago(30), lastStatus: 'ok' },
+  { id: 'task-2', name: 'تقرير مبيعات الفروع اليومي', prompt: 'اسحب مبيعات امبارح من InnoForge POS لمصنع الدلتا، وقارنها بنفس اليوم الأسبوع اللي فات، وابعت ملخص قصير.', companyId: 'delta', schedule: 'daily', time: '09:30', weekday: 0, dayOfMonth: 1, emails: [], whatsapp: ['+201001234567'], enabled: true, conversationId: null, lastRunAt: ago(6), lastStatus: 'ok' }
+]
+
 const schedules = new Map<string, ReportSchedule>([
   ['delta', { companyId: 'delta', enabled: true, dayOfMonth: 3, emails: ['ahmed@delta-foods.com', 'board@delta-foods.com'], whatsapp: ['+201001234567'], language: 'ar', format: 'pdf', aiSummary: true, lastPeriodSent: LAST, lastError: null }]
 ])
@@ -207,11 +237,13 @@ let settings: Settings = {
   theme: (params.get('theme') as Settings['theme']) ?? 'system',
   activeProvider: 'anthropic',
   providers: {
-    anthropic: { enabled: true, model: 'claude-opus-5-5', baseUrl: '', hasKey: true },
-    openai: { enabled: false, model: 'gpt-5', baseUrl: '', hasKey: false },
-    gemini: { enabled: false, model: 'gemini-2.5-pro', baseUrl: '', hasKey: false },
-    ollama: { enabled: true, model: 'qwen3:14b', baseUrl: 'http://localhost:11434/v1', hasKey: false }
+    anthropic: { enabled: true, model: 'claude-opus-5-5', fastModel: 'claude-haiku-5-5', baseUrl: '', hasKey: true },
+    openai: { enabled: false, model: 'gpt-5', fastModel: '', baseUrl: '', hasKey: false },
+    gemini: { enabled: true, model: 'gemini-2.5-pro', fastModel: 'gemini-2.5-flash', baseUrl: '', hasKey: true },
+    ollama: { enabled: true, model: 'qwen3:14b', fastModel: '', baseUrl: 'http://localhost:11434/v1', hasKey: false },
+    compatible: { enabled: false, model: 'deepseek-chat', fastModel: '', baseUrl: 'https://api.deepseek.com/v1', hasKey: false }
   },
+  agent: { fallback: true, effort: 'high', webSearch: true, maxSteps: 40 },
   autoOrganize: true,
   ocrLanguages: 'ara+eng',
   serverUrl: 'http://196.221.144.94:9991',
@@ -276,7 +308,7 @@ function companyDashboard(cid: string): CompanyDashboard | null {
 const conversations: ChatConversation[] = []
 const messages: ChatMessage[] = []
 
-function cannedAnswer(text: string, lang: 'ar' | 'en'): { steps: ToolStep[]; answer: string; report?: Report } {
+function cannedAnswer(text: string, lang: 'ar' | 'en'): { steps: ToolStep[]; answer: string; report?: Report; charts?: ChartSpec[]; table?: { title: string; columns: string[]; rows: (string | number | null)[][] } } {
   const q = text.toLowerCase()
   const step = (name: string, summary: string): ToolStep => ({ name, input: {}, ok: true, summary })
   const delta = metrics.filter((m) => m.companyId === 'delta')
@@ -294,6 +326,30 @@ function cannedAnswer(text: string, lang: 'ar' | 'en'): { steps: ToolStep[]; ans
           ? `جهّزت التقرير ✅\n\n**أهم النقاط:**\n- الإيرادات ${fmt(val('revenue', LAST))} جنيه مقابل ${fmt(val('revenue', prev))} الشهر اللي فات.\n- صافي الربح ${fmt(val('net_profit', LAST))} جنيه.\n- المصروفات أعلى من الموازنة في بند الكهرباء، وفيه قرار مفتوح (الطاقة الشمسية) محتاج مراجعة.\n- التوقع: النقدية مستقرة لمدة 12 شهر حتى لو التحصيل اتأخر شهر.\n\nالتقرير فيه ملخص تنفيذي، وجداول المؤشرات، والموازنة مقابل الفعلي، وتوقع النقدية، والمواعيد الجاية.`
           : `Your report is ready ✅\n\n- Revenue ${fmt(val('revenue', LAST))} vs ${fmt(val('revenue', prev))} last month.\n- Net profit ${fmt(val('net_profit', LAST))}.\n- Expenses above budget on electricity; the open solar-panel decision is due for review.\n- Cash stays positive for 12 months even with a one-month collection delay.`,
       report
+    }
+  }
+  if (/حلل|تحليل|رسم|chart|analy|قارن|compare/.test(q)) {
+    const series = (cid: string, m: string): number[] => MONTHS.map((p) => metrics.find((x) => x.companyId === cid && x.metric === m && x.period === p)!.value)
+    const margin = companies.filter((c) => c.currency === 'EGP').map((c) => {
+      const r = series(c.id, 'revenue').slice(-6).reduce((a, b) => a + b, 0)
+      const e = series(c.id, 'expenses').slice(-6).reduce((a, b) => a + b, 0)
+      return Math.round(((r - e) / r) * 1000) / 10
+    })
+    return {
+      steps: [step('get_metrics', '216 metric values'), step('run_analysis', 'analysis done'), step('create_chart', 'chart: الإيرادات الشهرية'), step('create_chart', 'chart: هامش الربح'), step('show_table', 'table: ملخص 6 شهور (2 rows)')],
+      answer:
+        lang === 'ar'
+          ? `حللت آخر 12 شهر لشركتين بالجنيه:\n\n- **مصنع الدلتا** بينمو بمعدل **${(profiles.delta.g * 100).toFixed(1)}% شهرياً** وهامشه مستقر.\n- **النيل للمقاولات** إيراداتها ثابتة تقريباً، بس المصروفات بتزيد أسرع، فالهامش بيقل كل شهر. لو الاتجاه ده كمل، هتوصل لنقطة التعادل خلال 5-6 شهور.\n\n**التوصية:** مراجعة عقود الموردين في النيل ووقف أي زيادة في التكاليف الثابتة.`
+          : `12-month analysis (EGP companies): Delta grows ~${(profiles.delta.g * 100).toFixed(1)}%/month with a stable margin; Nile's costs grow faster than revenue, so its margin shrinks every month.`,
+      charts: [
+        { type: 'line', title: lang === 'ar' ? 'الإيرادات الشهرية' : 'Monthly revenue', labels: MONTHS, series: companies.filter((c) => c.currency === 'EGP').map((c) => ({ name: c.name, values: series(c.id, 'revenue') })), unit: 'EGP' },
+        { type: 'bar', title: lang === 'ar' ? 'هامش الربح — آخر 6 شهور' : 'Profit margin — last 6 months', labels: companies.filter((c) => c.currency === 'EGP').map((c) => c.name), series: [{ name: lang === 'ar' ? 'الهامش' : 'Margin', values: margin }], unit: '%' }
+      ],
+      table: {
+        title: lang === 'ar' ? 'ملخص آخر 6 شهور' : 'Last 6 months',
+        columns: lang === 'ar' ? ['الشركة', 'الإيرادات', 'المصروفات', 'الهامش %'] : ['Company', 'Revenue', 'Expenses', 'Margin %'],
+        rows: companies.filter((c) => c.currency === 'EGP').map((c, i) => [c.name, series(c.id, 'revenue').slice(-6).reduce((a, b) => a + b, 0), series(c.id, 'expenses').slice(-6).reduce((a, b) => a + b, 0), margin[i]])
+      }
     }
   }
   if (/ماذا لو|لو |what if|تأخر|delay|سيناريو|scenario|نقدية|cash/.test(q)) {
@@ -315,7 +371,7 @@ function cannedAnswer(text: string, lang: 'ar' | 'en'): { steps: ToolStep[]; ans
 }
 
 async function simulateChat(conversationId: string, text: string): Promise<ChatMessage> {
-  const { steps, answer, report } = cannedAnswer(text, settings.language)
+  const { steps, answer, report, charts, table } = cannedAnswer(text, settings.language)
   for (const s of steps) {
     await new Promise((r) => setTimeout(r, 450))
     emit('chat:event', { type: 'tool', conversationId, step: s } satisfies ChatEvent)
@@ -332,7 +388,11 @@ async function simulateChat(conversationId: string, text: string): Promise<ChatM
     provider: 'anthropic',
     model: 'claude-opus-5-5',
     toolSteps: steps,
-    attachments: report ? [{ type: 'report', id: report.id, name: report.title, path: report.path }] : [],
+    attachments: [
+      ...(charts ?? []).map((chart) => ({ type: 'chart' as const, id: id('ch'), name: chart.title, chart })),
+      ...(table ? [{ type: 'table' as const, id: id('tb'), name: table.title, table: { columns: table.columns, rows: table.rows } }] : []),
+      ...(report ? [{ type: 'report' as const, id: report.id, name: report.title, path: report.path }] : [])
+    ],
     createdAt: nowIso()
   }
   messages.push(msg)
@@ -468,7 +528,8 @@ const api: AzimApi = {
         whatsapp: { ...settings.whatsapp, ...patch.whatsapp },
         lock: { ...settings.lock, ...patch.lock },
         backup: { ...settings.backup, ...patch.backup },
-        reminderRecipients: { ...settings.reminderRecipients, ...patch.reminderRecipients }
+        reminderRecipients: { ...settings.reminderRecipients, ...patch.reminderRecipients },
+        agent: { ...settings.agent, ...patch.agent }
       }
       return structuredClone(settings)
     },
@@ -602,6 +663,34 @@ const api: AzimApi = {
     create: async () => ({ path: 'AzimCommand-Backup.azimbak', size: 184_000_000 }),
     runNow: async () => 'AzimCommand-Backup.azimbak',
     restore: async () => false
+  },
+  agent: {
+    listModels: async (p) => (p === 'anthropic' ? ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] : ['model-a', 'model-b']),
+    memories: () => ok(memories),
+    forget: async (mid) => {
+      memories.splice(memories.findIndex((m) => m.id === mid), 1)
+      changed('memories')
+    },
+    tasks: () => ok(tasks),
+    saveTask: async (t) => {
+      const x = tasks.find((y) => y.id === t.id)
+      if (x) Object.assign(x, t)
+      else tasks.push({ id: id('task'), companyId: null, schedule: 'weekly', time: '08:00', weekday: 0, dayOfMonth: 1, emails: [], whatsapp: [], enabled: true, conversationId: null, lastRunAt: null, lastStatus: null, ...t } as AgentTask)
+      changed('tasks')
+      return structuredClone(x ?? tasks[tasks.length - 1])
+    },
+    removeTask: async (tid) => {
+      tasks.splice(tasks.findIndex((t) => t.id === tid), 1)
+      changed('tasks')
+    },
+    runTask: async (tid) => {
+      const x = tasks.find((t) => t.id === tid)!
+      await new Promise((r) => setTimeout(r, 1200))
+      x.lastRunAt = nowIso()
+      x.lastStatus = 'ok'
+      changed('tasks')
+      return 'ok'
+    }
   },
   sync: {
     status: async () => ({ state: 'ok', lastSyncAt: settings.lastSyncAt }),

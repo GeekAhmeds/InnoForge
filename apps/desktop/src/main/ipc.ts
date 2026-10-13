@@ -5,7 +5,8 @@ import { importFiles, reprocess } from './ingest'
 import { SUPPORTED_EXTENSIONS } from './ingest/extractors'
 import { getCompanyDashboard, getOverview, runChecks, search } from './insights'
 import * as chat from './ai/chat'
-import { complete } from './ai/providers'
+import { complete, listModels } from './ai/providers'
+import * as agent from './ai/agent'
 import { getSettings, setApiKey, setSecret, updateSettings, type SettingsPatch } from './settings'
 import { getSyncStatus, startSync, syncNow } from './sync'
 import { checkForUpdates, getUpdateStatus, installUpdate } from './updater'
@@ -256,6 +257,14 @@ export function registerIpc(): void {
     await backup.applyRestore(staging)
     return true
   })
+
+  h('ai:listModels', (_, provider: ProviderId) => listModels(provider))
+  h('memories:list', () => agent.listMemories())
+  h('memories:remove', (_, id: string) => agent.forget(id))
+  h('tasks:list', () => agent.listTasks())
+  h('tasks:save', (_, t) => agent.saveTask(t))
+  h('tasks:remove', (_, id: string) => agent.deleteTask(id))
+  h('tasks:run', (_, id: string) => agent.runTask(id))
 
   h('sync:status', () => getSyncStatus())
   h('sync:now', () => syncNow())

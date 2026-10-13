@@ -1,5 +1,14 @@
 // One agent loop per provider. Each speaks its provider's native message
 // format; the rest of the app only sees AgentRequest / AgentResult.
+//
+// How models are connected:
+//  - anthropic   Claude through the official SDK (API key)
+//  - openai      OpenAI through the official SDK (API key, optional base URL)
+//  - gemini      Google Gemini through @google/genai (API key)
+//  - ollama      a local model (Ollama / LM Studio) through its OpenAI-compatible API
+//  - compatible  any OpenAI-compatible service: OpenRouter, DeepSeek, Groq, vLLM...
+// If the active provider fails and fallback is on, the next enabled provider
+// answers instead, so the agent keeps working when one service is down.
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { GoogleGenAI, type Content, type Part } from '@google/genai'
@@ -36,6 +45,10 @@ export interface AgentRequest {
   onTool?: (step: ToolStep) => void
   signal?: AbortSignal
   maxSteps?: number
+  /** Background work (filing, scheduled tasks) uses each provider's fast model. */
+  fast?: boolean
+  /** Allow Claude's server-side web search for this request. */
+  webSearch?: boolean
 }
 
 export interface AgentResult {
@@ -47,43 +60,105 @@ export interface AgentResult {
 
 export class AiNotConfiguredError extends Error {}
 
+const ORDER: ProviderId[] = ['anthropic', 'openai', 'gemini', 'compatible', 'ollama']
+
+function usable(id: ProviderId): boolean {
+  const p = getSettings().providers[id]
+  if (!p.enabled || !p.model) return false
+  return id === 'ollama' || !!getApiKey(id)
+}
+
 export function activeProvider(): { id: ProviderId; model: string } {
   const s = getSettings()
   const p = s.providers[s.activeProvider]
   if (!p.enabled) throw new AiNotConfiguredError(`Provider ${s.activeProvider} is disabled. Enable it in Settings.`)
-  if (s.activeProvider !== 'ollama' && !getApiKey(s.activeProvider)) {
-    throw new AiNotConfiguredError(`No API key set for ${s.activeProvider}. Add it in Settings.`)
-  }
+  if (!usable(s.activeProvider)) throw new AiNotConfiguredError(`No API key or model set for ${s.activeProvider}. Add it in Settings.`)
   return { id: s.activeProvider, model: p.model }
 }
 
+/** The active provider first, then (with fallback on) the other usable ones. */
+function candidates(): ProviderId[] {
+  const s = getSettings()
+  activeProvider() // throws a clear message if the active one is not set up
+  if (!s.agent.fallback) return [s.activeProvider]
+  return [s.activeProvider, ...ORDER.filter((id) => id !== s.activeProvider && usable(id))]
+}
+
+function modelFor(id: ProviderId, fast: boolean): string {
+  const p = getSettings().providers[id]
+  return (fast && p.fastModel) || p.model
+}
+
+// Errors worth retrying on another provider: network, rate limits, outages, auth.
+function retryable(e: unknown): boolean {
+  if ((e as Error)?.name === 'AbortError') return false
+  const status = (e as { status?: number }).status
+  return status === undefined || status === 401 || status === 403 || status === 408 || status === 429 || status >= 500
+}
+
 export async function runAgent(req: AgentRequest): Promise<AgentResult> {
-  const { id, model } = activeProvider()
+  const list = candidates()
+  let lastError: unknown
+  for (const id of list) {
+    try {
+      return await runWith(id, modelFor(id, !!req.fast), req)
+    } catch (e) {
+      lastError = e
+      if (!retryable(e) || req.signal?.aborted) throw e
+    }
+  }
+  throw lastError
+}
+
+function runWith(id: ProviderId, model: string, req: AgentRequest): Promise<AgentResult> {
+  const s = getSettings()
   switch (id) {
     case 'anthropic':
       return runAnthropic(req, model)
     case 'gemini':
       return runGemini(req, model)
     case 'openai':
-      return runOpenAICompatible(req, 'openai', model, getApiKey('openai'), getSettings().providers.openai.baseUrl || undefined)
+      return runOpenAICompatible(req, 'openai', model, getApiKey('openai'), s.providers.openai.baseUrl || undefined)
+    case 'compatible':
+      return runOpenAICompatible(req, 'compatible', model, getApiKey('compatible'), s.providers.compatible.baseUrl)
     case 'ollama':
-      return runOpenAICompatible(
-        req,
-        'ollama',
-        model,
-        getApiKey('ollama') || 'ollama',
-        getSettings().providers.ollama.baseUrl || 'http://localhost:11434/v1'
-      )
+      return runOpenAICompatible(req, 'ollama', model, getApiKey('ollama') || 'ollama', s.providers.ollama.baseUrl || 'http://localhost:11434/v1')
   }
 }
 
-/** Single-shot completion without tools (used for organizing files). */
-export async function complete(system: string, user: string): Promise<string> {
-  const res = await runAgent({ system, history: [], user, tools: [], exec: async () => ({ content: '', ok: false, summary: '' }) })
+/** Single-shot completion without tools (summaries, classification). */
+export async function complete(system: string, user: string, fast = true): Promise<string> {
+  const res = await runAgent({ system, history: [], user, tools: [], fast, exec: async () => ({ content: '', ok: false, summary: '' }) })
   return res.text
 }
 
-const MAX_STEPS = 24
+/** Models the provider offers, for the model picker in Settings. */
+export async function listModels(id: ProviderId): Promise<string[]> {
+  const s = getSettings().providers[id]
+  switch (id) {
+    case 'anthropic': {
+      const client = new Anthropic({ apiKey: getApiKey('anthropic') })
+      const out: string[] = []
+      for await (const m of client.models.list()) out.push(m.id)
+      return out
+    }
+    case 'gemini': {
+      const ai = new GoogleGenAI({ apiKey: getApiKey('gemini') })
+      const out: string[] = []
+      for await (const m of await ai.models.list()) if (m.name) out.push(m.name.replace(/^models\//, ''))
+      return out
+    }
+    default: {
+      const baseURL = s.baseUrl || (id === 'ollama' ? 'http://localhost:11434/v1' : undefined)
+      const client = new OpenAI({ apiKey: getApiKey(id) || 'none', baseURL })
+      const out: string[] = []
+      for await (const m of client.models.list()) out.push(m.id)
+      return out.sort()
+    }
+  }
+}
+
+const MAX_STEPS = 40
 
 function step(name: string, input: unknown, out: ToolOutcome): ToolStep {
   return { name, input, ok: out.ok, summary: out.summary }
@@ -99,6 +174,8 @@ async function runTool(req: AgentRequest, name: string, input: unknown): Promise
   req.onTool?.(step(name, input, out))
   return out
 }
+
+const maxSteps = (req: AgentRequest): number => req.maxSteps ?? getSettings().agent.maxSteps ?? MAX_STEPS
 
 // ---------------- Claude (Anthropic) ----------------
 
@@ -116,21 +193,24 @@ async function runAnthropic(req: AgentRequest, model: string): Promise<AgentResu
   }
   messages.push({ role: 'user', content: req.user })
   const turnStart = messages.length
-  const tools: Anthropic.Beta.BetaTool[] = req.tools.map((t) => ({
+  const tools: Anthropic.Beta.BetaToolUnion[] = req.tools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema
   }))
+  if (req.webSearch && getSettings().agent.webSearch) {
+    tools.push({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 })
+  }
 
   let text = ''
-  for (let i = 0; i < (req.maxSteps ?? MAX_STEPS); i++) {
+  for (let i = 0; i < maxSteps(req); i++) {
     const stream = client.beta.messages.stream(
       {
         model,
         max_tokens: 64000,
         system: req.system,
         thinking: { type: 'adaptive' },
-        output_config: { effort: 'high' },
+        output_config: { effort: req.fast ? 'low' : getSettings().agent.effort },
         // Route around refusals server-side instead of failing the turn.
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
@@ -145,6 +225,11 @@ async function runAnthropic(req: AgentRequest, model: string): Promise<AgentResu
     })
     const message = await stream.finalMessage()
     messages.push({ role: 'assistant', content: message.content as Anthropic.Beta.BetaContentBlockParam[] })
+    for (const block of message.content) {
+      if (block.type === 'server_tool_use' && block.name === 'web_search') {
+        req.onTool?.({ name: 'web_search', input: block.input, ok: true, summary: String((block.input as { query?: string }).query ?? '') })
+      }
+    }
 
     if (message.stop_reason === 'refusal') {
       text += '\n\n(The model declined this request.)'
@@ -165,7 +250,7 @@ async function runAnthropic(req: AgentRequest, model: string): Promise<AgentResu
   return { text: text.trim(), provider: 'anthropic', model, native: messages.slice(turnStart) }
 }
 
-// ---------------- OpenAI and OpenAI-compatible (Ollama, LM Studio) ----------------
+// ---------------- OpenAI and OpenAI-compatible (Ollama, OpenRouter, ...) ----------------
 
 async function runOpenAICompatible(
   req: AgentRequest,
@@ -184,11 +269,8 @@ async function runOpenAICompatible(
   }))
 
   let text = ''
-  for (let i = 0; i < (req.maxSteps ?? MAX_STEPS); i++) {
-    const res = await client.chat.completions.create(
-      { model, messages, tools: tools.length ? tools : undefined },
-      { signal: req.signal }
-    )
+  for (let i = 0; i < maxSteps(req); i++) {
+    const res = await client.chat.completions.create({ model, messages, tools: tools.length ? tools : undefined }, { signal: req.signal })
     const msg = res.choices[0]?.message
     if (!msg) break
     if (msg.content) {
@@ -229,7 +311,7 @@ async function runGemini(req: AgentRequest, model: string): Promise<AgentResult>
   }))
 
   let text = ''
-  for (let i = 0; i < (req.maxSteps ?? MAX_STEPS); i++) {
+  for (let i = 0; i < maxSteps(req); i++) {
     const res = await ai.models.generateContent({
       model,
       contents,

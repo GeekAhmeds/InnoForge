@@ -122,6 +122,15 @@ const api: AzimApi = {
     runNow: () => invoke('backup:runNow'),
     restore: (password) => invoke('backup:restore', password)
   },
+  agent: {
+    listModels: (provider) => invoke('ai:listModels', provider),
+    memories: () => invoke('memories:list'),
+    forget: (id) => invoke('memories:remove', id),
+    tasks: () => invoke('tasks:list'),
+    saveTask: (t) => invoke('tasks:save', t),
+    removeTask: (id) => invoke('tasks:remove', id),
+    runTask: (id) => invoke('tasks:run', id)
+  },
   sync: {
     status: () => invoke('sync:status'),
     now: () => invoke('sync:now'),

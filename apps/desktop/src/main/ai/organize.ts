@@ -28,7 +28,8 @@ Be efficient: do not read more than you need. Reply with one short line when don
     user: `Document id: ${doc.id}\nFile name: ${doc.name}\nKind: ${doc.kind}\nCurrent guess: category=${doc.category}, period=${doc.period ?? 'unknown'}\nSheets: ${JSON.stringify(sheets)}\nPreview: ${doc.summary}`,
     tools: TOOLS.filter((t) => ORGANIZE_TOOLS.includes(t.name)),
     exec: (name, input) => executeTool(name, input, ctx),
-    maxSteps: 8
+    maxSteps: 8,
+    fast: true
   })
   logActivity(doc.companyId, 'ai', `AI organized ${doc.name}`)
 }

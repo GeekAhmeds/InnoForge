@@ -30,7 +30,7 @@ export function canCall(channel: string): boolean {
   if (role === 'owner' || role === 'admin') return true
   if (channel.startsWith('lock:') || channel.startsWith('sync:') || channel.startsWith('updates:') || channel.startsWith('app:')) return true
   if (channel === 'settings:update') return true // language/theme; sensitive keys are filtered in ipc.ts
-  if (channel.startsWith('chat:') || channel.startsWith('connectors:') || channel.startsWith('accounts:') || channel.startsWith('backup:') || channel.startsWith('schedule:')) {
+  if (channel.startsWith('chat:') || channel.startsWith('ai:') || channel.startsWith('memories:') || channel.startsWith('tasks:') || channel.startsWith('connectors:') || channel.startsWith('accounts:') || channel.startsWith('backup:') || channel.startsWith('schedule:')) {
     return false
   }
   if (!MUTATING.test(channel)) return true

@@ -10,11 +10,13 @@ const DEFAULTS: Settings = {
   theme: 'system',
   activeProvider: 'anthropic',
   providers: {
-    anthropic: { enabled: true, model: 'claude-opus-5-5', baseUrl: '', hasKey: false },
-    openai: { enabled: false, model: 'gpt-5', baseUrl: '', hasKey: false },
-    gemini: { enabled: false, model: 'gemini-2.5-pro', baseUrl: '', hasKey: false },
-    ollama: { enabled: false, model: 'qwen3:14b', baseUrl: 'http://localhost:11434/v1', hasKey: false }
+    anthropic: { enabled: true, model: 'claude-opus-5-5', fastModel: 'claude-haiku-5-5', baseUrl: '', hasKey: false },
+    openai: { enabled: false, model: 'gpt-5', fastModel: '', baseUrl: '', hasKey: false },
+    gemini: { enabled: false, model: 'gemini-2.5-pro', fastModel: 'gemini-2.5-flash', baseUrl: '', hasKey: false },
+    ollama: { enabled: false, model: 'qwen3:14b', fastModel: '', baseUrl: 'http://localhost:11434/v1', hasKey: false },
+    compatible: { enabled: false, model: '', fastModel: '', baseUrl: 'https://openrouter.ai/api/v1', hasKey: false }
   },
+  agent: { fallback: true, effort: 'high', webSearch: true, maxSteps: 40 },
   autoOrganize: true,
   ocrLanguages: 'ara+eng',
   serverUrl: DEFAULT_SERVER_URL,
@@ -53,6 +55,7 @@ export function getSettings(): Settings {
     smtp: { ...DEFAULTS.smtp, ...stored.smtp, hasPassword: !!getSecret('smtp') },
     whatsapp: { ...DEFAULTS.whatsapp, ...stored.whatsapp, hasToken: !!getSecret('whatsapp') },
     reminderRecipients: { ...DEFAULTS.reminderRecipients, ...stored.reminderRecipients },
+    agent: { ...DEFAULTS.agent, ...stored.agent },
     lock: { ...DEFAULTS.lock, ...stored.lock, hasPin: !!getSecret('pin') },
     backup: { ...DEFAULTS.backup, ...stored.backup, hasPassword: !!getSecret('backup') }
   }
@@ -74,7 +77,8 @@ export function updateSettings(patch: SettingsPatch): Settings {
     whatsapp: { ...current.whatsapp, ...patch.whatsapp },
     lock: { ...current.lock, ...patch.lock },
     backup: { ...current.backup, ...patch.backup },
-    reminderRecipients: { ...current.reminderRecipients, ...patch.reminderRecipients }
+    reminderRecipients: { ...current.reminderRecipients, ...patch.reminderRecipients },
+    agent: { ...current.agent, ...patch.agent }
   }
   for (const id of Object.keys(patch.providers ?? {}) as ProviderId[]) {
     next.providers[id] = { ...current.providers[id], ...patch.providers![id] }

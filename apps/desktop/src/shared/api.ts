@@ -10,6 +10,8 @@ import type {
   Reminder,
   ReportSchedule,
   ServerUser,
+  AgentTask,
+  Memory,
   ChatConversation,
   ChatEvent,
   ChatMessage,
@@ -29,7 +31,8 @@ import type {
 } from './types'
 import type { HistoryPoint } from './forecast'
 
-export type SettingsPatch = Partial<Omit<Settings, 'providers' | 'smtp' | 'whatsapp' | 'lock' | 'backup' | 'reminderRecipients'>> & {
+export type SettingsPatch = Partial<Omit<Settings, 'providers' | 'smtp' | 'whatsapp' | 'lock' | 'backup' | 'reminderRecipients' | 'agent'>> & {
+  agent?: Partial<Settings['agent']>
   providers?: Partial<Record<ProviderId, Partial<Settings['providers'][ProviderId]>>>
   smtp?: Partial<Settings['smtp']>
   whatsapp?: Partial<Settings['whatsapp']>
@@ -156,6 +159,15 @@ export interface AzimApi {
     create(password: string): Promise<{ path: string; size: number } | null>
     runNow(): Promise<string | null>
     restore(password: string): Promise<boolean>
+  }
+  agent: {
+    listModels(provider: ProviderId): Promise<string[]>
+    memories(): Promise<Memory[]>
+    forget(id: string): Promise<void>
+    tasks(): Promise<AgentTask[]>
+    saveTask(t: Partial<AgentTask> & { name: string; prompt: string }): Promise<AgentTask>
+    removeTask(id: string): Promise<void>
+    runTask(id: string): Promise<string>
   }
   sync: {
     status(): Promise<SyncStatus>

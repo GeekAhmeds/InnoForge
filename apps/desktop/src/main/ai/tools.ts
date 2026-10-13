@@ -10,6 +10,10 @@ import { listReminders, saveReminder } from '../reminders'
 import { getConnector, listConnectors, runQuery } from '../connectors'
 import { getSchedule, sendMonthlyReport } from '../monthly'
 import { BASE_SCENARIO, type Scenario } from '@shared/forecast'
+import { cleanChartSpec } from '@shared/chart-svg'
+import { runAnalysis } from '../sandbox'
+import { forget, listMemories, listTasks, remember, saveTask } from './agent'
+import { randomUUID } from 'crypto'
 import type { ChatAttachment, Reminder, Severity } from '@shared/types'
 import type { ToolDef, ToolOutcome } from './providers'
 
@@ -20,6 +24,19 @@ export interface ToolContext {
 
 const str = { type: 'string' }
 const companyIdProp = { type: 'string', description: 'Company id (from list_companies).' }
+const chartSchema = {
+  type: 'object',
+  description: 'A chart. labels = x-axis categories; each series has one value per label. Use line/area for trends over time, bar for comparing categories, stacked_bar for parts of a total over time, horizontal_bar for ranking long names, donut only for shares of one total with at most 6 parts.',
+  properties: {
+    type: { type: 'string', enum: ['bar', 'line', 'area', 'stacked_bar', 'horizontal_bar', 'donut'] },
+    title: str,
+    subtitle: str,
+    labels: { type: 'array', items: str },
+    series: { type: 'array', items: { type: 'object', properties: { name: str, values: { type: 'array', items: { type: ['number', 'null'] } } }, required: ['name', 'values'] } },
+    unit: { type: 'string', description: 'e.g. EGP, %, units' }
+  },
+  required: ['type', 'title', 'labels', 'series']
+}
 
 export const TOOLS: ToolDef[] = [
   {
@@ -245,7 +262,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'query_connector',
     description:
-      'Run a read-only query on a live company data source (database or accounting system) that the user allowed for AI. SQL connectors take a single SELECT; Odoo takes JSON {"model","domain","fields","limit"}; REST takes a path. Call with no query to list the available connectors.',
+      'Run a read-only query on a live company data source (database or accounting system) that the user allowed for AI. SQL connectors take a single SELECT; Odoo takes JSON {"model","domain","fields","limit"}; REST takes a path; InnoForge POS takes JSON {"report": id, "range": "today|this_month|last_month|last_30_days|last_90_days|ytd|last_12_months"} (ids: sales_by_day, invoices, sales_by_product, sales_by_category, sales_by_customer, sales_by_payment, sales_by_hour, returns, tax, profit_loss, stock_valuation, low_stock, slow_movers, purchases_by_supplier, supplier_balances, customer_balances, aging, collections, installments_due, expenses_by_category, treasury) or {"call": "reports.dashboard"} — amounts come back in major currency units. Call with no query to list the available connectors.',
     input_schema: { type: 'object', properties: { connector_id: str, query: str, company_id: companyIdProp } }
   },
   {
@@ -255,9 +272,83 @@ export const TOOLS: ToolDef[] = [
     input_schema: { type: 'object', properties: { company_id: companyIdProp, period: { type: 'string', description: 'YYYY-MM, default last month' } }, required: ['company_id'] }
   },
   {
+    name: 'create_chart',
+    description:
+      'Draw a chart in the chat for the user (it is rendered interactively under your answer). Use it whenever numbers are easier to see than to read: trends, comparisons between companies, breakdowns. Only plot numbers you got from the data.',
+    input_schema: chartSchema as ToolDef['input_schema']
+  },
+  {
+    name: 'show_table',
+    description: 'Show a data table in the chat (sortable, exportable to Excel by the user). Use for detailed figures; keep your text answer for the insight.',
+    input_schema: {
+      type: 'object',
+      properties: { title: str, columns: { type: 'array', items: str }, rows: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } } },
+      required: ['title', 'columns', 'rows']
+    }
+  },
+  {
+    name: 'run_analysis',
+    description: `Run JavaScript in an isolated sandbox to analyze data precisely (sums, growth, pivots, correlations, regressions, forecasts, outliers). Load inputs by reference instead of copying numbers:
+- {"name":"sales","document_id":"…","sheet":"…"} → rows of a spreadsheet/CSV/database/connector table as objects keyed by column
+- {"name":"m","metrics_company_id":"…"} → rows {metric, period, value}
+- {"name":"b","budget_company_id":"…"} → rows {metric, period, budget, actual, variance, variancePct}
+The code is the body of an async function with (data, h, console); return a JSON-serializable result. h has: num, sum, mean, median, min, max, std, percentile, groupBy, sumBy, pivot, pctChange, corr, linreg, movingAvg, top, round. No network or file access.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        inputs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { name: str, document_id: str, sheet: str, metrics_company_id: str, budget_company_id: str },
+            required: ['name']
+          }
+        },
+        code: { type: 'string', description: 'Function body, e.g. const byMonth = h.sumBy(data.sales, r => String(r.date).slice(0,7), "amount"); return byMonth' }
+      },
+      required: ['code']
+    }
+  },
+  {
+    name: 'remember',
+    description:
+      "Save a durable fact or preference for future conversations (e.g. \"Delta's fiscal year starts in July\", \"Ahmed wants reports in Arabic with an executive summary first\"). Only things that will matter later.",
+    input_schema: { type: 'object', properties: { content: str, company_id: companyIdProp }, required: ['content'] }
+  },
+  {
+    name: 'forget_memory',
+    description: 'Delete a saved memory by id (when it is wrong or outdated).',
+    input_schema: { type: 'object', properties: { memory_id: str }, required: ['memory_id'] }
+  },
+  {
+    name: 'schedule_task',
+    description:
+      'Create a recurring task you will run on your own, e.g. "every Monday 8:00 review cash and receivables for all companies and send me a summary". The prompt is what you will be asked each time. Results go to a chat and optionally to email/WhatsApp recipients the user named.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: str,
+        prompt: str,
+        company_id: companyIdProp,
+        schedule: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
+        time: { type: 'string', description: 'HH:MM, 24h local time' },
+        weekday: { type: 'number', description: '0=Sunday … 6=Saturday (weekly)' },
+        day_of_month: { type: 'number', description: '1-28 (monthly)' },
+        emails: { type: 'array', items: str },
+        whatsapp: { type: 'array', items: str }
+      },
+      required: ['name', 'prompt', 'schedule']
+    }
+  },
+  {
+    name: 'list_tasks',
+    description: 'List the recurring tasks already scheduled.',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
     name: 'generate_report',
     description:
-      'Generate a professional report file (PDF, Excel or Word) in Arabic or English. Provide the full content: sections with paragraphs, bullet lists and tables. Numbers must come from the data you read. Returns the saved file path; the user gets a button to open it.',
+      'Generate a professional report file (PDF, Excel or Word) in Arabic or English. Provide the full content: sections with paragraphs, bullet lists, tables and charts (a section can carry one chart). Numbers must come from the data you read. Returns the saved file path; the user gets a button to open it.',
     input_schema: {
       type: 'object',
       properties: {
@@ -281,7 +372,8 @@ export const TOOLS: ToolDef[] = [
                   rows: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } }
                 },
                 required: ['columns', 'rows']
-              }
+              },
+              chart: chartSchema
             },
             required: ['heading']
           }
@@ -568,9 +660,86 @@ export async function executeTool(name: string, input: Record<string, unknown>, 
       ctx.attachments.push({ type: 'report', id: report.id, name: report.title, path: report.path })
       return errors.length ? fail(errors.join('; ')) : ok(`Sent to ${[...sched.emails, ...sched.whatsapp].join(', ')}`, 'monthly report sent')
     }
+    case 'create_chart': {
+      const chart = cleanChartSpec(input)
+      ctx.attachments.push({ type: 'chart', id: randomUUID(), name: chart.title, chart })
+      return ok('Chart shown to the user.', `chart: ${chart.title}`)
+    }
+    case 'show_table': {
+      const columns = Array.isArray(input.columns) ? (input.columns as unknown[]).map(String) : []
+      const rows = Array.isArray(input.rows) ? (input.rows as unknown[][]).slice(0, 2000) : []
+      if (!columns.length) return fail('columns are required')
+      ctx.attachments.push({
+        type: 'table',
+        id: randomUUID(),
+        name: s(input.title) ?? 'Table',
+        table: { columns, rows: rows.map((r) => columns.map((_, i) => (r[i] === undefined ? null : (r[i] as string | number | null)))) }
+      })
+      return ok('Table shown to the user.', `table: ${s(input.title) ?? ''} (${rows.length} rows)`)
+    }
+    case 'run_analysis': {
+      const code = s(input.code)
+      if (!code) return fail('code is required')
+      const data: Record<string, unknown[]> = {}
+      for (const inp of (Array.isArray(input.inputs) ? input.inputs : []) as Record<string, unknown>[]) {
+        const name = s(inp.name) ?? `input${Object.keys(data).length + 1}`
+        if (s(inp.document_id)) {
+          const t = repo.getDocumentTable(String(inp.document_id), s(inp.sheet))
+          if (!t) return fail(`no table data in document ${inp.document_id}`)
+          data[name] = t.rows.map((r) => Object.fromEntries(t.columns.map((c, i) => [c, r[i]])))
+        } else if (s(inp.metrics_company_id)) {
+          data[name] = repo.listMetrics({ companyId: String(inp.metrics_company_id) }).map((m) => ({ metric: m.metric, period: m.period, value: m.value }))
+        } else if (s(inp.budget_company_id)) {
+          data[name] = budgetVsActual(String(inp.budget_company_id))
+        }
+      }
+      const { result, logs } = await runAnalysis(code, data)
+      const text = JSON.stringify({ result, logs })
+      return ok(text.length > 60_000 ? text.slice(0, 60_000) + '…(truncated)' : text, 'analysis done')
+    }
+    case 'remember': {
+      const content = s(input.content)
+      if (!content) return fail('content is required')
+      const m = remember(content, s(input.company_id) ?? null)
+      return ok({ id: m.id }, `remembered: ${content.slice(0, 60)}`)
+    }
+    case 'forget_memory': {
+      forget(String(input.memory_id ?? ''))
+      return ok('Forgotten.', 'memory removed')
+    }
+    case 'schedule_task': {
+      const name = s(input.name)
+      const prompt = s(input.prompt)
+      if (!name || !prompt) return fail('name and prompt are required')
+      const t = saveTask({
+        name,
+        prompt,
+        companyId: s(input.company_id) ?? ctx.companyId ?? null,
+        schedule: (['daily', 'weekly', 'monthly'].includes(String(input.schedule)) ? input.schedule : 'weekly') as 'daily' | 'weekly' | 'monthly',
+        time: s(input.time) ?? '08:00',
+        weekday: n(input.weekday, 0),
+        dayOfMonth: n(input.day_of_month, 1),
+        emails: Array.isArray(input.emails) ? (input.emails as unknown[]).map(String) : [],
+        whatsapp: Array.isArray(input.whatsapp) ? (input.whatsapp as unknown[]).map(String) : []
+      })
+      return ok({ id: t.id }, `scheduled: ${name} (${t.schedule} ${t.time})`)
+    }
+    case 'list_tasks': {
+      const list = listTasks()
+      return ok(list.map((t) => ({ id: t.id, name: t.name, schedule: t.schedule, time: t.time, enabled: t.enabled, last_run: t.lastRunAt })), `${list.length} tasks`)
+    }
     case 'generate_report': {
       const spec = input as unknown as ReportSpec
       if (!spec.title || !Array.isArray(spec.sections)) return fail('title and sections are required')
+      for (const sec of spec.sections) {
+        if (sec.chart) {
+          try {
+            sec.chart = cleanChartSpec(sec.chart)
+          } catch {
+            delete sec.chart
+          }
+        }
+      }
       spec.companyId = companyArg(input, ctx) ?? null
       const report = await generateReport(spec)
       ctx.attachments.push({ type: 'report', id: report.id, name: report.title, path: report.path })

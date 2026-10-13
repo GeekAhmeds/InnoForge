@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useT, formatDate } from '../i18n'
+import { useLive } from '../hooks'
 import { toast } from '../components/Toast'
 import { AccountsSection, MessagingSection, SecuritySection } from './settings/Sections'
 import type { SettingsPatch } from '@shared/api'
@@ -9,7 +10,18 @@ const PROVIDERS: { id: ProviderId; name: string; models: string[]; needsKey: boo
   { id: 'anthropic', name: 'Claude (Anthropic)', models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], needsKey: true, hasBaseUrl: false },
   { id: 'openai', name: 'OpenAI', models: ['gpt-5', 'gpt-5-mini'], needsKey: true, hasBaseUrl: true },
   { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], needsKey: true, hasBaseUrl: false },
+  { id: 'compatible', name: 'OpenAI-compatible (OpenRouter, DeepSeek, Groq, vLLM…)', models: [], needsKey: true, hasBaseUrl: true },
   { id: 'ollama', name: 'Local model (Ollama / LM Studio)', models: ['qwen3:14b', 'llama3.1:8b', 'gpt-oss:20b'], needsKey: false, hasBaseUrl: true }
+]
+
+// Base URLs for the OpenAI-compatible slot.
+const COMPATIBLE_PRESETS: [string, string][] = [
+  ['OpenRouter', 'https://openrouter.ai/api/v1'],
+  ['DeepSeek', 'https://api.deepseek.com/v1'],
+  ['Groq', 'https://api.groq.com/openai/v1'],
+  ['Together', 'https://api.together.xyz/v1'],
+  ['LM Studio', 'http://localhost:1234/v1'],
+  ['vLLM', 'http://localhost:8000/v1']
 ]
 
 export function SettingsPage(props: { settings: Settings; onChange: (s: Settings) => void; companies: Company[]; admin: boolean }): React.JSX.Element {
@@ -20,6 +32,8 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [testing, setTesting] = useState(false)
+  const [models, setModels] = useState<Record<string, string[]>>({})
+  const [memories, reloadMemories] = useLive(() => window.azim.agent.memories(), [], ['memories'])
 
   useEffect(() => {
     window.azim.app.version().then(setVersion)
@@ -134,10 +148,14 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
                   <label>{t.model}</label>
                   <input className="input" list={`models-${p.id}`} value={ps.model} onChange={(e) => patchProvider(p.id, { model: e.target.value })} />
                   <datalist id={`models-${p.id}`}>
-                    {p.models.map((m) => (
+                    {[...new Set([...p.models, ...(models[p.id] ?? [])])].map((m) => (
                       <option key={m} value={m} />
                     ))}
                   </datalist>
+                </div>
+                <div className="field">
+                  <label>{t.fastModel}</label>
+                  <input className="input" list={`models-${p.id}`} value={ps.fastModel} onChange={(e) => patchProvider(p.id, { fastModel: e.target.value })} />
                 </div>
                 {p.needsKey && (
                   <div className="field">
@@ -164,13 +182,38 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
                   </div>
                 )}
               </div>
+              {p.id === 'compatible' && (
+                <div className="row" style={{ flexWrap: 'wrap', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{t.presets}:</span>
+                  {COMPATIBLE_PRESETS.map(([name, url]) => (
+                    <button key={name} className={`btn sm ${ps.baseUrl === url ? 'primary' : ''}`} onClick={() => patchProvider(p.id, { baseUrl: url })}>
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                className="btn sm"
+                style={{ marginBottom: 8 }}
+                onClick={async () => {
+                  try {
+                    const list = await window.azim.agent.listModels(p.id)
+                    setModels((m) => ({ ...m, [p.id]: list }))
+                    toast(`✓ ${list.length}`)
+                  } catch (e) {
+                    toast(`✗ ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`)
+                  }
+                }}
+              >
+                {t.listModels}
+              </button>
               {p.hasBaseUrl && (
                 <div className="field">
                   <label>{t.baseUrl}</label>
                   <input
                     className="input"
                     dir="ltr"
-                    placeholder={p.id === 'openai' ? 'https://api.openai.com/v1' : 'http://localhost:11434/v1'}
+                    placeholder={p.id === 'openai' ? 'https://api.openai.com/v1' : p.id === 'compatible' ? 'https://openrouter.ai/api/v1' : 'http://localhost:11434/v1'}
                     value={ps.baseUrl}
                     onChange={(e) => patchProvider(p.id, { baseUrl: e.target.value })}
                   />
@@ -191,6 +234,58 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
         >
           {testing ? '…' : t.test}
         </button>
+      </div>
+
+      <div className="card settings-section">
+        <h3>{t.agentSettings}</h3>
+        <label className="check">
+          <input type="checkbox" checked={s.agent.fallback} onChange={(e) => patch({ agent: { fallback: e.target.checked } })} />
+          {t.fallback}
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={s.agent.webSearch} onChange={(e) => patch({ agent: { webSearch: e.target.checked } })} />
+          {t.webSearch}
+        </label>
+        <div className="row">
+          <div className="field">
+            <label>{t.effort}</label>
+            <select className="input" value={s.agent.effort} onChange={(e) => patch({ agent: { effort: e.target.value as Settings['agent']['effort'] } })}>
+              {(['low', 'medium', 'high', 'xhigh', 'max'] as const).map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>{t.maxSteps}</label>
+            <input className="input" type="number" min={4} max={100} value={s.agent.maxSteps} onChange={(e) => patch({ agent: { maxSteps: Number(e.target.value) || 40 } })} />
+          </div>
+        </div>
+        <h3 style={{ marginTop: 12 }}>{t.memories}</h3>
+        <p style={{ color: 'var(--ink-2)', fontSize: 13, marginTop: 0 }}>{t.memoriesHint}</p>
+        {!memories?.length && <div className="empty">{t.noData}</div>}
+        <div className="list">
+          {(memories ?? []).map((m) => (
+            <div className="list-item" key={m.id}>
+              <div style={{ flex: 1 }}>
+                {m.content}
+                <div className="meta">
+                  {m.companyId ? props.companies.find((c) => c.id === m.companyId)?.name : t.allCompanies} · {formatDate(m.createdAt, lang)}
+                </div>
+              </div>
+              <button
+                className="btn ghost sm danger"
+                onClick={async () => {
+                  await window.azim.agent.forget(m.id)
+                  reloadMemories()
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="card settings-section">

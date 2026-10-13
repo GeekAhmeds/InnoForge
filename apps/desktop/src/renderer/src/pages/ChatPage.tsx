@@ -4,9 +4,12 @@ import remarkGfm from 'remark-gfm'
 import { CheckCircle2, FileSpreadsheet, FileText, FileType, Plus, Send, Square, Trash2, Wrench, XCircle } from 'lucide-react'
 import { useLive } from '../hooks'
 import { useT } from '../i18n'
+import { ChatChart, ChatTable } from '../components/ChatVisuals'
 import type { ChatConversation, ChatMessage, Company, ToolStep } from '@shared/types'
 
 const ICONS = { pdf: FileText, xlsx: FileSpreadsheet, docx: FileType } as const
+
+const STEP_LABELS: Record<string, string> = { run_analysis: '🧮', create_chart: '📊', show_table: '📋', web_search: '🌐', generate_report: '📄', remember: '🧠', schedule_task: '⏱' }
 
 export function ChatPage(props: { companies: Company[]; initialCompanyId: string | null; initialPrompt?: string }): React.JSX.Element {
   const { t } = useT()
@@ -43,7 +46,7 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
   }, [])
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth' })
+    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [messages, streaming, steps])
 
   const send = async (text: string): Promise<void> => {
@@ -189,7 +192,7 @@ function Steps({ steps }: { steps: ToolStep[] }): React.JSX.Element | null {
       {steps.map((s, i) => (
         <div key={i} className={`tool-step ${s.ok ? '' : 'fail'}`}>
           {s.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-          <Wrench size={12} /> <code>{s.name}</code> — {s.summary}
+          {STEP_LABELS[s.name] ?? <Wrench size={12} />} <code>{s.name}</code> — {s.summary}
         </div>
       ))}
     </div>
@@ -209,9 +212,18 @@ function Message({ m }: { m: ChatMessage }): React.JSX.Element {
         ) : (
           m.content
         )}
-        {m.attachments.length > 0 && (
+        {m.attachments
+          .filter((a) => a.type === 'chart' || a.type === 'table')
+          .map((a) =>
+            a.type === 'chart' && a.chart ? (
+              <ChatChart key={a.id} spec={a.chart} />
+            ) : a.table ? (
+              <ChatTable key={a.id} title={a.name} columns={a.table.columns} rows={a.table.rows} />
+            ) : null
+          )}
+        {m.attachments.some((a) => a.type === 'report') && (
           <div className="attachments">
-            {m.attachments.map((a) => {
+            {m.attachments.filter((a) => a.type === 'report').map((a) => {
               const ext = (a.path?.split('.').pop() ?? 'pdf') as keyof typeof ICONS
               const Icon = ICONS[ext] ?? FileText
               return (

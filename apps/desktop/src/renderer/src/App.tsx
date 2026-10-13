@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Building2, CalendarClock, FileText, LayoutDashboard, Lock, MessageSquare, Plus, Search, Settings as SettingsIcon, RefreshCw, Download } from 'lucide-react'
+import { Bot, Building2, CalendarClock, FileText, LayoutDashboard, Lock, MessageSquare, Plus, Search, Settings as SettingsIcon, RefreshCw, Download } from 'lucide-react'
 import { dictionaries, LangContext } from './i18n'
 import { useLive } from './hooks'
 import { Overview } from './pages/Overview'
@@ -12,6 +12,7 @@ import { Palette } from './components/Palette'
 import { ToastHost } from './components/Toast'
 import { LockScreen } from './components/LockScreen'
 import { RemindersPage } from './pages/RemindersPage'
+import { TasksPage } from './pages/TasksPage'
 import { APP_DEVELOPER, type Company, type Role, type Settings, type SyncStatus, type UpdateStatus } from '@shared/types'
 
 export type Route =
@@ -20,13 +21,14 @@ export type Route =
   | { page: 'chat'; companyId?: string | null; prompt?: string }
   | { page: 'reports' }
   | { page: 'reminders' }
+  | { page: 'tasks' }
   | { page: 'settings' }
 
 // Deep links like #company/<id>/<tab>, #chat, #reminders (used by the docs demo).
 function routeFromHash(): Route {
   const [page, id, tab] = location.hash.replace(/^#/, '').split('/')
   if (page === 'company' && id) return { page: 'company', companyId: id, tab }
-  if (page === 'chat' || page === 'reports' || page === 'reminders' || page === 'settings') return { page }
+  if (page === 'chat' || page === 'reports' || page === 'reminders' || page === 'tasks' || page === 'settings') return { page }
   return { page: 'overview' }
 }
 
@@ -110,6 +112,11 @@ export default function App(): React.JSX.Element {
           {admin && (
             <button className={`nav-item ${isActive('chat') ? 'active' : ''}`} onClick={() => nav({ page: 'chat' })}>
               <MessageSquare size={17} /> {t.chat}
+            </button>
+          )}
+          {admin && (
+            <button className={`nav-item ${isActive('tasks') ? 'active' : ''}`} onClick={() => nav({ page: 'tasks' })}>
+              <Bot size={17} /> {t.agentTasks}
             </button>
           )}
           <button className={`nav-item ${isActive('reminders') ? 'active' : ''}`} onClick={() => nav({ page: 'reminders' })}>
@@ -218,6 +225,7 @@ export default function App(): React.JSX.Element {
             )}
             {route.page === 'chat' && <ChatPage companies={companies ?? []} initialCompanyId={route.companyId ?? null} initialPrompt={route.prompt} />}
             {route.page === 'reports' && <ReportsPage companies={companies ?? []} />}
+            {route.page === 'tasks' && <TasksPage companies={companies ?? []} onOpenChat={(companyId) => nav({ page: 'chat', companyId })} />}
             {route.page === 'reminders' && <RemindersPage companies={companies ?? []} canEdit={role !== 'viewer'} />}
             {route.page === 'settings' && <SettingsPage settings={settings} onChange={setSettings} companies={companies ?? []} admin={admin} />}
           </div>

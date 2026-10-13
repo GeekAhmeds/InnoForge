@@ -222,6 +222,33 @@ function migrate(d: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    -- What the agent should remember across conversations.
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      company_id TEXT,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    -- Recurring jobs the agent runs on its own (weekly cash review, ...).
+    CREATE TABLE IF NOT EXISTS agent_tasks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      company_id TEXT,
+      schedule TEXT NOT NULL DEFAULT 'weekly',
+      time TEXT NOT NULL DEFAULT '08:00',
+      weekday INTEGER NOT NULL DEFAULT 0,
+      day_of_month INTEGER NOT NULL DEFAULT 1,
+      emails TEXT NOT NULL DEFAULT '[]',
+      whatsapp TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      conversation_id TEXT,
+      last_run_at TEXT,
+      last_status TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS datasets (
       id TEXT PRIMARY KEY,
       connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,

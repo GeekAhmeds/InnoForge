@@ -98,11 +98,12 @@ export interface ActivityItem {
   createdAt: string
 }
 
-export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'ollama'
+export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'ollama' | 'compatible'
 
 export interface ProviderSettings {
   enabled: boolean
   model: string
+  fastModel: string // cheaper model for background work (filing clerk, scheduled tasks); '' = same model
   baseUrl: string // used by ollama / OpenAI-compatible servers
   hasKey: boolean // keys never leave the main process
 }
@@ -120,6 +121,12 @@ export interface Settings {
   theme: Theme
   activeProvider: ProviderId
   providers: Record<ProviderId, ProviderSettings>
+  agent: {
+    fallback: boolean // try the other enabled providers if the active one fails
+    effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' // Claude reasoning effort
+    webSearch: boolean // Claude may search the web (exchange rates, tax rules...)
+    maxSteps: number
+  }
   autoOrganize: boolean // let the AI classify every imported file
   ocrLanguages: string // tesseract languages, e.g. "ara+eng"
   serverUrl: string // sync + update server
@@ -185,7 +192,7 @@ export interface ReportSchedule {
   lastError: string | null
 }
 
-export type ConnectorType = 'postgres' | 'mysql' | 'mssql' | 'sqlite' | 'odoo' | 'rest'
+export type ConnectorType = 'innoerp' | 'innopos' | 'postgres' | 'mysql' | 'mssql' | 'sqlite' | 'odoo' | 'rest'
 
 export interface Connector {
   id: string
@@ -232,11 +239,49 @@ export interface ChatConversation {
   updatedAt: string
 }
 
+export type ChartType = 'bar' | 'line' | 'area' | 'stacked_bar' | 'horizontal_bar' | 'donut'
+
+/** A chart the agent draws: shown in chat and embedded in reports. */
+export interface ChartSpec {
+  type: ChartType
+  title: string
+  subtitle?: string
+  labels: string[] // x-axis categories (periods, products, companies...)
+  series: { name: string; values: (number | null)[] }[]
+  unit?: string // EGP, %, units...
+}
+
 export interface ChatAttachment {
-  type: 'report' | 'document'
+  type: 'report' | 'document' | 'chart' | 'table'
   id: string
   name: string
   path?: string
+  chart?: ChartSpec
+  table?: { columns: string[]; rows: (string | number | null)[][] }
+}
+
+export interface Memory {
+  id: string
+  companyId: string | null
+  content: string
+  createdAt: string
+}
+
+export interface AgentTask {
+  id: string
+  name: string
+  prompt: string
+  companyId: string | null
+  schedule: 'daily' | 'weekly' | 'monthly'
+  time: string // HH:MM local
+  weekday: number // 0-6 for weekly
+  dayOfMonth: number // 1-28 for monthly
+  emails: string[]
+  whatsapp: string[]
+  enabled: boolean
+  conversationId: string | null
+  lastRunAt: string | null
+  lastStatus: string | null
 }
 
 export interface ChatMessage {
