@@ -126,8 +126,24 @@ docker compose up -d --build
 > ⚠️ السيرفر شغال على HTTP. قبل ما تحط عليه داتا مالية حقيقية، حط قدامه HTTPS (Caddy أو nginx مع دومين).
 
 ## إصدار نسخة جديدة
-1. في GitHub Secrets ضيف `INNO_SERVER_URL` و`INNO_PUBLISH_TOKEN`، عشان التحديث يوصل للبرامج المتثبتة.
-2. زوّد `version` في `apps/desktop/package.json`، واعمل commit فيه `[release]` في الرسالة (أو `git tag azim-v0.3.0`). الـ Actions بيبني Windows وLinux، ويعمل الإصدار `azim-v<version>` على GitHub Releases، ويرفعه على سيرفر Inno. البادئة `azim-v` عشان ماتتلخبطش مع إصدارات منتجات Inno التانية.
+1. زوّد `version` في `apps/desktop/package.json`، واعمل commit فيه `[release]` في الرسالة (أو `git tag azim-v0.3.0`).
+2. الـ Actions بيبني Windows وLinux، ويعمل الإصدار `azim-v<version>` على GitHub Releases ومعاه ملفات التحديث (`latest*.yml`).
+   - الإصدار **مش بيتعلم «Latest»**. العلامة دي بتاعة InnoForge POS، لأن سيرفر الـ POS بيسحب أي نسخة عليها.
+   - البادئة `azim-v` عشان ماتتلخبطش مع إصدارات منتجات Inno التانية.
+
+### توصيل التحديث للبرامج المتثبتة (نفس طريقة الـ POS)
+سيرفر inno هو اللي **بيسحب** آخر نسخة `azim-v*` من GitHub كل 10 دقايق، ومش محتاج أي secrets على GitHub. مرة واحدة على السيرفر:
+
+```bash
+sudo bash /opt/inno/apps/inno-server/deploy/azim-updates-sync.sh --install
+sudo nano /etc/azim-updates.env   # INNO_PUBLISH_TOKEN = نفس اللي في .env بتاع السيرفر
+sudo azim-updates-sync            # أول مرة دلوقتي — بعد كده لوحده
+```
+
+- اللوج: `journalctl -u azim-updates`.
+- لنسخة معيّنة: `sudo TAG=azim-v0.4.1 azim-updates-sync`.
+- لو السيرفر شايف GitHub بس GitHub مش شايف السيرفر، الطريقة دي هي اللي تنفع.
+- (اختياري: الطريقة القديمة بالرفع من GitHub نفسه بالـ secrets `INNO_SERVER_URL` و`INNO_PUBLISH_TOKEN` لسه شغالة.)
 
 المثبّتات: https://github.com/GeekAhmeds/InnoForge/releases
 

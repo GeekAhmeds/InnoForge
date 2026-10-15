@@ -1,9 +1,11 @@
 # Build installers and publish them. Azim Command tags are prefixed so they
 # never clash with other Inno products in this repo (e.g. pos-v*):
 #   git tag azim-v0.2.0 && git push origin azim-v0.2.0
-# Installers are attached to a GitHub Release and uploaded to the Inno server
-# (set repository secrets INNO_SERVER_URL and INNO_PUBLISH_TOKEN), where every
-# running copy of the app picks them up automatically.
+# Installers and update manifests are attached to a GitHub Release (never
+# marked "Latest", which belongs to the POS). The Inno server pulls the newest
+# azim-v* release every 10 minutes (apps/inno-server/deploy/azim-updates-sync.sh),
+# the same way the POS update server works, so no secrets are needed here.
+# Optional push instead: set INNO_SERVER_URL and INNO_PUBLISH_TOKEN secrets.
 name: Release desktop app
 
 # Also runs for a push to an azim branch whose commit message contains
@@ -74,7 +76,14 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: Azim Command ${{ steps.ver.outputs.tag }}
+          # Never take the repo's "Latest" badge: the POS update server pulls
+          # whatever release is "Latest" (apps/license-server/deploy/updates-sync.sh).
+          make_latest: false
+          # The update manifests and blockmaps let the Inno server pull a release
+          # (apps/inno-server/deploy/azim-updates-sync.sh) without any secrets here.
           files: |
             apps/desktop/dist/*.exe
+            apps/desktop/dist/*.exe.blockmap
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb
+            apps/desktop/dist/latest*.yml
