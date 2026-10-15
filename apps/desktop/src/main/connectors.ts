@@ -11,7 +11,7 @@ import { dataChanged } from './events'
 import * as repo from './repo'
 import { decrypt, encrypt } from './settings'
 import { runChecks } from './insights'
-import { INNOPOS_DATASETS, innoPosQuery, newDeviceId } from './connectors-inno'
+import { INNOPOS_DATASETS, innoErpDefaultDatasets, innoErpQuery, innoPosQuery, newDeviceId } from './connectors-inno'
 import type { Connector, ConnectorType, Dataset } from '@shared/types'
 
 type Row = Record<string, any>
@@ -68,7 +68,6 @@ export function saveConnector(
   const ts = now()
   const existing = input.id ? (d.prepare('SELECT * FROM connectors WHERE id = ?').get(input.id) as Row | undefined) : undefined
   const id = existing?.id ?? uid()
-  if (input.type === 'innoerp') throw new Error('Inno Source ERP integration is not available yet')
   if (input.type === 'innopos') {
     // The POS identifies each connected computer by a stable id.
     const previous = existing ? (JSON.parse(existing.config) as Record<string, unknown>) : {}
@@ -180,7 +179,7 @@ export async function runQuery(c: Connector, query: string): Promise<QueryResult
   const password = secretOf(c.id)
   switch (c.type) {
     case 'innoerp':
-      throw new Error('Inno Source ERP integration is not available yet')
+      return innoErpQuery(c, password, query)
     case 'innopos':
       return innoPosQuery(c, password, query)
     case 'postgres': {
@@ -287,7 +286,7 @@ export async function testConnector(id: string): Promise<{ ok: boolean; message:
   const c = getConnector(id)
   if (!c) return { ok: false, message: 'not found' }
   const probe: Record<ConnectorType, string> = {
-    innoerp: '',
+    innoerp: '{"call":"me"}',
     innopos: '{"call":"reports.catalog"}',
     postgres: 'SELECT 1 AS ok',
     mysql: 'SELECT 1 AS ok',
@@ -298,6 +297,13 @@ export async function testConnector(id: string): Promise<{ ok: boolean; message:
   }
   try {
     const r = await runQuery(c, probe[c.type])
+    if (c.type === 'innoerp') {
+      // First successful test: one dataset per catalog entry the key may read.
+      const added = c.datasets.length ? [] : await innoErpDefaultDatasets(c, secretOf(c.id))
+      for (const ds of added) saveDataset({ connectorId: c.id, ...ds })
+      const keyName = r.rows.find((x) => x[0] === 'key.name')?.[1]
+      return { ok: true, message: `OK${keyName ? ` — ${keyName}` : ''}${added.length ? ` · ${added.length} datasets` : ''}` }
+    }
     return { ok: true, message: `OK (${r.rows.length} rows)` }
   } catch (e) {
     return { ok: false, message: (e as Error).message }

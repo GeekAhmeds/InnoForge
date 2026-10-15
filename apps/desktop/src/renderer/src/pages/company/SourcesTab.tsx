@@ -6,6 +6,7 @@ import { toast } from '../../components/Toast'
 import type { Company, Connector, ConnectorType, Dataset } from '@shared/types'
 
 const TYPES: { type: ConnectorType; name: string; fields: string[]; example: string }[] = [
+  { type: 'innoerp', name: 'Inno Source ERP', fields: ['url', 'companyId'], example: '{"dataset":"sales_invoices","range":"last_90_days"}' },
   { type: 'innopos', name: 'InnoForge POS (Inno Source)', fields: ['host', 'port', 'username'], example: '{"report":"sales_by_day","range":"last_30_days"}' },
   { type: 'mssql', name: 'SQL Server', fields: ['host', 'port', 'database', 'user'], example: 'SELECT FORMAT(InvoiceDate, \'yyyy-MM\') AS period, SUM(Total) AS revenue FROM Invoices GROUP BY FORMAT(InvoiceDate, \'yyyy-MM\')' },
   { type: 'postgres', name: 'PostgreSQL', fields: ['host', 'port', 'database', 'user'], example: "SELECT to_char(date, 'YYYY-MM') AS period, sum(amount) AS revenue FROM invoices GROUP BY 1" },
@@ -25,7 +26,8 @@ function ConnectorForm({ companyId, initial, onClose }: { companyId: string; ini
   const [posKey, setPosKey] = useState('')
   const [posPin, setPosPin] = useState('')
   const pos = c.type === 'innopos'
-  const labels: Record<string, string> = { host: pos ? t.posHost : t.host, port: t.port, username: t.posUser, database: t.database, user: t.user, file: t.file, url: t.url, headerName: t.headerName }
+  const erp = c.type === 'innoerp'
+  const labels: Record<string, string> = { companyId: t.erpCompanyId, host: pos ? t.posHost : t.host, port: t.port, username: t.posUser, database: t.database, user: t.user, file: t.file, url: t.url, headerName: t.headerName }
   return (
     <div className="modal-bg" onClick={onClose}>
       <form
@@ -71,7 +73,7 @@ function ConnectorForm({ companyId, initial, onClose }: { companyId: string; ini
               <input
                 className="input"
                 dir="ltr"
-                placeholder={f === 'port' ? { mssql: '1433', postgres: '5432', mysql: '3306', innopos: '7790' }[c.type as string] : f === 'headerName' ? 'Authorization' : f === 'host' && pos ? '192.168.1.10' : ''}
+                placeholder={erp && f === 'url' ? 'https://erp.example.com/api/data/v1' : f === 'port' ? { mssql: '1433', postgres: '5432', mysql: '3306', innopos: '7790' }[c.type as string] : f === 'headerName' ? 'Authorization' : f === 'host' && pos ? '192.168.1.10' : ''}
                 value={String(c.config?.[f] ?? '')}
                 onChange={(e) => setC({ ...c, config: { ...c.config, [f]: e.target.value } })}
               />
@@ -107,10 +109,11 @@ function ConnectorForm({ companyId, initial, onClose }: { companyId: string; ini
         )}
         {c.type !== 'sqlite' && !pos && (
           <div className="field">
-            <label>{c.type === 'rest' ? t.headerName + ' — value' : t.password}</label>
+            <label>{c.type === 'rest' ? t.headerName + ' — value' : erp ? t.apiKey : t.password}</label>
             <input className="input" type="password" dir="ltr" placeholder={c.hasSecret ? '••••••••' : ''} value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
         )}
+        {erp && <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 10 }}>{t.innoErpHint}</div>}
         {(c.type === 'postgres' || c.type === 'mssql') && (
           <label className="check">
             <input
@@ -267,16 +270,20 @@ export function SourcesTab({ company }: { company: Company }): React.JSX.Element
         </button>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t.readOnlyHint}</span>
       </div>
-      <div className="card inno-soon" style={{ marginBottom: 14 }}>
-        <div className="row">
-          <Database size={18} color="var(--muted)" />
-          <strong>Inno Source ERP</strong>
-          <span className="chip" dir="ltr">innovationsrc.com</span>
-          <div className="spacer" />
-          <span className="pill">{t.notYet}</span>
+      {!list?.some((c) => c.type === 'innoerp') && (
+        <div className="card inno-soon" style={{ marginBottom: 14 }}>
+          <div className="row">
+            <Database size={18} color="var(--accent)" />
+            <strong>Inno Source ERP</strong>
+            <span className="chip" dir="ltr">innovationsrc.com</span>
+            <div className="spacer" />
+            <button className="btn sm primary" onClick={() => setEditing({ type: 'innoerp', name: 'Inno Source ERP', allowAi: true })}>
+              <Plus size={13} /> {t.connect}
+            </button>
+          </div>
+          <div style={{ color: 'var(--ink-2)', fontSize: 13, marginTop: 6 }}>{t.innoErpHint}</div>
         </div>
-        <div style={{ color: 'var(--ink-2)', fontSize: 13, marginTop: 6 }}>{t.innoErpSoon}</div>
-      </div>
+      )}
       {!list?.length && <div className="card empty">{t.noData}</div>}
       <div className="grid" style={{ gap: 14 }}>
         {(list ?? []).map((c) => (
