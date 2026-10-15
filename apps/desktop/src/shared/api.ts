@@ -97,7 +97,9 @@ export interface AzimApi {
     create(companyId: string | null): Promise<ChatConversation>
     remove(id: string): Promise<void>
     messages(conversationId: string): Promise<ChatMessage[]>
-    send(conversationId: string, text: string): Promise<ChatMessage>
+    /** files: local paths to attach; fileCompanyId: where to file them when the chat covers all companies */
+    send(conversationId: string, text: string, files?: string[], fileCompanyId?: string | null): Promise<ChatMessage>
+    pickFiles(): Promise<string[]>
     cancel(conversationId: string): Promise<void>
     onEvent(cb: (e: ChatEvent) => void): () => void
   }

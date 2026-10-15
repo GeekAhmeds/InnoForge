@@ -104,6 +104,7 @@ export interface ProviderSettings {
   enabled: boolean
   model: string
   fastModel: string // cheaper model for background work (filing clerk, scheduled tasks); '' = same model
+  workspaceId?: string // Claude only: needed when the API key is not scoped to a workspace
   baseUrl: string // used by ollama / OpenAI-compatible servers
   hasKey: boolean // keys never leave the main process
 }

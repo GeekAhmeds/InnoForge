@@ -5,7 +5,7 @@ import { importFiles, reprocess } from './ingest'
 import { SUPPORTED_EXTENSIONS } from './ingest/extractors'
 import { getCompanyDashboard, getOverview, runChecks, search } from './insights'
 import * as chat from './ai/chat'
-import { complete, listModels } from './ai/providers'
+import { complete, explainAiError, listModels } from './ai/providers'
 import * as agent from './ai/agent'
 import { getSettings, setApiKey, setSecret, updateSettings, type SettingsPatch } from './settings'
 import { getSyncStatus, startSync, syncNow } from './sync'
@@ -123,7 +123,20 @@ export function registerIpc(): void {
   h('chat:create', (_, companyId: string | null) => chat.createConversation(companyId))
   h('chat:remove', (_, id: string) => chat.deleteConversation(id))
   h('chat:messages', (_, id: string) => chat.listMessages(id))
-  h('chat:send', (_, id: string, text: string) => chat.sendMessage(id, text))
+  h('chat:send', (_, id: string, text: string, files?: string[], fileCompanyId?: string | null) =>
+    chat.sendMessage(id, text, { files: Array.isArray(files) ? files.filter((f) => typeof f === 'string') : [], fileCompanyId })
+  )
+  h('chat:pickFiles', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Supported files', extensions: SUPPORTED_EXTENSIONS.map((x) => x.slice(1)) },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    return r.canceled ? [] : r.filePaths
+  })
   h('chat:cancel', (_, id: string) => chat.cancel(id))
 
   h('settings:get', () => getSettings())
@@ -144,7 +157,7 @@ export function registerIpc(): void {
       const text = await complete('Reply with the single word: OK', 'ping')
       return { ok: true, message: text.slice(0, 120) || 'OK' }
     } catch (e) {
-      return { ok: false, message: (e as Error).message }
+      return { ok: false, message: explainAiError(e) }
     }
   })
 

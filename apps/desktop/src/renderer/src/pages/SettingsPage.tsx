@@ -157,6 +157,12 @@ export function SettingsPage(props: { settings: Settings; onChange: (s: Settings
                   <label>{t.fastModel}</label>
                   <input className="input" list={`models-${p.id}`} value={ps.fastModel} onChange={(e) => patchProvider(p.id, { fastModel: e.target.value })} />
                 </div>
+                {p.id === 'anthropic' && (
+                  <div className="field">
+                    <label>{t.workspaceId}</label>
+                    <input className="input" dir="ltr" placeholder="wrkspc_…" value={ps.workspaceId ?? ''} onChange={(e) => patchProvider('anthropic', { workspaceId: e.target.value.trim() })} />
+                  </div>
+                )}
                 {p.needsKey && (
                   <div className="field">
                     <label>{t.apiKey}</label>

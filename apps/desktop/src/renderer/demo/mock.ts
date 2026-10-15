@@ -515,6 +515,7 @@ const api: AzimApi = {
       return simulateChat(cid, text)
     },
     cancel: async () => undefined,
+    pickFiles: async () => [],
     onEvent: (cb) => on('chat:event', cb)
   },
   settings: {

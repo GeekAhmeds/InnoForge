@@ -59,7 +59,8 @@ const api: AzimApi = {
     create: (companyId) => invoke('chat:create', companyId),
     remove: (id) => invoke('chat:remove', id),
     messages: (id) => invoke('chat:messages', id),
-    send: (id, text) => invoke('chat:send', id, text),
+    send: (id, text, files, fileCompanyId) => invoke('chat:send', id, text, files, fileCompanyId),
+    pickFiles: () => invoke('chat:pickFiles'),
     cancel: (id) => invoke('chat:cancel', id),
     onEvent: (cb) => subscribe('chat:event', cb)
   },

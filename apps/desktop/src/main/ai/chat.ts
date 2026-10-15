@@ -1,11 +1,12 @@
 import { getDb, now, uid } from '../db'
+import { importFiles } from '../ingest'
 import * as repo from '../repo'
 import { broadcast } from '../events'
-import { runAgent, type HistoryTurn } from './providers'
+import { explainAiError, runAgent, type HistoryTurn } from './providers'
 import { executeTool, TOOLS, type ToolContext } from './tools'
 import { getSettings } from '../settings'
 import { listMemories, setTaskRunner } from './agent'
-import type { AgentTask, ChatConversation, ChatMessage, ToolStep } from '@shared/types'
+import type { AgentTask, ChatAttachment, ChatConversation, ChatMessage, DocumentRecord, ToolStep } from '@shared/types'
 
 type Row = Record<string, any>
 
@@ -122,25 +123,69 @@ How to work:
 
 const running = new Map<string, AbortController>()
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+// Files dropped into the chat are filed into the company like any import, then
+// the agent gets their ids plus a preview so it can start working right away.
+async function attachFiles(companyId: string, paths: string[]): Promise<{ docs: DocumentRecord[]; note: string }> {
+  const r = await importFiles(companyId, paths)
+  const ids = [...r.imported, ...r.existing].map((d) => d.id)
+  const load = (): DocumentRecord[] => ids.map((id) => repo.getDocument(id)).filter((d): d is DocumentRecord => !!d)
+  const deadline = Date.now() + 120_000 // OCR on a big scan can take a while
+  let docs = load()
+  while (docs.some((d) => d.status === 'pending' || d.status === 'processing') && Date.now() < deadline) {
+    await sleep(500)
+    docs = load()
+  }
+  const lines = docs.map((d) => {
+    const sheets = repo.listDocumentSheets(d.id)
+    const preview = d.status === 'ready' && !sheets.length ? repo.getDocumentText(d.id).slice(0, 3000).trim() : ''
+    return [
+      `- ${d.name} (document id: ${d.id}; kind: ${d.kind}; status: ${d.status}${d.error ? `: ${d.error}` : ''})`,
+      sheets.length ? `  sheets: ${sheets.map((s) => `${s.name} [${s.rowCount} rows: ${s.columns.slice(0, 20).join(', ')}]`).join('; ')}` : '',
+      preview ? `  text preview:\n<<<\n${preview}\n>>>` : ''
+    ]
+      .filter(Boolean)
+      .join('\n')
+  })
+  for (const f of r.failed) lines.push(`- ${f.path.split(/[\\/]/).pop()} — could not be imported: ${f.error}`)
+  const note = `[The user attached ${paths.length} file(s) to this message; they were saved to the company's documents:\n${lines.join('\n')}\nRead them with read_document / query_table / run_analysis as needed.]`
+  return { docs, note }
+}
+
 export function cancel(conversationId: string): void {
   running.get(conversationId)?.abort()
 }
 
-export async function sendMessage(conversationId: string, text: string, opts: { fast?: boolean } = {}): Promise<ChatMessage> {
+export async function sendMessage(
+  conversationId: string,
+  text: string,
+  opts: { fast?: boolean; files?: string[]; fileCompanyId?: string | null } = {}
+): Promise<ChatMessage> {
   const conv = getDb().prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId) as Row | undefined
   if (!conv) throw new Error('Conversation not found')
   const prior = history(conversationId)
+  let userText = text
+  let userAttachments: ChatAttachment[] = []
+  if (opts.files?.length) {
+    const target = conv.company_id ?? opts.fileCompanyId
+    if (!target) throw new Error('Choose the company these files belong to.')
+    const { docs, note } = await attachFiles(target, opts.files)
+    userAttachments = docs.map((d) => ({ type: 'document', id: d.id, name: d.name }))
+    userText = `${text.trim() || 'Please look at the attached file(s).'}\n\n${note}`
+  }
   insertMessage({
     conversationId,
     role: 'user',
-    content: text,
+    content: userText,
     provider: null,
     model: null,
     toolSteps: [],
-    attachments: []
+    attachments: userAttachments
   })
   if (!prior.length) {
-    getDb().prepare('UPDATE conversations SET title = ? WHERE id = ?').run(text.slice(0, 60), conversationId)
+    const title = text.trim() || userAttachments.map((a) => a.name).join(', ')
+    getDb().prepare('UPDATE conversations SET title = ? WHERE id = ?').run(title.slice(0, 60), conversationId)
   }
 
   const controller = new AbortController()
@@ -151,7 +196,7 @@ export async function sendMessage(conversationId: string, text: string, opts: { 
     const result = await runAgent({
       system: systemPrompt(conv.company_id),
       history: prior,
-      user: text,
+      user: userText,
       tools: TOOLS,
       webSearch: true,
       fast: opts.fast,
@@ -176,7 +221,7 @@ export async function sendMessage(conversationId: string, text: string, opts: { 
     broadcast('chat:event', { type: 'done', conversationId, message: msg })
     return msg
   } catch (e) {
-    const error = controller.signal.aborted ? 'Stopped.' : (e as Error).message
+    const error = controller.signal.aborted ? 'Stopped.' : explainAiError(e)
     broadcast('chat:event', { type: 'error', conversationId, error })
     // Keep the transcript well-formed: every user turn gets an answer.
     const msg = insertMessage({

@@ -49,17 +49,19 @@ async function sha256(path: string): Promise<string> {
 export interface ImportResult {
   imported: DocumentRecord[]
   duplicates: string[]
+  existing: DocumentRecord[] // the already-imported copies of the duplicates
   failed: { path: string; error: string }[]
 }
 
 export async function importFiles(companyId: string, paths: string[]): Promise<ImportResult> {
-  const result: ImportResult = { imported: [], duplicates: [], failed: [] }
+  const result: ImportResult = { imported: [], duplicates: [], existing: [], failed: [] }
   for (const path of paths) {
     try {
       const hash = await sha256(path)
       const existing = repo.findDocumentByHash(companyId, hash)
       if (existing) {
         result.duplicates.push(basename(path))
+        result.existing.push(existing)
         continue
       }
       const id = uid()

@@ -60,6 +60,28 @@ export interface AgentResult {
 
 export class AiNotConfiguredError extends Error {}
 
+// Claude client. An organization-level key (not scoped to a workspace) must
+// name the workspace to bill in the anthropic-workspace-id header.
+function claudeClient(): Anthropic {
+  const workspaceId = getSettings().providers.anthropic.workspaceId?.trim()
+  return new Anthropic({ apiKey: getApiKey('anthropic'), defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined })
+}
+
+/** Turn known provider errors into a message that says how to fix them. */
+export function explainAiError(e: unknown): string {
+  const msg = (e as Error)?.message ?? String(e)
+  if (/not scoped to a workspace|anthropic-workspace-id/i.test(msg)) {
+    return 'مفتاح Claude ده متعمل على مستوى المنظمة مش جوه workspace. الحل: اعمل مفتاح جديد من جوه workspace في Console (Settings ← Workspaces ← اختار workspace ← API Keys)، أو حط الـ Workspace ID في الإعدادات ← Claude. | This Claude API key is not scoped to a workspace: create a key inside a workspace in the Console, or enter the Workspace ID in Settings → Claude.'
+  }
+  if (/credit balance is too low|insufficient.*credit/i.test(msg)) {
+    return 'رصيد حساب Claude API خلص. اشحن من Console ← Billing، أو اربط رصيد اشتراك Max. | Your Claude API credit balance is too low: add credits in Console → Billing.'
+  }
+  if (/invalid x-api-key|authentication_error|invalid api key/i.test(msg)) {
+    return 'مفتاح الـ API غلط أو اتلغى. اعمل مفتاح جديد وحطه في الإعدادات. | The API key is invalid or revoked: create a new key and save it in Settings.'
+  }
+  return msg
+}
+
 const ORDER: ProviderId[] = ['anthropic', 'openai', 'gemini', 'compatible', 'ollama']
 
 function usable(id: ProviderId): boolean {
@@ -137,7 +159,7 @@ export async function listModels(id: ProviderId): Promise<string[]> {
   const s = getSettings().providers[id]
   switch (id) {
     case 'anthropic': {
-      const client = new Anthropic({ apiKey: getApiKey('anthropic') })
+      const client = claudeClient()
       const out: string[] = []
       for await (const m of client.models.list()) out.push(m.id)
       return out
@@ -180,7 +202,7 @@ const maxSteps = (req: AgentRequest): number => req.maxSteps ?? getSettings().ag
 // ---------------- Claude (Anthropic) ----------------
 
 async function runAnthropic(req: AgentRequest, model: string): Promise<AgentResult> {
-  const client = new Anthropic({ apiKey: getApiKey('anthropic') })
+  const client = claudeClient()
   const messages: Anthropic.Beta.BetaMessageParam[] = []
   for (const turn of req.history) {
     // Replay Claude's own turns verbatim (thinking + tool blocks) when they were

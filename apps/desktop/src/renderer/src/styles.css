@@ -273,6 +273,13 @@ td.num { text-align: end; font-variant-numeric: tabular-nums; white-space: nowra
 .suggestion { font-size: 12px; border: 1px solid var(--border); border-radius: 99px; padding: 4px 10px; cursor: pointer; background: var(--surface); }
 .suggestion:hover { border-color: var(--accent); color: var(--accent); }
 .typing { color: var(--muted); font-size: 13px; }
+.composer-files { max-width: 860px; margin: 0 auto 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.composer-files .input.sm { width: auto; padding: 3px 8px; font-size: 12px; }
+.file-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 8px; background: var(--surface); cursor: default; max-width: 260px; }
+.file-chip .btn { padding: 2px 4px; }
+.msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg-files .file-chip { cursor: pointer; padding-inline-end: 8px; }
+.chat-main.dropping { outline: 2px dashed var(--accent); outline-offset: -8px; }
 
 .chart-tip { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: var(--shadow); font-size: 12px; }
 .chart-tip .t { color: var(--ink-2); margin-bottom: 4px; }

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { CheckCircle2, FileSpreadsheet, FileText, FileType, Plus, Send, Square, Trash2, Wrench, XCircle } from 'lucide-react'
+import { CheckCircle2, File as FileIcon, FileSpreadsheet, FileText, FileType, Paperclip, Plus, Send, Square, Trash2, Wrench, X, XCircle } from 'lucide-react'
 import { useLive } from '../hooks'
 import { useT } from '../i18n'
 import { ChatChart, ChatTable } from '../components/ChatVisuals'
 import type { ChatConversation, ChatMessage, Company, ToolStep } from '@shared/types'
 
 const ICONS = { pdf: FileText, xlsx: FileSpreadsheet, docx: FileType } as const
+
+const baseName = (p: string): string => p.split(/[\\/]/).pop() ?? p
+// The user turn stores a note for the agent about attached files; hide it in the bubble.
+const visibleText = (content: string): string => content.split('\n\n[The user attached ')[0]
 
 const STEP_LABELS: Record<string, string> = { run_analysis: '🧮', create_chart: '📊', show_table: '📋', web_search: '🌐', generate_report: '📄', remember: '🧠', schedule_task: '⏱' }
 
@@ -21,6 +25,9 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
   const [streaming, setStreaming] = useState('')
   const [steps, setSteps] = useState<ToolStep[]>([])
   const [newScope, setNewScope] = useState<string | null>(props.initialCompanyId)
+  const [files, setFiles] = useState<string[]>([])
+  const [fileCompany, setFileCompany] = useState<string>('')
+  const [dragging, setDragging] = useState(false)
   const bottom = useRef<HTMLDivElement>(null)
   const activeId = useRef<string | null>(null)
   activeId.current = active?.id ?? null
@@ -49,8 +56,17 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [messages, streaming, steps])
 
+  const scopeId = active ? active.companyId : newScope
+  const addFiles = (paths: string[]): void => setFiles((f) => [...new Set([...f, ...paths.filter(Boolean)])])
+
   const send = async (text: string): Promise<void> => {
-    if (!text.trim() || busy) return
+    if ((!text.trim() && !files.length) || busy) return
+    const attached = files
+    const target = scopeId ?? (fileCompany || props.companies[0]?.id || null)
+    if (attached.length && !target) {
+      alert(t.chatNeedsCompany)
+      return
+    }
     let conv = active
     if (!conv) {
       conv = await window.azim.chat.create(newScope)
@@ -58,15 +74,26 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
       activeId.current = conv.id
     }
     setInput('')
+    setFiles([])
     setBusy(true)
     setStreaming('')
     setSteps([])
     setMessages((m) => [
       ...m,
-      { id: 'pending', conversationId: conv!.id, role: 'user', content: text, provider: null, model: null, toolSteps: [], attachments: [], createdAt: new Date().toISOString() }
+      {
+        id: 'pending',
+        conversationId: conv!.id,
+        role: 'user',
+        content: text,
+        provider: null,
+        model: null,
+        toolSteps: [],
+        attachments: attached.map((p) => ({ type: 'document' as const, id: p, name: baseName(p) })),
+        createdAt: new Date().toISOString()
+      }
     ])
     try {
-      await window.azim.chat.send(conv.id, text)
+      await window.azim.chat.send(conv.id, text, attached, target)
     } finally {
       setMessages(await window.azim.chat.messages(conv.id))
       setStreaming('')
@@ -112,7 +139,21 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
           </div>
         ))}
       </div>
-      <div className="chat-main">
+      <div
+        className={`chat-main ${dragging ? 'dropping' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDragging(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          addFiles([...e.dataTransfer.files].map((f) => window.azim.documents.pathForFile(f)))
+        }}
+      >
         <div className="chat-head">
           <strong>{active?.title ?? t.newChat}</strong>
           <span className="pill">{scopeName(active ? active.companyId : newScope)}</span>
@@ -156,8 +197,39 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
               ))}
             </div>
           )}
+          {files.length > 0 && (
+            <div className="composer-files">
+              {files.map((f) => (
+                <span key={f} className="file-chip" title={f}>
+                  <FileIcon size={12} /> {baseName(f)}
+                  <button className="btn ghost sm" onClick={() => setFiles(files.filter((x) => x !== f))}>
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+              {!scopeId && props.companies.length > 0 && (
+                <select className="input sm" value={fileCompany || props.companies[0].id} onChange={(e) => setFileCompany(e.target.value)} title={t.chatFilesCompany}>
+                  {props.companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {t.chatFilesCompany}: {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
           <div className="composer-box">
+            <button className="btn ghost" title={t.attachFiles} disabled={busy} onClick={async () => addFiles(await window.azim.chat.pickFiles())}>
+              <Paperclip size={15} />
+            </button>
             <textarea
+              onPaste={(e) => {
+                const pasted = [...e.clipboardData.files].map((f) => window.azim.documents.pathForFile(f)).filter(Boolean)
+                if (pasted.length) {
+                  e.preventDefault()
+                  addFiles(pasted)
+                }
+              }}
               rows={Math.min(8, Math.max(1, input.split('\n').length))}
               placeholder={t.askPlaceholder}
               value={input}
@@ -174,7 +246,7 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
                 <Square size={15} />
               </button>
             ) : (
-              <button className="btn primary" onClick={() => send(input)} disabled={!input.trim()} title={t.send}>
+              <button className="btn primary" onClick={() => send(input)} disabled={!input.trim() && !files.length} title={t.send}>
                 <Send size={15} />
               </button>
             )}
@@ -210,7 +282,18 @@ function Message({ m }: { m: ChatMessage }): React.JSX.Element {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
           </div>
         ) : (
-          m.content
+          visibleText(m.content)
+        )}
+        {m.role === 'user' && m.attachments.some((a) => a.type === 'document') && (
+          <div className="msg-files">
+            {m.attachments
+              .filter((a) => a.type === 'document')
+              .map((a) => (
+                <span key={a.id} className="file-chip" onClick={() => m.id !== 'pending' && window.azim.documents.open(a.id)}>
+                  <FileIcon size={12} /> {a.name}
+                </span>
+              ))}
+          </div>
         )}
         {m.attachments
           .filter((a) => a.type === 'chart' || a.type === 'table')
