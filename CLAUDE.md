@@ -8,6 +8,7 @@ Monorepo for InnoForge apps:
 - Start with `apps/pos/CLAUDE.md` (rules, commands, layout), then `apps/pos/docs/ARCHITECTURE.md`
   and `apps/pos/docs/FEATURES.md`. An Arabic overview is in `apps/pos/docs/SYSTEM-AR.md`.
 - **Where the project stands** (what is done, where it lives, what is still open): `apps/pos/docs/STATUS-AR.md`.
+- **Shipping a POS version to customers + fixing update problems** (Arabic, for the owner): `apps/pos/docs/RELEASE-AR.md`.
 - Task recipes live in `.claude/skills/`:
   - `pos-add-feature` — end-to-end checklist for a new feature (service → IPC → UI → i18n → tests).
   - `pos-db-migration` — changing the database schema safely.
