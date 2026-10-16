@@ -1,4 +1,6 @@
-FROM node:22-bookworm-slim AS build
+# Full image for building: it has python3/make/g++, which better-sqlite3 needs when no
+# prebuilt binary matches this Node version. The final image below stays slim.
+FROM node:22-bookworm AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
