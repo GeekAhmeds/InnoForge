@@ -99,6 +99,30 @@ printf '%s\n' "$release" | tail -n +2 | while read -r name size asset; do
 done
 ls "$work"/latest*.yml >/dev/null 2>&1 || { log "$tag has no latest*.yml (built before update manifests were attached) — skipping"; echo "$tag" > "$STATE_DIR/.release"; exit 0; }
 
+# GitHub replaces spaces in asset names with dots, so give every file the name its
+# manifest uses ("Azim Command-Setup-0.4.1.exe" was stored as "Azim.Command-Setup-0.4.1.exe").
+python3 - "$work" <<'PY'
+import os, re, sys
+work = sys.argv[1]
+for m in [f for f in os.listdir(work) if re.match(r'^latest.*\.yml$', f)]:
+    for ref in set(re.findall(r'(?:url|path):\s*(.+)', open(os.path.join(work, m), encoding='utf-8').read())):
+        ref = ref.strip().strip("'\"")
+        for name in (ref, ref + '.blockmap'):
+            dotted = name.replace(' ', '.')
+            if not os.path.exists(os.path.join(work, name)) and os.path.exists(os.path.join(work, dotted)):
+                os.rename(os.path.join(work, dotted), os.path.join(work, name))
+PY
+missing=$(python3 - "$work" <<'PY'
+import os, re, sys
+work = sys.argv[1]
+for m in [f for f in os.listdir(work) if re.match(r'^latest.*\.yml$', f)]:
+    for ref in set(re.findall(r'(?:url|path):\s*(.+)', open(os.path.join(work, m), encoding='utf-8').read())):
+        ref = ref.strip().strip("'\"")
+        if not os.path.exists(os.path.join(work, ref)): print(ref)
+PY
+)
+[ -z "$missing" ] || { log "files named in the manifests are missing from $tag: $missing"; exit 1; }
+
 os_of() {
   case "$1" in
     latest.yml|*.exe|*.exe.blockmap) echo win ;;

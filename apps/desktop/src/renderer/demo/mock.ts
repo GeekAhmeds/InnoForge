@@ -246,7 +246,7 @@ let settings: Settings = {
   agent: { fallback: true, effort: 'high', webSearch: true, maxSteps: 40 },
   autoOrganize: true,
   ocrLanguages: 'ara+eng',
-  serverUrl: 'http://196.221.144.94:9991',
+  serverUrl: 'https://azim.0x01source.com:9990',
   syncEnabled: true,
   syncToken: 'demo',
   lastSyncAt: ago(0.05),

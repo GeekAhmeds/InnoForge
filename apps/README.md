@@ -100,13 +100,27 @@ npm run dist:linux   # AppImage و .deb
 cd apps/mobile && npm install && npx expo start      # البناء: eas build -p android|ios
 ```
 
-## سيرفر Inno (196.221.144.94:9991)
+## سيرفر Inno (على سيرفر المكتب inno)
+
+أمر واحد على السيرفر بيعمل كل حاجة، ومش بيغيّر أي حاجة موجودة (زي سيرفر تراخيص الـ POS):
 
 ```bash
-cd apps/inno-server
-cp .env.example .env     # INNO_OWNER_TOKENS و INNO_PUBLISH_TOKEN  (openssl rand -hex 32)
-docker compose up -d --build
+curl -fsSLO https://raw.githubusercontent.com/GeekAhmeds/InnoForge/claude/azim-company-data-manager-gkr645/apps/inno-server/deploy/install-inno.sh
+sudo bash install-inno.sh
 ```
+
+السكريبت بيعمل الآتي:
+- بيشغّل السيرفر في Docker على `127.0.0.1:9991`.
+- بيضيف ملف nginx جديد بـ HTTPS على `https://azim.0x01source.com:9990`، بنفس الشهادة والبورت بتوع الـ POS. بياخد نسخة احتياطية الأول، وبيختبر الإعدادات قبل ما يشغّلها.
+- بيعمل التوكنات لوحده.
+- بيظبط سحب التحديثات من GitHub كل 10 دقايق.
+- في الآخر بيطبع **رابط السيرفر** و**رمز المالك**.
+
+ملاحظات:
+- **قبله:** اعمل سجل DNS نوعه A اسمه `azim` يشاور على IP المكتب، زي `pos`.
+- **تحديث السيرفر بعدين:** `sudo bash /opt/inno/apps/inno-server/deploy/install-inno.sh`.
+- **التراجع:** `sudo bash /opt/inno/apps/inno-server/deploy/uninstall-inno.sh`.
+- **من غير nginx (HTTP بس):** `sudo NO_NGINX=1 bash install-inno.sh`، وساعتها الراوتر لازم يحوّل البورت 9991.
 
 | Endpoint | الوظيفة |
 |---|---|
@@ -123,8 +137,6 @@ docker compose up -d --build
 
 **أول تشغيل:** في البرنامج افتح الإعدادات ← سيرفر Inno، وحط رابط السيرفر وواحد من `INNO_OWNER_TOKENS` وفعّل المزامنة. بعد كده من «الحسابات والصلاحيات» اعمل حساب لكل محاسب، وادّيله الرمز يحطه في برنامجه أو في تطبيق الموبايل.
 
-> ⚠️ السيرفر شغال على HTTP. قبل ما تحط عليه داتا مالية حقيقية، حط قدامه HTTPS (Caddy أو nginx مع دومين).
-
 ## إصدار نسخة جديدة
 1. زوّد `version` في `apps/desktop/package.json`، واعمل commit فيه `[release]` في الرسالة (أو `git tag azim-v0.3.0`).
 2. الـ Actions بيبني Windows وLinux، ويعمل الإصدار `azim-v<version>` على GitHub Releases ومعاه ملفات التحديث (`latest*.yml`).
@@ -132,18 +144,10 @@ docker compose up -d --build
    - البادئة `azim-v` عشان ماتتلخبطش مع إصدارات منتجات Inno التانية.
 
 ### توصيل التحديث للبرامج المتثبتة (نفس طريقة الـ POS)
-سيرفر inno هو اللي **بيسحب** آخر نسخة `azim-v*` من GitHub كل 10 دقايق، ومش محتاج أي secrets على GitHub. مرة واحدة على السيرفر:
-
-```bash
-sudo bash /opt/inno/apps/inno-server/deploy/azim-updates-sync.sh --install
-sudo nano /etc/azim-updates.env   # INNO_PUBLISH_TOKEN = نفس اللي في .env بتاع السيرفر
-sudo azim-updates-sync            # أول مرة دلوقتي — بعد كده لوحده
-```
-
+سيرفر inno هو اللي **بيسحب** آخر نسخة `azim-v*` من GitHub كل 10 دقايق، والـ `install-inno.sh` بيظبط ده لوحده. مش محتاج أي secrets على GitHub.
 - اللوج: `journalctl -u azim-updates`.
-- لنسخة معيّنة: `sudo TAG=azim-v0.4.1 azim-updates-sync`.
-- لو السيرفر شايف GitHub بس GitHub مش شايف السيرفر، الطريقة دي هي اللي تنفع.
-- (اختياري: الطريقة القديمة بالرفع من GitHub نفسه بالـ secrets `INNO_SERVER_URL` و`INNO_PUBLISH_TOKEN` لسه شغالة.)
+- السحب دلوقتي: `sudo azim-updates-sync`.
+- لنسخة معيّنة: `sudo TAG=azim-v0.4.2 azim-updates-sync`.
 
 المثبّتات: https://github.com/GeekAhmeds/InnoForge/releases
 

@@ -1,7 +1,7 @@
 // Inno Server client (app namespace `azim-command`). See apps/inno-server/src/index.ts.
 
 export const APP_ID = 'azim-command'
-export const DEFAULT_SERVER = 'http://196.221.144.94:9991'
+export const DEFAULT_SERVER = 'https://azim.0x01source.com:9990'
 
 export type Role = 'owner' | 'admin' | 'accountant' | 'viewer'
 

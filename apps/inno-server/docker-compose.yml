@@ -4,7 +4,8 @@ services:
     container_name: inno-server
     restart: unless-stopped
     ports:
-      - "9991:9991"
+      # Local only by default (nginx in front gives HTTPS); BIND=0.0.0.0 in .env exposes it directly.
+      - "${BIND:-127.0.0.1}:${APP_PORT:-9991}:9991"
     env_file: .env
     environment:
       DATA_DIR: /data

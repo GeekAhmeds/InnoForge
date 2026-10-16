@@ -24,7 +24,7 @@ npx expo start
 
 ## الإعداد داخل التطبيق
 
-1. عند أول تشغيل أدخل **عنوان السيرفر** (الافتراضي `http://196.221.144.94:9991`) و**رمز الدخول**.
+1. عند أول تشغيل أدخل **عنوان السيرفر** (الافتراضي `https://azim.0x01source.com:9990`) و**رمز الدخول**.
 2. رمز الدخول يصدر من برنامج Azim Command على الكمبيوتر (إدارة المستخدمين) أو يكون أحد رموز المالك في `INNO_OWNER_TOKENS` على السيرفر.
 3. التطبيق يتحقق من الرمز عبر `GET /api/azim-command/me` ثم يحفظ العنوان والرمز في الخزنة الآمنة للجهاز (expo-secure-store).
 4. تسجيل الخروج وتغيير اللغة (العربية / English) من شاشة الإعدادات. الصلاحيات (الشركات المسموحة، إخفاء القرارات عن المحاسب) يطبّقها السيرفر.
@@ -93,7 +93,7 @@ Type-check with `npx tsc --noEmit`.
 
 ## Configure the server
 
-On first launch enter the **server URL** (default `http://196.221.144.94:9991`) and an **access token** (issued from the desktop app's user management, or one of the server's `INNO_OWNER_TOKENS`). The app validates it with `GET /api/azim-command/me` and stores both in the device keychain/keystore. Sign out and switch language in Settings. Permissions (allowed companies, hidden tables per role) are enforced by the server.
+On first launch enter the **server URL** (default `https://azim.0x01source.com:9990`) and an **access token** (issued from the desktop app's user management, or one of the server's `INNO_OWNER_TOKENS`). The app validates it with `GET /api/azim-command/me` and stores both in the device keychain/keystore. Sign out and switch language in Settings. Permissions (allowed companies, hidden tables per role) are enforced by the server.
 
 ## Build with EAS
 

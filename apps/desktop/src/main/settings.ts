@@ -1,6 +1,6 @@
 import { safeStorage } from 'electron'
 import { getDb } from './db'
-import { DEFAULT_SERVER_URL, type ProviderId, type Settings } from '@shared/types'
+import { DEFAULT_SERVER_URL, OLD_SERVER_URLS, type ProviderId, type Settings } from '@shared/types'
 import type { SettingsPatch } from '@shared/api'
 
 // Settings that live in the JSON blob. Flags such as hasKey / hasPin are
@@ -59,6 +59,8 @@ export function getSettings(): Settings {
     lock: { ...DEFAULTS.lock, ...stored.lock, hasPin: !!getSecret('pin') },
     backup: { ...DEFAULTS.backup, ...stored.backup, hasPassword: !!getSecret('backup') }
   }
+  // Copies still on an old default address follow the server to its new one.
+  if (OLD_SERVER_URLS.includes(merged.serverUrl.replace(/\/+$/, ''))) merged.serverUrl = DEFAULT_SERVER_URL
   for (const id of Object.keys(DEFAULTS.providers) as ProviderId[]) {
     merged.providers[id] = { ...DEFAULTS.providers[id], ...(stored.providers?.[id] ?? {}), hasKey: !!getSecret(`key:${id}`) }
   }

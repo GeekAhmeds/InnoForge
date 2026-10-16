@@ -364,5 +364,8 @@ export interface SyncStatus {
 
 export const APP_DEVELOPER = 'Inno Source For Software Solutions'
 // Inno Server hosts several Inno products; this app lives under its own namespace.
-export const DEFAULT_SERVER_URL = 'http://196.221.144.94:9991'
+// HTTPS through nginx on the office server (apps/inno-server/deploy/install-inno.sh).
+export const DEFAULT_SERVER_URL = 'https://azim.0x01source.com:9990'
+/** Defaults of earlier versions, moved to DEFAULT_SERVER_URL automatically. */
+export const OLD_SERVER_URLS = ['http://196.221.144.94:9991']
 export const SERVER_APP_ID = 'azim-command'
