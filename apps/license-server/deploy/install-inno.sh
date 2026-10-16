@@ -218,7 +218,7 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now innoforge-updates.timer >/dev/null
 systemctl start innoforge-updates.service || true
-ok "اتظبط: أي نسخة تتعلّم «Latest» على GitHub بتنزل هنا خلال 10 دقايق (اللوج: journalctl -u innoforge-updates)"
+ok "اتظبط: أحدث نسخة pos-v… تتشال منها علامة «pre-release» على GitHub بتنزل هنا خلال 10 دقايق (اللوج: journalctl -u innoforge-updates)"
 
 say "7) التأكد"
 sleep 1

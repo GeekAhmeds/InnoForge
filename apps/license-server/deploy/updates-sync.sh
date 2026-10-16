@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Pulls the POS version marked "latest" on GitHub Releases into the update folder that
-# https://pos.0x01source.com:9990/updates/ serves. Runs every 10 minutes (systemd timer
-# installed by install-inno.sh). Pre-releases are ignored: a version reaches customers only
-# after someone ticks «Set as the latest release» on GitHub (or runs it once with TAG=pos-v…).
+# Pulls the newest published POS release (tag pos-v…, not a pre-release) from GitHub Releases
+# into the update folder that https://pos.0x01source.com:9990/updates/ serves. Runs every
+# 10 minutes (systemd timer installed by install-inno.sh). CI makes pre-releases: a version
+# reaches customers only after someone unticks «Set as a pre-release» on GitHub (or runs it once
+# with TAG=pos-v…). GitHub's single "Latest" badge is not used, so other apps in the same repo
+# (e.g. azim-v…) can keep it. It never moves customers back to an older version.
 #
 # Safe swap: files are downloaded to a temp folder on the same disk, sizes checked, installers
 # moved in first and the latest*.yml files last, so an app never sees a version whose file is
@@ -18,12 +20,28 @@ AUTH=()
 
 log() { echo "[innoforge-updates] $*"; }
 
-# TAG=pos-v0.1.44 innoforge-updates-sync  → publish that exact release now (even a pre-release).
-if [ -n "${TAG:-}" ]; then where="tags/$TAG"; else where="latest"; fi
-json=$(curl -fsSL --max-time 30 "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/releases/$where") || { log "GitHub not reachable or no latest release"; exit 0; }
-tag=$(printf '%s' "$json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
-case "$tag" in pos-v*) ;; *) log "latest release $tag is not a POS release — nothing to do"; exit 0;; esac
 current=$(cat "$DEST/.release" 2>/dev/null || true)
+gh() { curl -fsSL --max-time 30 "${AUTH[@]}" -H "Accept: application/vnd.github+json" "$API/repos/$REPO/$1"; }
+
+# TAG=pos-v0.1.44 innoforge-updates-sync  → publish that exact release now (even a pre-release or an older one).
+if [ -n "${TAG:-}" ]; then
+  json=$(gh "releases/tags/$TAG") || { log "release $TAG not found"; exit 1; }
+else
+  list=$(gh "releases?per_page=100") || { log "GitHub not reachable"; exit 0; }
+  # The highest pos-v version that is published (not a draft, not a pre-release), and newer than what is served.
+  tag=$(printf '%s' "$list" | CURRENT="$current" python3 -c '
+import json, os, re, sys
+ver = lambda t: tuple(int(x) for x in re.findall(r"\d+", t[len("pos-v"):]))
+ok = [r["tag_name"] for r in json.load(sys.stdin)
+      if r["tag_name"].startswith("pos-v") and not r["draft"] and not r["prerelease"] and re.fullmatch(r"pos-v\d+(\.\d+)*", r["tag_name"])]
+cur = os.environ["CURRENT"]
+best = max(ok, key=ver, default="")
+print(best if best and (not cur.startswith("pos-v") or ver(best) > ver(cur)) else "")')
+  [ -n "$tag" ] || exit 0   # nothing newer than what customers already get
+  json=$(gh "releases/tags/$tag") || { log "GitHub not reachable"; exit 0; }
+fi
+tag=$(printf '%s' "$json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
+case "$tag" in pos-v*) ;; *) log "$tag is not a POS release — nothing to do"; exit 0;; esac
 [ "$tag" = "$current" ] && exit 0
 
 log "new release $tag (was ${current:-none})"

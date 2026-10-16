@@ -36,7 +36,7 @@
 **🔄 إزاي النسخ الجديدة بتوصل للعملاء (من غير SSH ومن غير أسرار على السيرفر):**
 1. كل push بيبني البرنامج، ويعمل **Pre-release** على GitHub اسمه `pos-v0.1.N`، وفيه ملفات التحديث الموقّعة وملفات التسطيب.
 2. **إنت اللي بتقرر** إمتى النسخة توصل للعملاء: GitHub ← **Releases** ← افتح النسخة ← **Edit** ← شيل علامة «Set as a pre-release» وعلّم «Set as the latest release» ← **Update release**.
-3. inno بيشيّك كل 10 دقايق (`innoforge-updates.timer`)، ولو لقى نسخة جديدة متعلّمة Latest بينزّلها في `/srv/InnoForge/PoS`. البرامج عند العملاء بتلاقيها على `https://pos.0x01source.com:9990/updates/` وتحدّث نفسها.
+3. inno بيشيّك كل 10 دقايق (`innoforge-updates.timer`)، ولو لقى نسخة `pos-v…` أحدث اتشالت منها علامة «pre-release» بينزّلها في `/srv/InnoForge/PoS` (مش بيعتمد على «Latest» عشان برامج تانية في نفس الـ repo زي azim بتاخدها، ومبيرجعش لنسخة أقدم أبداً). نسخة معيّنة فوراً: `sudo TAG=pos-v0.1.54 innoforge-updates-sync`. البرامج عند العملاء بتلاقيها على `https://pos.0x01source.com:9990/updates/` وتحدّث نفسها.
 4. **اللوج:** `journalctl -u innoforge-updates -n 20`.
    **السحب على طول:** `sudo systemctl start innoforge-updates`.
 
