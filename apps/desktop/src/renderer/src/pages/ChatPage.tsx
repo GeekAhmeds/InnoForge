@@ -32,12 +32,15 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
   const activeId = useRef<string | null>(null)
   activeId.current = active?.id ?? null
 
-  // Open the latest conversation for the requested scope, or start fresh.
+  // When the page opens, continue the latest conversation for the requested scope.
+  // Only once: afterwards an empty selection means the user asked for a new chat.
+  const autoOpened = useRef(false)
   useEffect(() => {
-    if (!conversations || active) return
+    if (!conversations || autoOpened.current) return
+    autoOpened.current = true
     const match = conversations.find((c) => c.companyId === props.initialCompanyId)
     if (match && !props.initialPrompt) setActive(match)
-  }, [conversations, active, props.initialCompanyId, props.initialPrompt])
+  }, [conversations, props.initialCompanyId, props.initialPrompt])
 
   useEffect(() => {
     if (active) window.azim.chat.messages(active.id).then(setMessages)
@@ -119,7 +122,11 @@ export function ChatPage(props: { companies: Company[]; initialCompanyId: string
             ))}
           </select>
         </div>
-        <button className="btn primary" style={{ width: '100%', marginBottom: 12 }} onClick={() => setActive(null)}>
+        <button className="btn primary" style={{ width: '100%', marginBottom: 12 }} onClick={() => {
+            setActive(null)
+            setInput('')
+            setFiles([])
+          }}>
           <Plus size={15} /> {t.newChat}
         </button>
         {(conversations ?? []).map((c) => (
