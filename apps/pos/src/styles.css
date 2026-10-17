@@ -181,6 +181,9 @@ input.grow { flex: 1; }
 .variant-cell .strong { font-weight: 700; font-size: 15px; }
 .variant-cell.out { opacity: .55; }
 .variant-cell.none { cursor: default; color: var(--muted); border-style: dashed; }
+.block { display: block; }
+.blind-return { display: flex; flex-direction: column; gap: 12px; }
+.blind-return .trow { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; }
 small.packs { display: block; font-size: 11px; white-space: nowrap; }
 .receipt-designer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: start; margin: 8px 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .receipt-designer h4 { margin: 0 0 4px; }

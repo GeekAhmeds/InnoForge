@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   language: 'ar',
   receipt_header: '',
   receipt_footer: 'شكراً لزيارتكم',
+  blind_returns: false, // returns without an invoice (needs the blind_return permission or a supervisor)
+  blind_return_max: 0, // the most one such return may refund, minor units (0 = no limit)
   receipt_layout: '', // receipt designer: which parts the thermal receipt shows (JSON; '' = defaults)
   printer_name: '',
   kitchen_printer_name: '',
@@ -211,7 +213,7 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
 
   const permsOf = (u) => effectivePermissions(u);
   // Actions a supervisor can unlock on the spot with their PIN; the rest are simply forbidden.
-  const APPROVABLE = new Set(['discount', 'price_override', 'credit_sale', 'refund', 'void', 'expenses', 'open_drawer']);
+  const APPROVABLE = new Set(['discount', 'price_override', 'credit_sale', 'refund', 'blind_return', 'void', 'expenses', 'open_drawer']);
   const can = (perm, u = session.user) => !!permsOf(u)[perm];
 
   /**
@@ -336,6 +338,10 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       if (patch?.uae_enabled) requireFeature('uae_einvoice');
       if (patch && 'uae_mode' in patch && !['export', 'asp'].includes(patch.uae_mode)) throw new PosError('INVALID_SETTING', 'uae_mode');
       if (patch && 'uae_emirate' in patch && patch.uae_emirate && !uaeDoc.EMIRATES.includes(patch.uae_emirate)) throw new PosError('INVALID_SETTING', 'uae_emirate');
+      if (patch?.blind_returns) {
+        const cur = { ...getSettings(), ...patch };
+        if (cur.eta_enabled || cur.zatca_enabled || cur.uae_enabled) throw new PosError('BLIND_RETURN_EINVOICE');
+      }
       if (patch && 'label_size' in patch && !['38x25', '40x30', '50x25', '50x30', '58x40', '60x40', 'a4', 'a4_40', 'custom'].includes(patch.label_size)) throw new PosError('INVALID_SETTING', 'label_size');
       for (const key of ['receipt_layout', 'label_layout']) if (patch && key in patch && str(patch[key])) {
         let layout = null;
@@ -1601,6 +1607,59 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         return after;
       });
     },
+    /**
+     * A return without an invoice (the customer has no receipt). Off unless Settings → Returns
+     * allows it; needs the blind_return permission (or a supervisor), a reason, and stays under
+     * the set maximum. Items are valued at today's price; the money goes back in cash or onto
+     * the customer's account. Not available with e-invoicing (a credit note must name its invoice).
+     * items: [{ product_id, qty, unit_id }]
+     */
+    blindReturn({ items = [], customerId = null, method = 'cash', reason = '', approval = null } = {}) {
+      const s = getSettings();
+      if (!s.blind_returns) throw new PosError('BLIND_RETURNS_OFF');
+      if (s.eta_enabled || s.zatca_enabled || s.uae_enabled) throw new PosError('BLIND_RETURN_EINVOICE');
+      const { user: u, approvedBy } = requirePerm('blind_return', approval);
+      const shift = currentShift();
+      if (!shift) throw new PosError('NO_OPEN_SHIFT');
+      if (!str(reason)) throw new PosError('REASON_REQUIRED');
+      if (!['cash', 'account'].includes(method)) throw new PosError('INVALID_SETTING', 'method');
+      const customer = customerId ? db.prepare('SELECT id, name FROM customers WHERE id = ?').get(int(customerId)) : null;
+      if (customerId && !customer) throw new PosError('NOT_FOUND');
+      if (method === 'account' && !customer) throw new PosError('CUSTOMER_REQUIRED');
+      return transaction(db, () => {
+        const lines = [];
+        for (const it of Array.isArray(items) ? items : []) {
+          const qty = num(it.qty);
+          if (!(qty > 0)) throw new PosError('INVALID_QTY');
+          const p = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
+          if (!p) throw new PosError('PRODUCT_NOT_FOUND');
+          if (p.attributes) throw new PosError('PICK_VARIANT', p.name);
+          const unit = it.unit_id ? db.prepare('SELECT * FROM product_units WHERE id = ? AND product_id = ?').get(it.unit_id, p.id) : null;
+          if (it.unit_id && !unit) throw new PosError('INVALID_UNIT');
+          const factor = unit?.factor ?? 1;
+          const unitPrice = unit ? unit.price ?? Math.round(p.price * factor) : p.price;
+          lines.push({ p, unit, factor, qty, unitPrice, amount: Math.round(unitPrice * qty), unitCost: Math.round(p.cost * factor), name: unit ? `${p.name} (${unit.name})` : p.name });
+        }
+        if (!lines.length) throw new PosError('NOTHING_TO_RETURN');
+        const amount = lines.reduce((sum, l) => sum + l.amount, 0);
+        if (s.blind_return_max > 0 && amount > s.blind_return_max) throw new PosError('BLIND_RETURN_LIMIT', String(s.blind_return_max));
+        const cashOut = method === 'cash' ? amount : 0;
+        const returnId = Number(db.prepare('INSERT INTO returns (order_id, shift_id, user_id, customer_id, amount, method, reason, cash_amount) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)')
+          .run(shift.id, u.id, customer?.id ?? null, amount, method, str(reason), cashOut).lastInsertRowid);
+        if (method === 'account') {
+          db.prepare("INSERT INTO customer_payments (customer_id, amount, method, shift_id, user_id, notes) VALUES (?, ?, 'return', ?, ?, ?)")
+            .run(customer.id, amount, shift.id, u.id, str(reason));
+        }
+        for (const l of lines) {
+          db.prepare('INSERT INTO blind_return_items (return_id, product_id, name, unit_id, unit_factor, qty, unit_price, amount, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(returnId, l.p.id, l.name, l.unit?.id ?? null, l.factor, l.qty, l.unitPrice, l.amount, l.unitCost);
+          consumeStock(l.p.id, l.qty, l.factor, [], +1, 'return', returnId, u.id);
+        }
+        audit('blind_return', { entity: 'return', entityId: returnId, approvedBy, details: { amount, method, customer: customer?.name, reason: str(reason), items: lines.map((l) => ({ name: l.name, qty: l.qty })) } });
+        const ret = plain(db.prepare('SELECT r.*, u.name AS user_name FROM returns r JOIN users u ON u.id = r.user_id WHERE r.id = ?').get(returnId));
+        return { ...ret, customer_name: customer?.name || '', items: lines.map((l) => ({ name: l.name, qty: l.qty, amount: l.amount })) };
+      });
+    },
   };
 
 
@@ -2393,7 +2452,9 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         FROM order_items i JOIN orders o ON o.id = i.order_id WHERE ${range}`).get(f, t);
       const purchasesTotal = db.prepare("SELECT COALESCE(SUM(total), 0) AS t FROM purchases WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
       const expensesTotal = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
-      const profit = Math.round(cost.revenue - cost.cost);
+      // Returns without an invoice take their amount (less the goods' cost) off the profit.
+      const blindRet = db.prepare("SELECT COALESCE(SUM(bi.amount - bi.unit_cost * bi.qty), 0) AS p FROM blind_return_items bi JOIN returns r ON r.id = bi.return_id WHERE r.created_at >= ? AND r.created_at < date(?, '+1 day')").get(f, t).p;
+      const profit = Math.round(cost.revenue - cost.cost - blindRet);
       // Settlement discounts given when collecting reduce profit; supplier rebates received add to it.
       const settlementDiscounts = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method = 'discount' AND status = 'posted' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
       const rebatesTotal = db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE method = 'rebate' AND created_at >= ? AND created_at < date(?, '+1 day')").get(f, t).t;
@@ -3565,7 +3626,8 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
     const sales = (from, to) => plain(db.prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(credit), 0) AS credit
       FROM orders WHERE status = 'completed' AND completed_at >= ? AND completed_at < date(?, '+1 day')`).get(from, to));
     const profit = (from, to) => Math.round(db.prepare(`SELECT COALESCE(SUM(i.line_total * (i.qty - i.returned_qty) / i.qty - i.unit_cost * (i.qty - i.returned_qty)), 0) AS p
-      FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')`).get(from, to).p);
+      FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.status = 'completed' AND o.completed_at >= ? AND o.completed_at < date(?, '+1 day')`).get(from, to).p
+      - db.prepare("SELECT COALESCE(SUM(bi.amount - bi.unit_cost * bi.qty), 0) AS p FROM blind_return_items bi JOIN returns r ON r.id = bi.return_id WHERE r.created_at >= ? AND r.created_at < date(?, '+1 day')").get(from, to).p);
     const refunds = (from, to) => db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM returns WHERE created_at >= ? AND created_at < date(?, '+1 day')").get(from, to).t;
     const showCost = can('view_cost');
     const shift = currentShift();

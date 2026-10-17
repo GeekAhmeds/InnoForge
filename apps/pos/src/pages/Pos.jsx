@@ -10,6 +10,8 @@ import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { ModifierPicker } from '../components/Modifiers.jsx';
 import { VariantPicker } from '../components/Variants.jsx';
 import { OrderModal } from './Orders.jsx';
+import { scannedUnit } from '../lib/packs.js';
+import { BlindReturnModal, ReturnStart } from '../components/BlindReturn.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 import { has } from '../lib/features.js';
 
@@ -152,7 +154,7 @@ export default function Pos() {
       setModal({ kind: 'variants', product: byCode });
       setSearch('');
     } else if (byCode) {
-      addProduct(byCode, qtyStr ? Number(qtyStr) : 1, byCode.unit || null);
+      addProduct(byCode, qtyStr ? Number(qtyStr) : 1, scannedUnit(byCode));
       setSearch('');
     } else if (products.length === 1) {
       pick(products[0]);
@@ -162,18 +164,8 @@ export default function Pos() {
     }
   }
 
-  /** Return: type the invoice number or scan the barcode printed on the receipt. */
-  async function startReturn() {
-    const no = await ask(t('pos.returnAsk'), { required: true });
-    if (!no) { focusSearch(); return; }
-    try {
-      const order = await api.orders.byInvoice(String(no).trim());
-      if (!order) { notify(t('pos.returnNotFound', { n: no }), 'error'); return; }
-      setModal({ kind: 'return', id: order.id });
-    } catch (err) {
-      notify(tErr(err), 'error');
-    }
-  }
+  /** Return: type the invoice number or scan the barcode printed on the receipt (or, when allowed, no invoice). */
+  const startReturn = () => setModal({ kind: 'returnStart' });
 
   const reset = useCallback(() => { clearDraft(draftKey); setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch, draftKey]);
   // A new dine-in order needs a table; an existing one (e.g. a split bill) can be paid without.
@@ -435,6 +427,10 @@ export default function Pos() {
           onRemove={() => { setCart((c) => ({ ...c, items: c.items.filter((_, i) => i !== modal.idx) })); setModal(null); focusSearch(); }}
         />
       )}
+      {modal?.kind === 'returnStart' && (
+        <ReturnStart onClose={() => { setModal(null); focusSearch(); }} onInvoice={(id) => setModal({ kind: 'return', id })} onBlind={() => setModal({ kind: 'blindReturn' })} />
+      )}
+      {modal?.kind === 'blindReturn' && <BlindReturnModal onClose={() => { setModal(null); focusSearch(); }} />}
       {modal?.kind === 'return' && <OrderModal id={modal.id} startRefund onClose={() => { setModal(null); focusSearch(); }} />}
       {modal?.kind === 'variants' && (
         <VariantPicker product={modal.product} onClose={() => { setModal(null); focusSearch(); }} onPick={(v) => { setModal(null); pick(v); }} />

@@ -78,7 +78,7 @@ docs/                 guide.html + developer docs
 
 1. **Money is integer minor units** (piasters) everywhere in the DB and services. Convert only at the UI edge with `toMinor` / `fromMinor` / `formatMoney` (`src/lib/money.js`). Quantities are REAL (weights, cartons).
 2. **The server prices everything.** The renderer sends product ids, quantities, units and *flags* (e.g. `price_override`); `priceCart()` re-reads prices, price lists, customer discounts and promotions from the DB. Never trust a total from the UI.
-3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v21**.
+3. **Migrations are append-only** (`MIGRATIONS` in `db.cjs`). Never edit one that has shipped; add a new entry. Table rebuilds use `{ fkOff: true, sql }`. Current version: **v22**.
 4. **Every service method checks access first**: `requireUser()` or `requirePerm('perm', approval, extra)`. Restricted-but-approvable actions (`discount`, `price_override`, `credit_sale`, `refund`, `void`, `expenses`, `open_drawer`) throw `APPROVAL_REQUIRED`; the UI wraps calls in `withApproval(fn)` to get a supervisor PIN and retry.
 5. **Audit sensitive actions** with `audit('action_name', { entity, entityId, details, approvedBy })` and add `audit.action_name` (+ any `auditKey.*`) to both dictionaries.
 6. **Errors are `PosError(CODE)`**; the UI shows `t('err.CODE')`. Add new codes to both `ar.js` and `en.js`.

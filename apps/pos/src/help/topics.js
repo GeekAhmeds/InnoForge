@@ -147,7 +147,8 @@ export const TOPICS = [
         'الأصناف بترجع المخزون. والفلوس: لو الفاتورة كانت آجل، بتتخصم من حساب العميل الأول، والباقي بيطلع كاش من الدرج.',
         'إيصال المرتجع بيتطبع لوحده للعميل: الأصناف والمبلغ واترد إزاي.',
       ],
-      tips: ['المرتجع محتاج صلاحية، أو موافقة مشرف.', 'عشان المسح يشتغل، فعّل «باركود رقم الفاتورة» في تصميم الإيصال.'],
+      tips: ['المرتجع محتاج صلاحية، أو موافقة مشرف.', 'عشان المسح يشتغل، فعّل «باركود رقم الفاتورة» في تصميم الإيصال.',
+        'مرتجع من غير فاتورة (العميل مش معاه الإيصال): بيتفعّل من «الإعدادات ← بيانات النشاط ← المرتجعات»، وممكن تحط أقصى مبلغ. بعدها «↩ مرتجع ← مرتجع من غير فاتورة»: امسح الأصناف، واختار الفلوس ترجع كاش ولا على حساب العميل، واكتب السبب. الأسعار بسعر النهارده، والكاشير محتاج صلاحية «مرتجع من غير فاتورة» أو موافقة مشرف. مش متاح مع الفاتورة الإلكترونية.'],
     },
     en: {
       title: 'Returns and voids',
@@ -158,7 +159,8 @@ export const TOPICS = [
         'Items go back into stock; money comes off the customer\'s balance first (credit sales), the rest is paid from the drawer.',
         'A return slip prints for the customer: items, amount and how it was refunded.',
       ],
-      tips: ['Returns need the permission or a supervisor\'s approval.', 'For scanning, turn on "Invoice number barcode" in the receipt design.'],
+      tips: ['Returns need the permission or a supervisor\'s approval.', 'For scanning, turn on "Invoice number barcode" in the receipt design.',
+        'Returns without an invoice (no receipt): turn them on in Settings → Business → Returns, with an optional maximum. Then "↩ Return → Return without an invoice": scan the items, choose cash or the customer\'s account, and give a reason. Prices are today\'s; cashiers need the "Returns without an invoice" permission or a supervisor. Not available with e-invoicing.'],
     },
   },
   {

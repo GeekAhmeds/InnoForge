@@ -5,7 +5,7 @@ import { receiptHtml } from '../lib/receipt.js';
 import ReceiptDesigner, { sampleOrder } from '../components/ReceiptDesigner.jsx';
 import { LABEL_SIZES, sizeName } from '../lib/labels.js';
 import { Field, Modal, Toggle, useApp, useLoad } from '../components/ui.jsx';
-import { formatMoney } from '../lib/money.js';
+import { formatMoney, fromMinor, toMinor } from '../lib/money.js';
 import Support from '../components/Support.jsx';
 import { UpdatePanel } from '../components/Updates.jsx';
 import KitchenSettings from '../components/Kitchen.jsx';
@@ -111,6 +111,17 @@ function SettingsForm({ tab }) {
             <select value={f.decimals} onChange={set('decimals')}>{[0, 2, 3].map((x) => <option key={x} value={x}>{x}</option>)}</select>
           </Field>
           <div className="span2"><Toggle checked={f.allow_negative_stock} onChange={set('allow_negative_stock')} label={t('settings.negativeStock')} /></div>
+          <h4 className="span2">↩ {t('blind.settings')}</h4>
+          <div className="span2">
+            <Toggle checked={f.blind_returns} onChange={set('blind_returns')} label={t('blind.enable')} />
+            <small className="muted block">{f.eta_enabled || f.zatca_enabled || f.uae_enabled ? t('blind.einvoiceOff') : t('blind.enableHint')}</small>
+          </div>
+          {f.blind_returns && (
+            <Field label={t('blind.max')}>
+              <input inputMode="decimal" value={f.blind_max_text ?? fromMinor(f.blind_return_max, f.decimals)}
+                onChange={(e) => setF((x) => ({ ...x, blind_max_text: e.target.value, blind_return_max: toMinor(e.target.value, x.decimals) }))} />
+            </Field>
+          )}
           <div className="span2">
             <Field label={t('screens.title')} hint={t('screens.hint')}>
               <div className="screen-picks">

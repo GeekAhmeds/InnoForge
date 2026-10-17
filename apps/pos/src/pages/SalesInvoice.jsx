@@ -8,6 +8,7 @@ import { InstallmentFields, newInstallmentForm } from '../components/Installment
 import { NoShift } from './Pos.jsx';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { has } from '../lib/features.js';
+import { scannedUnit } from '../lib/packs.js';
 
 // Trading (B2B) sales invoice: customer first, then a line grid with unit, quantity,
 // price, discount % and stock; due date, salesperson and partial payment on one screen.
@@ -129,7 +130,7 @@ export default function SalesInvoice() {
     const [, qtyStr, c] = q.match(/^(\d+(?:\.\d+)?)\*(.+)$/) || [null, null, q];
     const p = await api.products.byBarcode(c);
     if (!p) return false;
-    const l = lineFromProduct(p, p.unit || null);
+    const l = lineFromProduct(p, scannedUnit(p));
     if (qtyStr) l.qty = qtyStr;
     setLines((ls) => [...ls, l]);
     return true;

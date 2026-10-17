@@ -76,6 +76,7 @@ Conventions inside the file: `requireUser()`, `requirePerm(perm, approval, extra
 | v19 | `zatca_documents` (stamped Saudi invoices/credit notes in chain order: icv, uuid, hash, signed xml, qr, status), `orders.zatca_qr`, `returns.zatca_qr`, `customers.zatca` (buyer address JSON) |
 | v20 | `uae_documents` (PINT AE documents for the ASP), `customers.uae` (buyer address/emirate/license JSON) |
 | v21 | Product variants: `products.parent_id`, `attributes` (parent), `variant` / `variant_label` / `own_price` (variant) |
+| v22 | Returns without an invoice: `returns` rebuilt with `order_id` optional and `customer_id`; `blind_return_items` |
 
 Key relationships: an **order** is a cart that is `open` (held cart / table) then `completed` (gets `invoice_no`) or `void`. `orders.credit` is the part left on the customer's account. Stock is always in **base units** (`unit_factor` converts cartons). `stock_moves` is the stock ledger; `batches` hold expiry-tracked stock (FEFO).
 

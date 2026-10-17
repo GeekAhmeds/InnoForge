@@ -21,3 +21,10 @@ export function packsText(qty, product, t) {
   const rest = Math.round((abs - packs * pack.factor) * 1000) / 1000;
   return `${sign}${packs} ${pack.name}${rest ? ` + ${formatQty(rest)} ${baseUnitName(product.unit, t)}` : ''}`;
 }
+
+/**
+ * The pack a scanned barcode stands for (a carton's own barcode), or null for the item itself.
+ * products.byBarcode returns the matched unit as `unit`; on a plain item `unit` is its base
+ * unit's name ('pcs', 'kg'), which is not a pack.
+ */
+export const scannedUnit = (p) => (p?.unit && typeof p.unit === 'object' ? p.unit : null);

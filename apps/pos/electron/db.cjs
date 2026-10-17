@@ -976,6 +976,43 @@ const MIGRATIONS = [
   ALTER TABLE products ADD COLUMN own_price INTEGER NOT NULL DEFAULT 0; -- variant: 1 = its own price, 0 = follows the parent
   CREATE INDEX idx_products_parent ON products(parent_id);
   `,
+  // v22: returns without an invoice (switched on in settings, own permission): returns.order_id
+  // becomes optional, the customer it went to is kept, and the returned items live in their own
+  // table (there is no invoice line to point at).
+  { fkOff: true, sql: `
+  CREATE TABLE returns_new (
+    id          INTEGER PRIMARY KEY,
+    order_id    INTEGER REFERENCES orders(id),
+    shift_id    INTEGER REFERENCES shifts(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    customer_id INTEGER REFERENCES customers(id),
+    amount      INTEGER NOT NULL,
+    method      TEXT NOT NULL DEFAULT 'cash',
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    cash_amount INTEGER NOT NULL DEFAULT 0,
+    zatca_qr    TEXT NOT NULL DEFAULT ''
+  );
+  INSERT INTO returns_new (id, order_id, shift_id, user_id, amount, method, reason, created_at, cash_amount, zatca_qr)
+    SELECT id, order_id, shift_id, user_id, amount, method, reason, created_at, cash_amount, zatca_qr FROM returns;
+  DROP TABLE returns;
+  ALTER TABLE returns_new RENAME TO returns;
+  CREATE INDEX idx_returns_order ON returns(order_id);
+  CREATE INDEX idx_returns_created ON returns(created_at);
+  CREATE TABLE blind_return_items (
+    id          INTEGER PRIMARY KEY,
+    return_id   INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+    product_id  INTEGER REFERENCES products(id) ON DELETE SET NULL,
+    name        TEXT NOT NULL,
+    unit_id     INTEGER REFERENCES product_units(id) ON DELETE SET NULL,
+    unit_factor REAL NOT NULL DEFAULT 1,
+    qty         REAL NOT NULL CHECK (qty > 0),
+    unit_price  INTEGER NOT NULL,
+    amount      INTEGER NOT NULL,
+    unit_cost   INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX idx_blind_return_items_return ON blind_return_items(return_id);
+  ` },
 ];
 
 function openDatabase(file) {

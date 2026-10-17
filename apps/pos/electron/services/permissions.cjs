@@ -9,6 +9,7 @@ const PERMISSIONS = [
   'price_override',  // change a product's price in the cart
   'credit_sale',     // sell on a customer's account
   'refund',          // returns from completed invoices
+  'blind_return',    // returns without an invoice (when Settings allow them)
   'void',            // cancel open orders already sent to the kitchen
   'open_drawer',     // open the cash drawer without a sale
   'view_cost',       // see cost prices and profit

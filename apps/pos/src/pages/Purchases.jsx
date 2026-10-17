@@ -8,7 +8,7 @@ import { openWhatsApp } from '../lib/share.js';
 import { poHtml } from '../lib/receipt.js';
 import { AccountSelect } from './Treasury.jsx';
 import { WarehouseSelect } from '../components/Warehouses.jsx';
-import { packsText } from '../lib/packs.js';
+import { packsText, scannedUnit } from '../lib/packs.js';
 import { has } from '../lib/features.js';
 
 export default function Purchases() {
@@ -119,8 +119,9 @@ function PurchaseEditor({ onClose, onSaved, initial = null }) {
 
   const add = (p) => {
     setLines((ls) => (ls.some((l) => l.product_id === p.id) ? ls : [...ls, {
-      product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(p.cost ?? 0, d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
-      units: p.units || [], unit: p.unit, unit_id: '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
+      product_id: p.id, name: p.name, qty: '1', unit_cost: fromMinor(Math.round((p.cost ?? 0) * (scannedUnit(p)?.factor || 1)), d), price: fromMinor(p.price, d), oldPrice: p.price, stock: p.stock, track: p.track_stock,
+      // A scanned carton barcode picks the carton (its cost is worked out from the base cost).
+      units: p.units || [], unit: scannedUnit(p) ? 'pcs' : p.unit, unit_id: scannedUnit(p) ? String(scannedUnit(p).id) : '', baseCost: p.cost ?? 0, track_expiry: !!p.track_expiry, batch_no: '', expiry_date: '', discount_percent: '', bonus_qty: '',
     }]));
     setSearch('');
   };

@@ -1123,3 +1123,47 @@ test('returns: find the sale by its invoice number and get the slip details back
   assert.equal(after.last_return.reason, 'مقاس غلط');
   assert.equal(s.products.get(tea).stock, 9);
 });
+
+test('returns without an invoice: off by default, permission, limit, cash or account, reports', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const cheese = s.products.save({ name: 'جبنة', price: 5000, cost: 3000, stock: 10, units: [{ name: 'كرتونة', factor: 6, price: 27000 }] });
+  const cust = s.customers.save({ name: 'منى', phone: '0100' });
+  s.shifts.open({});
+  const item = (qty = 2, extra = {}) => [{ product_id: cheese, qty, ...extra }];
+  assert.equal(tryCode(() => s.orders.blindReturn({ items: item(), reason: 'x' })), 'BLIND_RETURNS_OFF');
+  s.settings.save({ blind_returns: true, blind_return_max: 30000 });
+  assert.equal(tryCode(() => s.orders.blindReturn({ items: item() })), 'REASON_REQUIRED');
+  assert.equal(tryCode(() => s.orders.blindReturn({ items: item(7), reason: 'x' })), 'BLIND_RETURN_LIMIT'); // 350 > 300
+  assert.equal(tryCode(() => s.orders.blindReturn({ items: item(), reason: 'x', method: 'account' })), 'CUSTOMER_REQUIRED');
+  // cash: 2 × 50 back from the drawer, stock up by 2
+  const r = s.orders.blindReturn({ items: item(), reason: 'من غير إيصال' });
+  assert.equal(r.amount, 10000);
+  assert.equal(r.cash_amount, 10000);
+  assert.equal(r.order_id, null);
+  assert.deepEqual(r.items, [{ name: 'جبنة', qty: 2, amount: 10000 }]);
+  assert.equal(s.products.get(cheese).stock, 12);
+  // a carton onto the customer's account (store credit)
+  const units = s.products.get(cheese).units;
+  const r2 = s.orders.blindReturn({ items: [{ product_id: cheese, qty: 1, unit_id: units[0].id }], reason: 'كرتونة', method: 'account', customerId: cust });
+  assert.equal(r2.amount, 27000);
+  assert.equal(r2.cash_amount, 0);
+  assert.equal(s.products.get(cheese).stock, 18);
+  assert.equal(s.customers.get(cust).balance, -27000);
+  // the shift's drawer and the reports see them
+  const sh = s.shifts.summary(s.shifts.current().id);
+  assert.equal(sh.refunds.total, 37000);
+  assert.equal(sh.refunds.cash, 10000);
+  const rep = s.reports.run({ id: 'returns' });
+  assert.equal(rep.rows.length, 2);
+  assert.equal(rep.rows[1].customer, 'منى');
+  assert.equal(rep.rows[0].invoice_no, null);
+  const pl = s.reports.run({ id: 'profit_loss' });
+  assert.equal(pl.rows.find((x) => x.item === 'rep.pl.sales').amount, -37000);
+  assert.equal(pl.rows.find((x) => x.item === 'rep.pl.cogs').amount, 6000 + 18000);
+  // a cashier needs a supervisor
+  s.users.save({ name: 'Cash', username: 'c9', pin: '5555', role: 'cashier' });
+  s.auth.logout();
+  s.auth.login({ username: 'c9', pin: '5555' });
+  assert.equal(tryCode(() => s.orders.blindReturn({ items: item(1), reason: 'x' })), 'APPROVAL_REQUIRED');
+  assert.equal(s.orders.blindReturn({ items: item(1), reason: 'x', approval: { username: 'admin', pin: '1234' } }).amount, 5000);
+});

@@ -36,6 +36,9 @@ function buildCatalog(ctx) {
       return { ...r, packs: `${r.stock < 0 ? '-' : ''}${n} ${u.name}${rest ? ` + ${rest}` : ''}` };
     });
   };
+  // Returns without an invoice (no sale line to net against): what they refunded and what the goods cost.
+  const blind = (f, t) => one(`SELECT COALESCE(SUM(bi.amount), 0) AS amount, COALESCE(SUM(bi.unit_cost * bi.qty), 0) AS cost
+    FROM blind_return_items bi JOIN returns r ON r.id = bi.return_id WHERE ${IN_RANGE('r.created_at')}`, f, t);
   const costCols = (cols) => (cost() ? cols : cols.filter((c) => !['cost', 'profit', 'margin', 'value_cost'].includes(c.key)));
 
   return {
@@ -48,6 +51,9 @@ function buildCatalog(ctx) {
           FROM orders o WHERE ${RANGE} GROUP BY day ORDER BY day`, f, t);
         const refunds = new Map(all(`SELECT date(created_at) AS day, SUM(amount) AS r FROM returns WHERE ${IN_RANGE('created_at')} GROUP BY day`, f, t).map((x) => [x.day, x.r]));
         const prof = new Map(all(`SELECT date(o.completed_at) AS day, SUM(${NET_LINE}) - SUM(${NET_COST}) AS p FROM order_items i JOIN orders o ON o.id = i.order_id WHERE ${RANGE} GROUP BY day`, f, t).map((x) => [x.day, Math.round(x.p)]));
+        for (const b of all(`SELECT date(r.created_at) AS day, SUM(bi.amount - bi.unit_cost * bi.qty) AS p FROM blind_return_items bi JOIN returns r ON r.id = bi.return_id WHERE ${IN_RANGE('r.created_at')} GROUP BY day`, f, t)) {
+          prof.set(b.day, (prof.get(b.day) || 0) - Math.round(b.p));
+        }
         for (const r of rows) { r.refunds = refunds.get(r.day) || 0; r.net = r.total - r.refunds; r.profit = prof.get(r.day) || 0; }
         return {
           columns: costCols([col('day', 'rep.col.date', 'date'), col('invoices', 'rep.col.invoices', 'int'), col('gross', 'rep.col.gross', 'money'), col('discount', 'rep.col.discount', 'money'),
@@ -168,8 +174,9 @@ function buildCatalog(ctx) {
       run: ({ f, t }) => ({
         columns: [col('created_at', 'rep.col.datetime', 'datetime'), col('invoice_no', 'rep.col.invoice', 'int', false), col('cashier', 'rep.col.cashier'), col('customer', 'rep.col.customer'),
           col('method', 'rep.col.method', 'method'), col('amount', 'rep.col.amount', 'money'), col('reason', 'rep.col.reason')],
+        // invoice_no is empty for a return without an invoice.
         rows: all(`SELECT r.created_at, o.invoice_no, u.name AS cashier, COALESCE(c.name, '') AS customer, r.method, r.amount, r.reason
-          FROM returns r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id LEFT JOIN customers c ON c.id = o.customer_id
+          FROM returns r LEFT JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id LEFT JOIN customers c ON c.id = COALESCE(o.customer_id, r.customer_id)
           WHERE ${IN_RANGE('r.created_at')} ORDER BY r.created_at`, f, t),
       }),
     },
@@ -191,12 +198,14 @@ function buildCatalog(ctx) {
         const exp = all(`SELECT category, SUM(amount) AS amount FROM expenses WHERE ${IN_RANGE('created_at')} GROUP BY category ORDER BY amount DESC`, f, t);
         const settle = one(`SELECT COALESCE(SUM(amount), 0) AS t FROM customer_payments WHERE method = 'discount' AND status = 'posted' AND ${IN_RANGE('created_at')}`, f, t).t;
         const rebates = one(`SELECT COALESCE(SUM(amount), 0) AS t FROM supplier_payments WHERE method = 'rebate' AND ${IN_RANGE('created_at')}`, f, t).t;
-        const sales = Math.round(s.sales - disc);
-        const gross = Math.round(sales - s.cogs);
+        const b = blind(f, t);
+        const sales = Math.round(s.sales - disc - b.amount);
+        const cogs = s.cogs - b.cost;
+        const gross = Math.round(sales - cogs);
         const expenses = exp.reduce((a, r) => a + r.amount, 0);
         const rows = [
           { item: 'rep.pl.sales', amount: sales, kind: 'in' },
-          { item: 'rep.pl.cogs', amount: -Math.round(s.cogs), kind: 'out' },
+          { item: 'rep.pl.cogs', amount: -Math.round(cogs), kind: 'out' },
           { item: 'rep.pl.gross', amount: gross, kind: 'sum' },
           ...exp.map((e) => ({ item: e.category || '—', amount: -e.amount, kind: 'out', raw: true })),
           ...(settle ? [{ item: 'rep.pl.settlement', amount: -settle, kind: 'out' }] : []),

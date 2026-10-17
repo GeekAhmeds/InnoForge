@@ -147,7 +147,7 @@ export function returnHtml(order, ret, lines, settings, t, lang) {
   return page(settings, lang, `${header(settings, t)}
   <hr><div class="c"><b>↩ ${t('receipt.returnTitle')}</b></div><hr>
   <table>
-    ${line(t('receipt.forInvoice'), `<b>${order.invoice_no ?? '—'}</b>`)}
+    ${order.invoice_no ? line(t('receipt.forInvoice'), `<b>${order.invoice_no}</b>`) : `<tr><td colspan="2" class="c">(${t('receipt.noInvoice')})</td></tr>`}
     ${line(t('receipt.date'), ltr(ret.created_at || new Date().toLocaleString('en-GB')))}
     ${line(t('receipt.cashier'), esc(ret.user_name || ''))}
   </table>
