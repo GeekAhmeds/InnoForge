@@ -1529,6 +1529,14 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         ORDER BY o.id DESC LIMIT ?`).all(...params));
     },
     /** Returns items from a completed order; refunded in cash from the open shift. */
+    /** The completed sale with this invoice number (typed, or scanned from the receipt's barcode), or null. */
+    byInvoice(invoiceNo) {
+      requireUser();
+      const no = int(String(invoiceNo ?? '').trim().replace(/^#/, ''), 0);
+      if (!no) return null;
+      const row = db.prepare("SELECT id FROM orders WHERE invoice_no = ? AND status = 'completed'").get(no);
+      return row ? getOrder(row.id) : null;
+    },
     refund({ orderId, items = [], reason = '', approval = null } = {}) {
       const { user: u, approvedBy } = requirePerm('refund', approval);
       const shift = currentShift();
@@ -1587,7 +1595,10 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
           }
         }
         audit('refund', { entity: 'order', entityId: orderId, approvedBy, details: { invoice: order.invoice_no, amount, cash: cashOut, reason: str(reason), items: lines.map((l) => ({ name: l.line.name, qty: l.qty })) } });
-        return getOrder(orderId);
+        const after = getOrder(orderId);
+        // This return (for the slip handed to the customer).
+        after.last_return = { ...after.returns.find((r) => r.id === returnId), items: lines.map((l) => ({ name: l.line.name, qty: l.qty, amount: l.amount })) };
+        return after;
       });
     },
   };

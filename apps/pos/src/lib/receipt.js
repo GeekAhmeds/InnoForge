@@ -136,6 +136,39 @@ export function receiptHtml(order, settings, t, lang) {
 }
 
 /** The bill brought to the table before paying (not an invoice: no number, no payments). */
+/**
+ * The slip handed to the customer for a return: what came back and how the money went back.
+ * ret = the return row (amount, cash_amount, method, reason, zatca_qr); lines = [{ name, qty, amount }].
+ */
+export function returnHtml(order, ret, lines, settings, t, lang) {
+  const m = (v) => formatMoney(v, settings);
+  const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;
+  const toAccount = (ret.amount || 0) - (ret.cash_amount || 0);
+  return page(settings, lang, `${header(settings, t)}
+  <hr><div class="c"><b>↩ ${t('receipt.returnTitle')}</b></div><hr>
+  <table>
+    ${line(t('receipt.forInvoice'), `<b>${order.invoice_no ?? '—'}</b>`)}
+    ${line(t('receipt.date'), ltr(ret.created_at || new Date().toLocaleString('en-GB')))}
+    ${line(t('receipt.cashier'), esc(ret.user_name || ''))}
+  </table>
+  ${order.customer_name ? `<div class="muted">${t('pos.customer')}: ${esc(order.customer_name)}</div>` : ''}
+  <hr>
+  <table>
+    <tr><th>${t('receipt.item')}</th><th class="n">${t('receipt.qty')}</th><th class="n">${t('receipt.amount')}</th></tr>
+    ${lines.map((l) => `<tr><td>${esc(l.name)}</td><td class="n">${formatQty(l.qty)}</td><td class="n">${m(l.amount)}</td></tr>`).join('')}
+  </table>
+  <hr>
+  <table>
+    ${line(t('receipt.returnTotal'), m(ret.amount), 'big')}
+    ${ret.cash_amount ? line(t('receipt.returnCash'), m(ret.cash_amount)) : ''}
+    ${toAccount > 0 ? line(t('receipt.returnAccount'), m(toAccount)) : ''}
+  </table>
+  ${ret.reason ? `<hr><div>${t('orders.reason')}: ${esc(ret.reason)}</div>` : ''}
+  ${ret.zatca_qr ? `<div class="c" style="margin:6px 0">${qrSvg(ret.zatca_qr, { size: 130 })}</div>` : ''}
+  <hr>
+  ${footer(settings, t)}`);
+}
+
 export function checkHtml(order, settings, t, lang) {
   const m = (v) => formatMoney(v, settings);
   const line = (label, v, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n">${v}</td></tr>`;

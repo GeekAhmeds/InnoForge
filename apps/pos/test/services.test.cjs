@@ -1105,3 +1105,21 @@ test('variants: a T-shirt in sizes and colours sells, stocks and reports per var
   assert.equal(tryCode(() => s.products.saveVariants({ parentId: tee, attributes, variants: [{ values: { اللون: 'أخضر', المقاس: 'M' } }] })), 'INVALID_VARIANTS');
   assert.equal(tryCode(() => s.products.saveVariants({ parentId: redL.id, attributes, variants: [] })), 'VARIANT_OF_VARIANT');
 });
+
+test('returns: find the sale by its invoice number and get the slip details back', () => {
+  const { s } = setup({ tax_rate: 0 });
+  const tea = s.products.save({ name: 'شاي', price: 1000, stock: 10 });
+  s.shifts.open({});
+  const sale = s.orders.checkout({ items: [{ product_id: tea, qty: 3 }], payments: [{ method: 'cash', amount: 3000 }] });
+  assert.equal(s.orders.byInvoice(String(sale.invoice_no)).id, sale.id);
+  assert.equal(s.orders.byInvoice(`#${sale.invoice_no}`).id, sale.id);
+  assert.equal(s.orders.byInvoice('999999'), null);
+  assert.equal(s.orders.byInvoice('abc'), null);
+  const order = s.orders.get(sale.id);
+  const after = s.orders.refund({ orderId: sale.id, items: [{ order_item_id: order.items[0].id, qty: 2 }], reason: 'مقاس غلط' });
+  assert.deepEqual(after.last_return.items, [{ name: 'شاي', qty: 2, amount: 2000 }]);
+  assert.equal(after.last_return.amount, 2000);
+  assert.equal(after.last_return.cash_amount, 2000);
+  assert.equal(after.last_return.reason, 'مقاس غلط');
+  assert.equal(s.products.get(tea).stock, 9);
+});

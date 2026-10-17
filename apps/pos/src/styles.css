@@ -199,8 +199,9 @@ small.small, p.small { font-size: 12px; margin: 4px 0; }
 .meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); margin-bottom: 12px; font-size: 14px; }
 
 /* ---------- POS ---------- */
-.pos { display: grid; grid-template-columns: 1fr 420px; height: 100%; }
-.catalog { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 0; gap: 10px; }
+/* One screen tall: the products scroll inside their own area and the cart (with Pay) never moves. */
+.pos { display: grid; grid-template-columns: 1fr 420px; grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.catalog { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 16px 0; gap: 10px; }
 .pos-search { display: flex; gap: 8px; }
 .pos-search input { font-size: 17px; padding: 12px 14px; }
 .pos-search button { white-space: nowrap; }

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { api, savePdf } from '../lib/api.js';
 import { invoiceText, openWhatsApp } from '../lib/share.js';
 import { formatMoney, formatQty } from '../lib/money.js';
-import { a4Html, receiptHtml } from '../lib/receipt.js';
+import { a4Html, receiptHtml, returnHtml } from '../lib/receipt.js';
 import { Empty, Field, Modal, useApp, useLoad } from '../components/ui.jsx';
 import { ExcelButtons } from '../components/ExcelImport.jsx';
 import { CollectModal } from '../components/Collect.jsx';
@@ -82,12 +82,13 @@ export default function Orders() {
   );
 }
 
-function OrderModal({ id, onClose, onChanged }) {
+/** An invoice: details, reprint, share, collect — and returns. `startRefund` opens straight on the return. */
+export function OrderModal({ id, onClose, onChanged = () => {}, startRefund = false }) {
   const { t, tErr, notify, settings, printDoc, lang, shift, withApproval } = useApp();
   const [order, , setOrder] = useLoad(() => api.orders.get(id), [id]);
   const [refundQty, setRefundQty] = useState({});
   const [reason, setReason] = useState('');
-  const [refunding, setRefunding] = useState(false);
+  const [refunding, setRefunding] = useState(startRefund);
   const [collecting, setCollecting] = useState(false);
   const [plan, setPlan] = useState(null); // 'make' | 'view'
   const m = (v) => formatMoney(v, settings);
@@ -102,6 +103,7 @@ function OrderModal({ id, onClose, onChanged }) {
       setRefunding(false);
       setRefundQty({});
       notify(t('orders.refundDone'));
+      if (updated.last_return) printDoc(returnHtml(updated, updated.last_return, updated.last_return.items, settings, t, lang));
       onChanged();
     } catch (err) {
       if (err.code !== 'CANCELLED') notify(tErr(err), 'error');
@@ -119,7 +121,8 @@ function OrderModal({ id, onClose, onChanged }) {
         <>
           <Field label={t('orders.reason')}><input value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
           <span className="spacer" />
-          <button onClick={() => setRefunding(false)}>{t('common.cancel')}</button>
+          <button onClick={() => setRefundQty(Object.fromEntries(order.items.filter((i) => i.qty - i.returned_qty > 0).map((i) => [i.id, i.qty - i.returned_qty])))}>{t('orders.returnAll')}</button>
+          <button onClick={() => (startRefund ? onClose() : setRefunding(false))}>{t('common.cancel')}</button>
           <button className="danger" onClick={doRefund}>{t('common.confirm')}</button>
         </>
       ) : (

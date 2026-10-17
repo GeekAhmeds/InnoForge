@@ -9,6 +9,7 @@ import { openCustomerDisplay, openDrawer, sendDisplay } from '../lib/api.js';
 import { clearDraft, loadDraft, saveDraft } from '../lib/drafts.js';
 import { ModifierPicker } from '../components/Modifiers.jsx';
 import { VariantPicker } from '../components/Variants.jsx';
+import { OrderModal } from './Orders.jsx';
 import { Empty, Field, Modal, Toggle, useApp } from '../components/ui.jsx';
 import { has } from '../lib/features.js';
 
@@ -161,6 +162,19 @@ export default function Pos() {
     }
   }
 
+  /** Return: type the invoice number or scan the barcode printed on the receipt. */
+  async function startReturn() {
+    const no = await ask(t('pos.returnAsk'), { required: true });
+    if (!no) { focusSearch(); return; }
+    try {
+      const order = await api.orders.byInvoice(String(no).trim());
+      if (!order) { notify(t('pos.returnNotFound', { n: no }), 'error'); return; }
+      setModal({ kind: 'return', id: order.id });
+    } catch (err) {
+      notify(tErr(err), 'error');
+    }
+  }
+
   const reset = useCallback(() => { clearDraft(draftKey); setCart(emptyCart(defaultType)); focusSearch(); }, [defaultType, focusSearch, draftKey]);
   // A new dine-in order needs a table; an existing one (e.g. a split bill) can be paid without.
   const needsTable = () => cart.order_type === 'dine_in' && !cart.table_id && !cart.id;
@@ -221,6 +235,7 @@ export default function Pos() {
       if (e.key === 'F9') { e.preventDefault(); openPay(); }
       if (e.key === 'F4') { e.preventDefault(); setModal({ kind: 'customer' }); }
       if (e.key === 'F8' && cart.items.length) { e.preventDefault(); holdOrSave(); }
+      if (e.key === 'F7') { e.preventDefault(); startReturn(); }
       if (e.key === 'Escape' && search) { e.preventDefault(); setSearch(''); }
       // With an empty search box: +/- change the last line's quantity, Delete removes it.
       const otherField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) && e.target !== searchRef.current;
@@ -265,6 +280,7 @@ export default function Pos() {
               ⚖ {scale.connected ? (scale.r ? `${formatQty(scale.r.weight)} kg` : '…') : t('devices.connect')}
             </button>
           )}
+          <button title={`${t('pos.return')} (F7)`} onClick={startReturn}>↩ {t('pos.return')}</button>
           {settings.cash_drawer && (
             <button title={t('drawer.open')} onClick={() => run(() => withApproval((approval) => openDrawer({ manual: true, approval })))}>💰</button>
           )}
@@ -294,7 +310,7 @@ export default function Pos() {
           {!products.length && <Empty>{categoryId === 'top' ? t('pos.noTopSellers') : t('common.none')}</Empty>}
         </div>
         <div className="shortcuts muted small">
-          {[['F2', t('pos.kSearch')], ['F4', t('pos.customer')], ['F8', t('pos.hold')], ['F9', t('pos.pay')], ['+ − Del', t('pos.kLast')]].map(([k, v]) => <span key={k}><kbd dir="ltr">{k}</kbd> {v}</span>)}
+          {[['F2', t('pos.kSearch')], ['F4', t('pos.customer')], ['F7', t('pos.return')], ['F8', t('pos.hold')], ['F9', t('pos.pay')], ['+ − Del', t('pos.kLast')]].map(([k, v]) => <span key={k}><kbd dir="ltr">{k}</kbd> {v}</span>)}
         </div>
       </section>
 
@@ -419,6 +435,7 @@ export default function Pos() {
           onRemove={() => { setCart((c) => ({ ...c, items: c.items.filter((_, i) => i !== modal.idx) })); setModal(null); focusSearch(); }}
         />
       )}
+      {modal?.kind === 'return' && <OrderModal id={modal.id} startRefund onClose={() => { setModal(null); focusSearch(); }} />}
       {modal?.kind === 'variants' && (
         <VariantPicker product={modal.product} onClose={() => { setModal(null); focusSearch(); }} onPick={(v) => { setModal(null); pick(v); }} />
       )}
