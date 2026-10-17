@@ -182,6 +182,21 @@ input.grow { flex: 1; }
 .variant-cell.out { opacity: .55; }
 .variant-cell.none { cursor: default; color: var(--muted); border-style: dashed; }
 .block { display: block; }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stat-row .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.stat-row .stat b { font-size: 20px; }
+.stat-row .stat small { color: var(--muted); }
+.shift-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.shift-card { text-align: start; display: flex; flex-direction: column; gap: 8px; margin: 0; cursor: pointer; font: inherit; color: inherit; border-top: 4px solid var(--brand); }
+.shift-card:hover { box-shadow: 0 4px 14px rgb(0 0 0 / .12); }
+.shift-card.me { border-top-color: var(--good); }
+.shift-figs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.shift-figs > div { display: flex; flex-direction: column; }
+.shift-figs b { font-size: 17px; }
+.shift-figs small { color: var(--muted); font-size: 11px; }
+.shift-detail { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
+.shift-detail .excel-preview { max-height: 420px; margin-top: 8px; }
+@media (max-width: 900px) { .shift-detail { grid-template-columns: 1fr; } }
 .blind-return { display: flex; flex-direction: column; gap: 12px; }
 .blind-return .trow { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; }
 small.packs { display: block; font-size: 11px; white-space: nowrap; }

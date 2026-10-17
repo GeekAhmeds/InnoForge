@@ -1167,3 +1167,43 @@ test('returns without an invoice: off by default, permission, limit, cash or acc
   assert.equal(tryCode(() => s.orders.blindReturn({ items: item(1), reason: 'x' })), 'APPROVAL_REQUIRED');
   assert.equal(s.orders.blindReturn({ items: item(1), reason: 'x', approval: { username: 'admin', pin: '1234' } }).amount, 5000);
 });
+
+test('shift monitor: every open shift on every computer, its detail, closing another computer\'s shift', () => {
+  const db = openDatabase(':memory:');
+  const main = createServices(db, { deviceId: 'main' });
+  main.auth.setup({ business: { business_name: 'Shop', business_type: 'retail', tax_rate: 0 }, admin: { name: 'Admin', username: 'admin', pin: '1234' } });
+  main.auth.login({ username: 'admin', pin: '1234' });
+  main.users.save({ name: 'Sara', username: 'sara', pin: '5555', role: 'cashier' });
+  const tea = main.products.save({ name: 'شاي', price: 1000, stock: 50 });
+  main.shifts.open({ openingCash: 5000 });
+  main.orders.checkout({ items: [{ product_id: tea, qty: 1 }], payments: [{ method: 'cash', amount: 1000 }] });
+  // a second computer (its own services, same database)
+  const till2 = createServices(db, { deviceId: 'till-2' });
+  till2.auth.login({ username: 'sara', pin: '5555' });
+  const s2 = till2.shifts.open({ openingCash: 2000 });
+  const sale = till2.orders.checkout({ items: [{ product_id: tea, qty: 3 }], payments: [{ method: 'cash', amount: 3000 }] });
+  till2.orders.checkout({ items: [{ product_id: tea, qty: 2 }], payments: [{ method: 'cash', amount: 5000 }], discount: 0 });
+  assert.equal(tryCode(() => till2.shifts.live()), 'FORBIDDEN');
+  const live = main.shifts.live();
+  assert.equal(live.length, 2);
+  const other = live.find((x) => x.device_id === 'till-2');
+  assert.equal(other.me, false);
+  assert.equal(other.user_name, 'Sara');
+  assert.equal(other.sales.count, 2);
+  assert.equal(other.sales.total, 5000);
+  assert.equal(other.expectedCash, 7000);
+  assert.deepEqual(other.cashiers, ['Sara']);
+  assert.equal(live.find((x) => x.device_id === 'main').me, true);
+  const d = main.shifts.detail(s2.id);
+  assert.equal(d.orders.length, 2);
+  assert.equal(d.orders[1].invoice_no, sale.invoice_no);
+  assert.ok(d.activity.some((a) => a.action === 'shift_open' && a.user_name === 'Sara'));
+  // the manager closes Sara's shift after counting her drawer
+  const closed = main.shifts.closeOther({ id: s2.id, countedCash: 6900, notes: 'نسيت تقفل' });
+  assert.equal(closed.shift.counted_cash, 6900);
+  assert.equal(closed.shift.expected_cash, 7000);
+  assert.equal(till2.shifts.current(), null);
+  assert.equal(main.shifts.live().length, 1);
+  assert.equal(tryCode(() => main.shifts.closeOther({ id: s2.id, countedCash: 0 })), 'SHIFT_CLOSED');
+  assert.ok(main.auditLog.list({}).some((a) => a.action === 'shift_close_remote'));
+});

@@ -68,7 +68,8 @@ export const TOPICS = [
         'آخر اليوم من «الوردية»: عدّ الكاش واكتبه، والبرنامج بيقولك الفرق (زيادة أو عجز)، واطبع تقرير الوردية (Z).',
         'لو عندك خزنة، تقدر «تورّد» جزء من الكاش للخزنة الرئيسية وإنت بتقفل.',
       ],
-      tips: ['تقرير «الورديات» في التقارير بيعرض الفرق في كل وردية.'],
+      tips: ['تقرير «الورديات» في التقارير بيعرض الفرق في كل وردية.',
+        'للمدير: «الوردية ← الورديات المفتوحة» بيعرض كل وردية مفتوحة على كل جهاز (المبيعات والنقدية المتوقعة والمرتجعات وآخر بيعة) وبيتحدّث لوحده. دوس على أي وردية تشوف فواتيرها ومرتجعاتها وكل خصم أو إلغاء أو موافقة فيها، وتقدر تقفل وردية جهاز تاني بعد ما تعدّ دُرجه. الوردية مربوطة بالجهاز: عشان تشتغل عليها ادخل على الجهاز ده بيوزرك.'],
     },
     en: {
       title: 'Shifts (opening and closing the drawer)',
@@ -79,7 +80,8 @@ export const TOPICS = [
         'At day end, on Shift, count the cash and enter it; the app shows the difference (over / short) and prints the Z-report.',
         'With a treasury you can hand part of the cash to the main cash box while closing.',
       ],
-      tips: ['The Shifts report lists the difference of every shift.'],
+      tips: ['The Shifts report lists the difference of every shift.',
+        'For managers: Shift → Open shifts shows every open shift on every computer (sales, expected cash, returns, last sale), refreshing by itself. Open any shift for its invoices, returns and every discount, void or approval in it, and close another computer\'s shift after counting its drawer. A shift belongs to its computer: to work in it, sign in on that computer with your user.'],
     },
   },
 

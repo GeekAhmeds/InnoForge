@@ -5,6 +5,7 @@ import { shiftHtml } from '../lib/receipt.js';
 import { Field, useApp, useLoad } from '../components/ui.jsx';
 import { ExpenseModal } from './Purchases.jsx';
 import { AccountSelect } from './Treasury.jsx';
+import { OpenShifts, ShiftDetail } from '../components/ShiftMonitor.jsx';
 
 export default function Shift() {
   const { t, tErr, notify, settings, shift, reloadShift, printDoc, lang, can, setPage } = useApp();
@@ -13,6 +14,9 @@ export default function Shift() {
   const [notes, setNotes] = useState('');
   const [deposit, setDeposit] = useState({ accountId: null, amount: '' });
   const [expense, setExpense] = useState(false);
+  // Managers: their own shift, every open shift (live), and the history.
+  const [view, setView] = useState('mine');
+  const [detailId, setDetailId] = useState(null);
   const [summary, reloadSummary] = useLoad(() => (shift ? api.shifts.summary(shift.id) : Promise.resolve(null)), [shift?.id]);
   const [history] = useLoad(() => (isAdmin ? api.shifts.list({}) : Promise.resolve([])), [shift?.id]);
   const m = (v) => formatMoney(v, settings);
@@ -34,8 +38,19 @@ export default function Shift() {
 
   return (
     <div className="page">
-      <div className="page-head"><h2>⏱ {t('nav.shift')}</h2></div>
-      {!shift ? (
+      <div className="page-head">
+        <h2>⏱ {t('nav.shift')}</h2>
+        {isAdmin && (
+          <div className="seg">
+            <button className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>{t('shift.current')}</button>
+            <button className={view === 'open' ? 'on' : ''} onClick={() => setView('open')}>🖥 {t('monitor.title')}</button>
+            <button className={view === 'history' ? 'on' : ''} onClick={() => setView('history')}>{t('shift.history')}</button>
+          </div>
+        )}
+      </div>
+      {view === 'open' && <OpenShifts onOpen={setDetailId} />}
+      {detailId && <ShiftDetail id={detailId} onClose={() => setDetailId(null)} onChanged={reloadShift} />}
+      {view !== 'mine' ? null : !shift ? (
         <div className="card narrow">
           <p>{t('shift.none')}</p>
           <button className="primary" onClick={() => setPage('pos')}>{t('shift.open')}</button>
@@ -81,15 +96,15 @@ export default function Shift() {
         </div>
       )}
 
-      {isAdmin && !!history?.length && (
+      {isAdmin && view === 'history' && !!history?.length && (
         <div className="card flush">
           <h3 className="pad">{t('shift.history')}</h3>
           <table className="grid">
-            <thead><tr><th>#</th><th>{t('shift.by')}</th><th>{t('shift.openedAt')}</th><th>{t('shift.closedAt')}</th><th className="num">{t('shift.expectedCash')}</th><th className="num">{t('shift.countedCash')}</th><th className="num">{t('shift.difference')}</th></tr></thead>
+            <thead><tr><th>#</th><th>{t('monitor.computer')}</th><th>{t('shift.by')}</th><th>{t('shift.openedAt')}</th><th>{t('shift.closedAt')}</th><th className="num">{t('shift.expectedCash')}</th><th className="num">{t('shift.countedCash')}</th><th className="num">{t('shift.difference')}</th></tr></thead>
             <tbody>
               {history.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.id}</td><td>{s.user_name}</td><td>{s.opened_at}</td><td>{s.closed_at || '—'}</td>
+                <tr key={s.id} className="clickable" onClick={() => setDetailId(s.id)}>
+                  <td>{s.id}</td><td>{s.device_name || s.device_id}</td><td>{s.user_name}</td><td>{s.opened_at}</td><td>{s.closed_at || '—'}</td>
                   <td className="num">{s.expected_cash != null ? m(s.expected_cash) : ''}</td>
                   <td className="num">{s.counted_cash != null ? m(s.counted_cash) : ''}</td>
                   <td className={`num ${s.counted_cash - s.expected_cash < 0 ? 'warn' : ''}`}>{s.counted_cash != null ? m(s.counted_cash - s.expected_cash) : ''}</td>

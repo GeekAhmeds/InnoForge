@@ -1034,9 +1034,65 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
       const u = requireUser();
       const shift = currentShift();
       if (!shift) throw new PosError('NO_OPEN_SHIFT');
+      return closeShift(shift, u, { countedCash, notes, depositAccountId, depositAmount });
+    },
+    /** The manager's view: every shift open right now, on every computer, with its running figures. */
+    live() {
+      requirePerm('shifts_all');
+      return plainAll(db.prepare(`SELECT s.*, u.name AS user_name, d.name AS device_name FROM shifts s JOIN users u ON u.id = s.user_id
+        LEFT JOIN devices d ON d.id = s.device_id WHERE s.closed_at IS NULL ORDER BY s.opened_at`).all()).map((sh) => {
+        const sum = shiftSummary(sh.id);
+        return {
+          ...sh,
+          me: sh.device_id === deviceId,
+          sales: sum.sales,
+          byMethod: sum.byMethod,
+          refunds: sum.refunds,
+          expectedCash: sum.expectedCash,
+          creditSales: sum.creditSales,
+          lastSaleAt: db.prepare("SELECT MAX(completed_at) AS t FROM orders WHERE shift_id = ? AND status = 'completed'").get(sh.id).t,
+          openOrders: db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'open' AND device_id = ?").get(sh.device_id).n,
+          cashiers: db.prepare("SELECT DISTINCT u.name FROM orders o JOIN users u ON u.id = o.user_id WHERE o.shift_id = ? AND o.status = 'completed'").all(sh.id).map((r) => r.name),
+        };
+      });
+    },
+    /** One shift in full (open or closed): figures, its invoices, returns and the sensitive actions taken during it. */
+    detail(id) {
+      requirePerm('shifts_all');
+      const sum = shiftSummary(int(id));
+      const sh = sum.shift;
+      sum.shift.device_name = db.prepare('SELECT name FROM devices WHERE id = ?').get(sh.device_id)?.name || '';
+      sum.shift.me = sh.device_id === deviceId;
+      sum.orders = plainAll(db.prepare(`SELECT o.id, o.invoice_no, o.completed_at, o.total, o.refunded, o.credit, o.discount, o.order_type, u.name AS user_name,
+          COALESCE(c.name, o.customer_name) AS customer, (SELECT GROUP_CONCAT(DISTINCT p.method) FROM payments p WHERE p.order_id = o.id) AS methods
+        FROM orders o JOIN users u ON u.id = o.user_id LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE o.shift_id = ? AND o.status = 'completed' ORDER BY o.id DESC LIMIT 300`).all(sh.id));
+      sum.returnsList = plainAll(db.prepare(`SELECT r.id, r.created_at, r.amount, r.cash_amount, r.method, r.reason, o.invoice_no, u.name AS user_name
+        FROM returns r LEFT JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id WHERE r.shift_id = ? ORDER BY r.id DESC`).all(sh.id));
+      // Who worked in the shift, and what they did that a manager watches for.
+      const people = [...new Set([sh.user_id, ...db.prepare('SELECT DISTINCT user_id FROM orders WHERE shift_id = ?').all(sh.id).map((r) => r.user_id),
+        ...db.prepare('SELECT DISTINCT user_id FROM returns WHERE shift_id = ?').all(sh.id).map((r) => r.user_id)])];
+      sum.activity = plainAll(db.prepare(`SELECT a.created_at, a.action, a.details, u.name AS user_name, ap.name AS approved_by_name
+        FROM audit_log a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN users ap ON ap.id = a.approved_by
+        WHERE a.created_at >= ? AND a.created_at <= COALESCE(?, datetime('now', 'localtime')) AND a.user_id IN (${people.map(() => '?').join(',')})
+          AND a.action IN ('refund', 'blind_return', 'order_void', 'void_open', 'discount', 'price_override', 'drawer_open', 'expense_create', 'approval_failed', 'shift_open', 'shift_close', 'shift_close_remote', 'credit_sale', 'receipt_void')
+        ORDER BY a.id DESC LIMIT 200`).all(sh.opened_at, sh.closed_at, ...people)).map((a) => ({ ...a, details: parseJson(a.details, {}) }));
+      return sum;
+    },
+    /** Closes another computer's shift (the cashier went home without closing): the manager counted its drawer. */
+    closeOther({ id, countedCash = 0, notes = '' } = {}) {
+      const u = requirePerm('shifts_all').user;
+      const shift = plain(db.prepare('SELECT * FROM shifts WHERE id = ?').get(int(id)));
+      if (!shift) throw new PosError('NOT_FOUND');
+      if (shift.closed_at) throw new PosError('SHIFT_CLOSED');
+      return closeShift(shift, u, { countedCash, notes, remote: true });
+    },
+  };
+
+  function closeShift(shift, u, { countedCash = 0, notes = '', depositAccountId = null, depositAmount = 0, remote = false }) {
       return transaction(db, () => {
         const { expectedCash } = shiftSummary(shift.id);
-        audit('shift_close', { entity: 'shift', entityId: shift.id, details: { expected: expectedCash, counted: int(countedCash), difference: int(countedCash) - expectedCash } });
+        audit(remote ? 'shift_close_remote' : 'shift_close', { entity: 'shift', entityId: shift.id, details: { expected: expectedCash, counted: int(countedCash), difference: int(countedCash) - expectedCash, ...(remote ? { device: shift.device_id } : {}) } });
         db.prepare("UPDATE shifts SET closed_at = datetime('now', 'localtime'), counted_cash = ?, expected_cash = ?, notes = ? WHERE id = ?")
           .run(int(countedCash), expectedCash, str(notes), shift.id);
         // The drawer's takings handed over to a cash box (the float can stay in the drawer).
@@ -1047,16 +1103,18 @@ function createServices(db, { entitlements = () => FULL, deviceId = 'local' } = 
         }
         return shiftSummary(shift.id);
       });
-    },
+  }
+
+  Object.assign(shifts, {
     summary(id) {
       requireUser();
       return shiftSummary(id || currentShift()?.id);
     },
     list({ limit = 50 } = {}) {
       requirePerm('shifts_all');
-      return plainAll(db.prepare('SELECT s.*, u.name AS user_name FROM shifts s JOIN users u ON u.id = s.user_id ORDER BY s.id DESC LIMIT ?').all(int(limit, 50)));
+      return plainAll(db.prepare('SELECT s.*, u.name AS user_name, d.name AS device_name FROM shifts s JOIN users u ON u.id = s.user_id LEFT JOIN devices d ON d.id = s.device_id ORDER BY s.id DESC LIMIT ?').all(int(limit, 50)));
     },
-  };
+  });
 
   // ---------- orders ----------
   function getOrder(id) {
